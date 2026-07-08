@@ -1,5 +1,6 @@
 import { prisma } from "../../config/database.js";
 import { AppError } from "../../common/errors/app-error.js";
+import { aggregateActivity } from "../activity/activity.service.js";
 import type { Period, ReportType } from "./openclaw.schemas.js";
 
 /**
@@ -13,9 +14,8 @@ export const OPENCLAW_TOOLS = [
   { name: "resolve_period", description: "Resolve a reporting period to a date range", status: "ready" },
   {
     name: "fetch_git_activity",
-    description: "Fetch normalized commit activity for the target + period",
-    status: "pending",
-    pendingPhase: "Phase 8 (Git Activity Collection)"
+    description: "Aggregate stored commit activity for the target + period",
+    status: "ready"
   },
   {
     name: "generate_report",
@@ -149,12 +149,39 @@ export async function resolveEmployees(
   }));
 }
 
+/** Resolves the Git usernames mapped to a set of employees (for filtering). */
+export async function resolveEmployeeUsernames(
+  organizationId: string,
+  employeeIds: string[]
+): Promise<string[]> {
+  const mappings = await prisma.employeeGitMapping.findMany({
+    where: { organizationId, userId: { in: employeeIds } },
+    include: { contributorIdentity: { select: { username: true } } }
+  });
+
+  return [
+    ...new Set(
+      mappings
+        .map((mapping) => mapping.contributorIdentity.username)
+        .filter((username): username is string => Boolean(username))
+    )
+  ];
+}
+
 /**
- * fetch_git_activity — SCAFFOLD. Real commit collection lands in Phase 8.
- * Returns zeroed stats flagged `pending` so the orchestration is observable.
+ * fetch_git_activity — aggregates stored commit activity for the target and
+ * period. Real as of Phase 8 (commit collection).
  */
-export async function fetchGitActivity(): Promise<GitActivity> {
-  return { commits: 0, additions: 0, deletions: 0, filesChanged: 0, pending: true };
+export async function fetchGitActivity(input: {
+  organizationId: string;
+  repositoryId?: string;
+  projectId?: string;
+  usernames?: string[];
+  since: Date;
+  until: Date;
+}): Promise<GitActivity> {
+  const stats = await aggregateActivity(input);
+  return { ...stats, pending: false };
 }
 
 type ReportContext = {
@@ -204,7 +231,9 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
     `Commits: ${context.activity.commits} · +${context.activity.additions} / -${context.activity.deletions} · ${context.activity.filesChanged} files`,
     "",
     "## Summary",
-    "> ⚙️ Scaffold report. Git activity collection (Phase 8) and AI narrative (Phase 10) are not wired yet — this confirms the OpenClaw orchestration path end to end."
+    context.activity.commits > 0
+      ? `Based on ${context.activity.commits} commit(s) in this period. The AI narrative (Phase 10) will summarize this activity.`
+      : "No commit activity found for this target and period. Collect commits on the Repositories page, then regenerate."
   ].filter((line): line is string => line !== null);
 
   return { title, markdown: lines.join("\n") };

@@ -1,0 +1,223 @@
+import type { Prisma } from "@prisma/client";
+
+import { prisma } from "../../config/database.js";
+import { AppError } from "../../common/errors/app-error.js";
+import {
+  MANAGER_ROLES,
+  requireOrganizationMember,
+  requireOrganizationRole
+} from "../../common/access/organization-access.js";
+import { decryptToken } from "../../common/crypto/token-cipher.js";
+import { getGitProvider } from "../git-providers/provider-registry.js";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_LOOKBACK_DAYS = 90;
+// Detail (stats + files) is one API call per commit — bound it per collection.
+const MAX_DETAIL_COMMITS = 150;
+const MAX_FILES_PER_COMMIT = 300;
+
+type Range = { since?: string; until?: string };
+
+async function loadRepository(repositoryId: string) {
+  const repository = await prisma.repository.findUnique({ where: { id: repositoryId } });
+
+  if (!repository) {
+    throw new AppError(404, "Repository was not found", "REPOSITORY_NOT_FOUND");
+  }
+
+  return repository;
+}
+
+function resolveRange(range: Range) {
+  const until = range.until ? new Date(range.until) : new Date();
+  const since = range.since
+    ? new Date(range.since)
+    : new Date(until.getTime() - DEFAULT_LOOKBACK_DAYS * DAY_MS);
+  return { since, until };
+}
+
+/**
+ * Fetches commits (and per-commit stats/files) from the provider for a date
+ * range and stores any that are new. Existing commits are skipped so repeated
+ * collection is cheap.
+ */
+export async function collectActivity(actorId: string, repositoryId: string, range: Range) {
+  const repository = await loadRepository(repositoryId);
+  await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
+
+  const credential = await prisma.gitCredential.findUnique({
+    where: { id: repository.credentialId }
+  });
+
+  if (!credential) {
+    throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
+  }
+
+  const { since, until } = resolveRange(range);
+  const token = decryptToken(credential.encryptedToken);
+  const provider = getGitProvider(credential.provider);
+
+  const commits = await provider.listCommits(token, repository.owner, repository.name, {
+    since: since.toISOString(),
+    until: until.toISOString(),
+    branch: repository.defaultBranch ?? undefined
+  });
+
+  const existing = await prisma.commit.findMany({
+    where: { repositoryId, sha: { in: commits.map((commit) => commit.sha) } },
+    select: { sha: true }
+  });
+  const existingShas = new Set(existing.map((commit) => commit.sha));
+  const newCommits = commits.filter((commit) => !existingShas.has(commit.sha));
+  const toCollect = newCommits.slice(0, MAX_DETAIL_COMMITS);
+
+  let collected = 0;
+  for (const commit of toCollect) {
+    const detail = await provider.getCommitDetail(
+      token,
+      repository.owner,
+      repository.name,
+      commit.sha
+    );
+
+    await prisma.$transaction(async (tx) => {
+      const created = await tx.commit.create({
+        data: {
+          repositoryId,
+          sha: commit.sha,
+          message: commit.message,
+          authorName: commit.authorName,
+          authorEmail: commit.authorEmail,
+          username: commit.username,
+          committedAt: new Date(commit.committedAt),
+          additions: detail.additions,
+          deletions: detail.deletions,
+          changedFilesCount: detail.changedFilesCount
+        }
+      });
+
+      if (detail.files.length) {
+        await tx.changedFile.createMany({
+          data: detail.files.slice(0, MAX_FILES_PER_COMMIT).map((file) => ({
+            commitId: created.id,
+            filePath: file.filePath,
+            status: file.status,
+            additions: file.additions,
+            deletions: file.deletions,
+            changes: file.changes
+          }))
+        });
+      }
+    });
+
+    collected += 1;
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      organizationId: repository.organizationId,
+      actorId,
+      action: "activity.collect",
+      entityType: "Repository",
+      entityId: repositoryId,
+      metadataJson: { collected, totalInRange: commits.length }
+    }
+  });
+
+  return {
+    range: { since, until },
+    totalInRange: commits.length,
+    newCollected: collected,
+    detailCapped: Math.max(0, newCommits.length - MAX_DETAIL_COMMITS)
+  };
+}
+
+export async function getActivitySummary(actorId: string, repositoryId: string, range: Range) {
+  const repository = await loadRepository(repositoryId);
+  await requireOrganizationMember(actorId, repository.organizationId);
+
+  const { since, until } = resolveRange(range);
+  const where: Prisma.CommitWhereInput = {
+    repositoryId,
+    committedAt: { gte: since, lte: until }
+  };
+
+  const [totals, recent] = await Promise.all([
+    prisma.commit.aggregate({
+      where,
+      _count: { _all: true },
+      _sum: { additions: true, deletions: true, changedFilesCount: true }
+    }),
+    prisma.commit.findMany({
+      where,
+      orderBy: { committedAt: "desc" },
+      take: 10,
+      select: {
+        sha: true,
+        message: true,
+        authorName: true,
+        username: true,
+        committedAt: true,
+        additions: true,
+        deletions: true,
+        changedFilesCount: true
+      }
+    })
+  ]);
+
+  return {
+    range: { since, until },
+    stats: {
+      commits: totals._count._all,
+      additions: totals._sum.additions ?? 0,
+      deletions: totals._sum.deletions ?? 0,
+      filesChanged: totals._sum.changedFilesCount ?? 0
+    },
+    recent: recent.map((commit) => ({
+      sha: commit.sha.slice(0, 7),
+      message: commit.message.split("\n")[0]!.slice(0, 120),
+      author: commit.username ?? commit.authorName,
+      committedAt: commit.committedAt,
+      additions: commit.additions,
+      deletions: commit.deletions,
+      changedFilesCount: commit.changedFilesCount
+    }))
+  };
+}
+
+/**
+ * Aggregates stored commit activity for a target (repo/project) and optional
+ * set of Git usernames within a date range. Used by OpenClaw's
+ * fetch_git_activity tool to power reports.
+ */
+export async function aggregateActivity(input: {
+  organizationId: string;
+  repositoryId?: string;
+  projectId?: string;
+  usernames?: string[];
+  since: Date;
+  until: Date;
+}) {
+  const where: Prisma.CommitWhereInput = {
+    repository: {
+      organizationId: input.organizationId,
+      ...(input.projectId ? { projectId: input.projectId } : {})
+    },
+    committedAt: { gte: input.since, lte: input.until },
+    ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
+    ...(input.usernames?.length ? { username: { in: input.usernames } } : {})
+  };
+
+  const totals = await prisma.commit.aggregate({
+    where,
+    _count: { _all: true },
+    _sum: { additions: true, deletions: true, changedFilesCount: true }
+  });
+
+  return {
+    commits: totals._count._all,
+    additions: totals._sum.additions ?? 0,
+    deletions: totals._sum.deletions ?? 0,
+    filesChanged: totals._sum.changedFilesCount ?? 0
+  };
+}

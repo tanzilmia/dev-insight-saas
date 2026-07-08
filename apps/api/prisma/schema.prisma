@@ -176,6 +176,7 @@ model Repository {
   project      Project?              @relation(fields: [projectId], references: [id], onDelete: SetNull)
   credential   GitCredential         @relation(fields: [credentialId], references: [id], onDelete: Cascade)
   contributors ContributorIdentity[]
+  commits      Commit[]
 
   @@unique([organizationId, provider, externalId])
   @@index([organizationId])
@@ -222,6 +223,42 @@ model EmployeeGitMapping {
 
   @@index([organizationId])
   @@index([userId])
+}
+
+model Commit {
+  id                String   @id @default(cuid())
+  repositoryId      String
+  sha               String
+  message           String
+  authorName        String?
+  authorEmail       String?
+  username          String?
+  committedAt       DateTime
+  additions         Int      @default(0)
+  deletions         Int      @default(0)
+  changedFilesCount Int      @default(0)
+  createdAt         DateTime @default(now())
+
+  repository   Repository    @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  changedFiles ChangedFile[]
+
+  @@unique([repositoryId, sha])
+  @@index([repositoryId, committedAt])
+  @@index([repositoryId, username])
+}
+
+model ChangedFile {
+  id        String  @id @default(cuid())
+  commitId  String
+  filePath  String
+  status    String?
+  additions Int     @default(0)
+  deletions Int     @default(0)
+  changes   Int     @default(0)
+
+  commit Commit @relation(fields: [commitId], references: [id], onDelete: Cascade)
+
+  @@index([commitId])
 }
 
 model RequestLog {

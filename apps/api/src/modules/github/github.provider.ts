@@ -2,9 +2,12 @@ import { AppError } from "../../common/errors/app-error.js";
 import { env } from "../../config/env.js";
 import type {
   CredentialValidationResult,
+  GitCommit,
+  GitCommitDetail,
   GitContributor,
   GitProvider,
-  GitRepository
+  GitRepository,
+  ListCommitsOptions
 } from "../git-providers/git-provider.js";
 
 const PER_PAGE = 100;
@@ -31,6 +34,23 @@ type GitHubCollaborator = {
   id: number;
   login: string;
   avatar_url?: string;
+};
+
+type GitHubCommit = {
+  sha: string;
+  commit: { message: string; author?: { name?: string; email?: string; date?: string } };
+  author: { login?: string } | null;
+};
+
+type GitHubCommitDetail = {
+  stats?: { additions?: number; deletions?: number };
+  files?: {
+    filename: string;
+    status?: string;
+    additions?: number;
+    deletions?: number;
+    changes?: number;
+  }[];
 };
 
 /** GitHub implementation of {@link GitProvider} using the REST API. */
@@ -254,5 +274,101 @@ export class GitHubProvider implements GitProvider {
     }
 
     return collaborators;
+  }
+
+  async listCommits(
+    token: string,
+    owner: string,
+    repo: string,
+    options: ListCommitsOptions
+  ): Promise<GitCommit[]> {
+    const commits: GitCommit[] = [];
+    const params = new URLSearchParams({ per_page: String(PER_PAGE) });
+    if (options.since) params.set("since", options.since);
+    if (options.until) params.set("until", options.until);
+    if (options.branch) params.set("sha", options.branch);
+
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      params.set("page", String(page));
+      const response = await this.request(
+        `/repos/${owner}/${repo}/commits?${params.toString()}`,
+        token
+      );
+
+      // An empty repository (no commits yet) responds with 409.
+      if (response.status === 409) {
+        return commits;
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        throw new AppError(
+          400,
+          "GitHub rejected the stored token. Reconnect the credential.",
+          "INVALID_CREDENTIAL"
+        );
+      }
+
+      if (response.status === 404) {
+        throw new AppError(404, "Repository not found on GitHub", "REPO_NOT_ON_PROVIDER");
+      }
+
+      if (!response.ok) {
+        throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+      }
+
+      const items = (await response.json()) as GitHubCommit[];
+
+      for (const item of items) {
+        commits.push({
+          sha: item.sha,
+          message: item.commit.message,
+          authorName: item.commit.author?.name ?? null,
+          authorEmail: item.commit.author?.email ?? null,
+          username: item.author?.login ?? null,
+          committedAt: item.commit.author?.date ?? new Date(0).toISOString()
+        });
+      }
+
+      if (items.length < PER_PAGE) {
+        return commits;
+      }
+
+      if (page === MAX_PAGES) {
+        console.warn(
+          `GitHubProvider.listCommits hit the ${MAX_PAGES}-page cap; older commits may be omitted.`
+        );
+      }
+    }
+
+    return commits;
+  }
+
+  async getCommitDetail(
+    token: string,
+    owner: string,
+    repo: string,
+    sha: string
+  ): Promise<GitCommitDetail> {
+    const response = await this.request(`/repos/${owner}/${repo}/commits/${sha}`, token);
+
+    if (!response.ok) {
+      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+    }
+
+    const detail = (await response.json()) as GitHubCommitDetail;
+    const files = detail.files ?? [];
+
+    return {
+      additions: detail.stats?.additions ?? 0,
+      deletions: detail.stats?.deletions ?? 0,
+      changedFilesCount: files.length,
+      files: files.map((file) => ({
+        filePath: file.filename,
+        status: file.status ?? null,
+        additions: file.additions ?? 0,
+        deletions: file.deletions ?? 0,
+        changes: file.changes ?? 0
+      }))
+    };
   }
 }

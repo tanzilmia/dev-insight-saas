@@ -4,6 +4,7 @@ import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
 import { errorHandler } from "./common/middleware/error-handler.js";
+import { activityRouter } from "./modules/activity/activity.controller.js";
 import { authRouter } from "./modules/auth/auth.controller.js";
 import { contributorsRouter } from "./modules/contributors/contributors.controller.js";
 import { credentialsRouter } from "./modules/credentials/credentials.controller.js";
@@ -34,6 +35,7 @@ export function createApp() {
   app.use("/api/employees", employeesRouter);
   app.use("/api/git-credentials", credentialsRouter);
   app.use("/api/repositories", repositoriesRouter);
+  app.use("/api/repositories", activityRouter);
   app.use("/api/contributors", contributorsRouter);
   app.use("/api/openclaw", openclawRouter);
   app.use(errorHandler);

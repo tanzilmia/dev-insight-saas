@@ -300,10 +300,27 @@ export type TrackedRepository = RepositoryInput & {
   id: string;
   provider: "GITHUB";
   project: { id: string; name: string } | null;
+  commitCount: number;
   lastSyncedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export type CollectActivityResult = {
+  range: { since: string; until: string };
+  totalInRange: number;
+  newCollected: number;
+  detailCapped: number;
+};
+
+export async function collectActivity(repositoryId: string) {
+  const response = await api.post<{ activity: CollectActivityResult }>(
+    `/api/repositories/${repositoryId}/activity`,
+    {}
+  );
+
+  return response.data.activity;
+}
 
 export async function listRepositories(organizationId: string) {
   const response = await api.get<{ repositories: TrackedRepository[] }>(
@@ -469,7 +486,7 @@ export type GeneratedReport = {
     deletions: number;
     filesChanged: number;
   };
-  status: "SCAFFOLD";
+  status: string;
   pending: string[];
 };
 

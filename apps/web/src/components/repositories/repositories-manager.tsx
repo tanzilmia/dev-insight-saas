@@ -7,6 +7,7 @@ import {
   DownloadCloud,
   FolderGit2,
   Globe,
+  History,
   Loader2,
   Lock,
   Plus,
@@ -20,6 +21,7 @@ import {
   type Project,
   type TrackedRepository,
   assignRepositoryProject,
+  collectActivity,
   getApiErrorMessage,
   listProjects,
   listRepositories,
@@ -67,6 +69,7 @@ export function RepositoriesManager() {
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  const [rowNotice, setRowNotice] = useState<string | null>(null);
 
   const [availableQuery, setAvailableQuery] = useState("");
   const [trackedQuery, setTrackedQuery] = useState("");
@@ -223,6 +226,24 @@ export function RepositoriesManager() {
 
     try {
       await untrackRepository(repo.id);
+      await refresh();
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleCollect(repo: TrackedRepository) {
+    setBusyId(repo.id);
+    setRowError(null);
+    setRowNotice(null);
+
+    try {
+      const result = await collectActivity(repo.id);
+      setRowNotice(
+        `Collected ${result.newCollected} new commit(s) from ${repo.fullName} (last 90 days).`
+      );
       await refresh();
     } catch (error) {
       setRowError(getApiErrorMessage(error));
@@ -392,6 +413,11 @@ export function RepositoriesManager() {
               {rowError}
             </p>
           ) : null}
+          {rowNotice ? (
+            <p className="mb-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-600 dark:text-emerald-400">
+              {rowNotice}
+            </p>
+          ) : null}
 
           {loading ? (
             <div className="glass grid place-items-center rounded-[1.75rem] p-10 text-(--muted)">
@@ -441,10 +467,8 @@ export function RepositoriesManager() {
                           {repo.fullName}
                         </a>
                         <p className="mt-1 text-xs font-bold text-(--muted)">
-                          {repo.defaultBranch ? `${repo.defaultBranch} · ` : ""}
-                          {repo.lastSyncedAt
-                            ? `synced ${new Date(repo.lastSyncedAt).toLocaleDateString()}`
-                            : "not synced"}
+                          {repo.commitCount} commit{repo.commitCount === 1 ? "" : "s"}
+                          {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ""}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -472,6 +496,19 @@ export function RepositoriesManager() {
                         ) : null}
                         {manageable ? (
                           <>
+                            <button
+                              type="button"
+                              onClick={() => handleCollect(repo)}
+                              disabled={busy}
+                              className="glass glass-hover inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-(--text)"
+                            >
+                              {busy ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : (
+                                <History size={13} />
+                              )}
+                              Collect
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleResync(repo)}

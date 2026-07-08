@@ -5,6 +5,7 @@ import {
   buildReportMarkdown,
   fetchGitActivity,
   resolveEmployees,
+  resolveEmployeeUsernames,
   resolvePeriod,
   resolveProject,
   resolveRepository
@@ -32,7 +33,20 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     ? await resolveEmployees(input.organizationId, input.employeeIds)
     : [];
 
-  const activity = await fetchGitActivity();
+  // Employee/team reports filter commits to the employees' mapped identities.
+  const usernames = input.employeeIds?.length
+    ? await resolveEmployeeUsernames(input.organizationId, input.employeeIds)
+    : undefined;
+
+  const activity = await fetchGitActivity({
+    organizationId: input.organizationId,
+    repositoryId: repository?.id,
+    projectId: project?.id,
+    usernames,
+    since: range.from,
+    until: range.to
+  });
+
   const { title, markdown } = buildReportMarkdown({
     reportType: input.reportType,
     range,
@@ -73,11 +87,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
       deletions: activity.deletions,
       filesChanged: activity.filesChanged
     },
-    status: "SCAFFOLD" as const,
-    pending: [
-      "Git activity collection (Phase 8)",
-      "AI report generation (Phase 10)",
-      "Report persistence (Phase 11)"
-    ]
+    status: "PARTIAL" as const,
+    pending: ["AI report generation (Phase 10)", "Report persistence (Phase 11)"]
   };
 }

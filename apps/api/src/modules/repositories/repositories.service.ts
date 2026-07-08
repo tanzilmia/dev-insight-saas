@@ -22,6 +22,7 @@ type RepositoryInput = {
 
 type RepositoryWithProject = Repository & {
   project: { id: string; name: string } | null;
+  _count: { commits: number };
 };
 
 function toRepository(repository: RepositoryWithProject) {
@@ -36,6 +37,7 @@ function toRepository(repository: RepositoryWithProject) {
     isPrivate: repository.isPrivate,
     defaultBranch: repository.defaultBranch,
     project: repository.project,
+    commitCount: repository._count.commits,
     lastSyncedAt: repository.lastSyncedAt,
     createdAt: repository.createdAt,
     updatedAt: repository.updatedAt
@@ -43,7 +45,8 @@ function toRepository(repository: RepositoryWithProject) {
 }
 
 const projectSelect = {
-  project: { select: { id: true, name: true } }
+  project: { select: { id: true, name: true } },
+  _count: { select: { commits: true } }
 } satisfies Prisma.RepositoryInclude;
 
 /** Loads the organization's GitHub credential or throws a helpful error. */
