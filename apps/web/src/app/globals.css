@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #eef2f7;
+  --foreground: #111827;
+  --surface: #ffffff;
+  --surface-soft: rgba(255, 255, 255, 0.68);
+  --text: #111827;
+  --muted: #637083;
+  --accent: #0f9f8f;
+  --accent-strong: #0f766e;
+  --border: rgba(17, 24, 39, 0.12);
+  --glass: rgba(255, 255, 255, 0.58);
+  --glass-strong: rgba(255, 255, 255, 0.82);
+  --field: rgba(255, 255, 255, 0.74);
 }
 
 @theme inline {
@@ -12,15 +22,52 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+[data-theme="dark"] {
+  --background: #080b12;
+  --foreground: #f8fafc;
+  --surface: #0f172a;
+  --surface-soft: rgba(15, 23, 42, 0.68);
+  --text: #f8fafc;
+  --muted: #a7b0c0;
+  --accent: #4ade80;
+  --accent-strong: #22c55e;
+  --border: rgba(248, 250, 252, 0.14);
+  --glass: rgba(15, 23, 42, 0.58);
+  --glass-strong: rgba(15, 23, 42, 0.82);
+  --field: rgba(15, 23, 42, 0.74);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  content: "";
+  background:
+    radial-gradient(circle at 18% 18%, rgba(15, 159, 143, 0.22), transparent 28%),
+    radial-gradient(circle at 82% 12%, rgba(59, 130, 246, 0.18), transparent 26%),
+    radial-gradient(circle at 70% 82%, rgba(244, 114, 182, 0.14), transparent 28%),
+    linear-gradient(135deg, var(--background), var(--surface));
+}
+
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  background-image:
+    linear-gradient(rgba(127, 127, 127, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(127, 127, 127, 0.08) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(to bottom, black, transparent 78%);
+}
+
+button,
+input {
+  font: inherit;
 }
