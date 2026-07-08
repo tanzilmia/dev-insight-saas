@@ -1,18 +1,34 @@
 @import "tailwindcss";
 
 :root {
-  --background: #eef2f7;
-  --foreground: #111827;
+  color-scheme: light;
+  --background: #e8ecfb;
+  --foreground: #0c1122;
   --surface: #ffffff;
-  --surface-soft: rgba(255, 255, 255, 0.68);
-  --text: #111827;
-  --muted: #637083;
-  --accent: #0f9f8f;
+  --surface-soft: rgba(255, 255, 255, 0.66);
+  --text: #0c1122;
+  --muted: #58627a;
+  --accent: #0ea5a4;
+  --accent-2: #6366f1;
+  --accent-3: #a855f7;
   --accent-strong: #0f766e;
-  --border: rgba(17, 24, 39, 0.12);
-  --glass: rgba(255, 255, 255, 0.58);
-  --glass-strong: rgba(255, 255, 255, 0.82);
-  --field: rgba(255, 255, 255, 0.74);
+
+  --glass: rgba(255, 255, 255, 0.55);
+  --glass-strong: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.7);
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 26px 60px -30px rgba(19, 27, 66, 0.5);
+
+  --field: rgba(255, 255, 255, 0.7);
+  --field-border: rgba(20, 30, 70, 0.12);
+  --border: rgba(20, 30, 70, 0.1);
+  --ring: rgba(99, 102, 241, 0.32);
+
+  --orb-1: #22d3ee;
+  --orb-2: #6366f1;
+  --orb-3: #f472b6;
+  --orb-4: #34d399;
+  --orb-opacity: 0.5;
 }
 
 @theme inline {
@@ -23,18 +39,34 @@
 }
 
 [data-theme="dark"] {
-  --background: #080b12;
-  --foreground: #f8fafc;
-  --surface: #0f172a;
-  --surface-soft: rgba(15, 23, 42, 0.68);
-  --text: #f8fafc;
-  --muted: #a7b0c0;
-  --accent: #4ade80;
-  --accent-strong: #22c55e;
-  --border: rgba(248, 250, 252, 0.14);
-  --glass: rgba(15, 23, 42, 0.58);
-  --glass-strong: rgba(15, 23, 42, 0.82);
-  --field: rgba(15, 23, 42, 0.74);
+  color-scheme: dark;
+  --background: #05070f;
+  --foreground: #eef2fb;
+  --surface: #0b1120;
+  --surface-soft: rgba(255, 255, 255, 0.04);
+  --text: #f2f5fc;
+  --muted: #94a2bd;
+  --accent: #2dd4bf;
+  --accent-2: #818cf8;
+  --accent-3: #c084fc;
+  --accent-strong: #34d399;
+
+  --glass: rgba(255, 255, 255, 0.055);
+  --glass-strong: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-highlight: rgba(255, 255, 255, 0.2);
+  --glass-shadow: 0 34px 70px -34px rgba(0, 0, 0, 0.8);
+
+  --field: rgba(255, 255, 255, 0.05);
+  --field-border: rgba(255, 255, 255, 0.12);
+  --border: rgba(255, 255, 255, 0.1);
+  --ring: rgba(129, 140, 248, 0.45);
+
+  --orb-1: #0ea5e9;
+  --orb-2: #6366f1;
+  --orb-3: #db2777;
+  --orb-4: #059669;
+  --orb-opacity: 0.42;
 }
 
 body {
@@ -42,18 +74,7 @@ body {
   color: var(--foreground);
 }
 
-body::before {
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  content: "";
-  background:
-    radial-gradient(circle at 18% 18%, rgba(15, 159, 143, 0.22), transparent 28%),
-    radial-gradient(circle at 82% 12%, rgba(59, 130, 246, 0.18), transparent 26%),
-    radial-gradient(circle at 70% 82%, rgba(244, 114, 182, 0.14), transparent 28%),
-    linear-gradient(135deg, var(--background), var(--surface));
-}
-
+/* Fine grid overlay that fades toward the bottom */
 body::after {
   position: fixed;
   inset: 0;
@@ -61,13 +82,201 @@ body::after {
   pointer-events: none;
   content: "";
   background-image:
-    linear-gradient(rgba(127, 127, 127, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(127, 127, 127, 0.08) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: linear-gradient(to bottom, black, transparent 78%);
+    linear-gradient(rgba(127, 127, 127, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(127, 127, 127, 0.06) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: linear-gradient(to bottom, black, transparent 82%);
 }
 
 button,
 input {
   font: inherit;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent-2) 30%, transparent);
+}
+
+/* ---------- Animated aurora background ---------- */
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: var(--orb-opacity);
+  will-change: transform;
+}
+
+.orb-1 {
+  width: 46vmax;
+  height: 46vmax;
+  top: -12vmax;
+  left: -8vmax;
+  background: radial-gradient(circle at 30% 30%, var(--orb-1), transparent 70%);
+  animation: drift-1 24s ease-in-out infinite;
+}
+
+.orb-2 {
+  width: 42vmax;
+  height: 42vmax;
+  top: -6vmax;
+  right: -10vmax;
+  background: radial-gradient(circle at 70% 30%, var(--orb-2), transparent 70%);
+  animation: drift-2 30s ease-in-out infinite;
+}
+
+.orb-3 {
+  width: 40vmax;
+  height: 40vmax;
+  bottom: -14vmax;
+  right: 4vmax;
+  background: radial-gradient(circle at 50% 60%, var(--orb-3), transparent 70%);
+  animation: drift-3 27s ease-in-out infinite;
+}
+
+.orb-4 {
+  width: 36vmax;
+  height: 36vmax;
+  bottom: -12vmax;
+  left: 2vmax;
+  background: radial-gradient(circle at 40% 50%, var(--orb-4), transparent 70%);
+  animation: drift-4 33s ease-in-out infinite;
+}
+
+@keyframes drift-1 {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(6vmax, 5vmax, 0) scale(1.12); }
+}
+@keyframes drift-2 {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-7vmax, 6vmax, 0) scale(1.08); }
+}
+@keyframes drift-3 {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-5vmax, -6vmax, 0) scale(1.14); }
+}
+@keyframes drift-4 {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(6vmax, -5vmax, 0) scale(1.1); }
+}
+
+/* ---------- Glass surfaces ---------- */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+
+.glass-soft {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+.glass-hover {
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+}
+.glass-hover:hover {
+  transform: translateY(-3px);
+  background: var(--glass-strong);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight),
+    0 0 0 1px color-mix(in srgb, var(--accent-2) 25%, transparent);
+}
+
+/* ---------- Accents & buttons ---------- */
+.text-gradient {
+  background: linear-gradient(115deg, var(--accent-2), var(--accent), var(--accent-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.btn-gradient {
+  background: linear-gradient(115deg, var(--accent-2), var(--accent));
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 16px 34px -14px color-mix(in srgb, var(--accent-2) 80%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+.btn-gradient:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.06);
+  box-shadow: 0 22px 44px -14px color-mix(in srgb, var(--accent-2) 85%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+.btn-gradient:disabled {
+  opacity: 0.6;
+  transform: none;
+  cursor: not-allowed;
+}
+
+/* ---------- Form fields ---------- */
+.field {
+  background: var(--field);
+  border: 1px solid var(--field-border);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.field::placeholder {
+  color: color-mix(in srgb, var(--muted) 75%, transparent);
+}
+.field:focus {
+  outline: none;
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 4px var(--ring);
+  background: var(--glass-strong);
+}
+
+/* ---------- Dividers & misc ---------- */
+.hairline {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+}
+
+/* ---------- Entrance animation ---------- */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-rise {
+  opacity: 0;
+  animation: rise-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .animate-rise,
+  .pulse-dot {
+    animation: none !important;
+  }
+  .animate-rise {
+    opacity: 1;
+  }
 }

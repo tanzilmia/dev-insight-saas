@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, GitBranch, ShieldCheck, Sparkles } from "lucide-react";
+import {
+  ArrowRight,
+  GitBranch,
+  ShieldCheck,
+  Sparkles,
+  TrendingUp
+} from "lucide-react";
 
 import { PublicNav } from "@/components/layout/public-nav";
 
@@ -21,43 +27,68 @@ const features = [
   }
 ];
 
+const stats = [
+  ["4", "Roles built in"],
+  ["1-click", "Org onboarding"],
+  ["100%", "Server-validated"]
+];
+
 export default function Home() {
   return (
-    <main className="min-h-screen px-5 pb-16 pt-28 md:px-8">
+    <main className="min-h-screen px-5 pb-20 pt-28 md:px-8">
       <PublicNav />
-      <section className="mx-auto grid max-w-7xl gap-10 py-10 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
-        <div>
-          <p className="mb-5 text-xs font-black uppercase tracking-[0.35em] text-[var(--accent)]">
+      <section className="mx-auto grid max-w-7xl gap-12 py-10 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
+        <div className="animate-rise">
+          <span className="glass-soft mb-6 inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
+            <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-(--accent)" />
             DevInsight AI
-          </p>
-          <h1 className="max-w-4xl text-5xl font-black leading-[0.98] tracking-tight text-[var(--text)] md:text-7xl">
-            Developer intelligence without manual status chasing.
+          </span>
+          <h1 className="max-w-4xl text-5xl font-black leading-[0.98] tracking-tight text-(--text) md:text-7xl">
+            Developer intelligence without{" "}
+            <span className="text-gradient">manual status chasing.</span>
           </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-[var(--muted)]">
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-(--muted)">
             Turn Git activity into organization-aware engineering visibility,
             team reports, and risk summaries through a clean SaaS dashboard.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
               href="/login"
-              className="inline-flex items-center gap-2 rounded-full bg-[var(--text)] px-5 py-3 text-sm font-black text-[var(--surface)] transition hover:-translate-y-0.5 hover:opacity-90"
+              className="btn-gradient inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-black"
             >
               Login now <ArrowRight size={16} />
             </Link>
             <Link
               href="/dashboard"
-              className="rounded-full border border-[var(--border)] bg-[var(--glass)] px-5 py-3 text-sm font-black text-[var(--text)] shadow-lg shadow-black/5 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-[var(--glass-strong)]"
+              className="glass glass-hover rounded-full px-6 py-3.5 text-sm font-black text-(--text)"
             >
               Open dashboard
             </Link>
           </div>
+
+          <div className="mt-12 grid max-w-lg grid-cols-3 gap-4">
+            {stats.map(([value, label]) => (
+              <div key={label}>
+                <p className="text-3xl font-black text-(--text)">{value}</p>
+                <p className="mt-1 text-xs font-bold uppercase tracking-[0.12em] text-(--muted)">
+                  {label}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="rounded-[2.5rem] border border-[var(--border)] bg-[var(--glass)] p-5 shadow-2xl shadow-black/10 backdrop-blur-2xl md:p-8">
-          <div className="rounded-[2rem] border border-[var(--border)] bg-[var(--surface-soft)] p-5">
-            <div className="mb-8 flex items-center justify-between">
-              <span className="text-sm font-black">Engineering Pulse</span>
-              <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-600">
+        <div className="glass animate-rise rounded-[2.5rem] p-5 [animation-delay:120ms] md:p-7">
+          <div className="glass-soft rounded-4xl p-5 md:p-6">
+            <div className="mb-7 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp size={18} className="text-(--accent)" />
+                <span className="text-sm font-black text-(--text)">
+                  Engineering Pulse
+                </span>
+              </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-600 dark:text-emerald-400">
+                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 Foundation ready
               </span>
             </div>
@@ -65,13 +96,19 @@ export default function Home() {
               {features.map((feature) => (
                 <div
                   key={feature.title}
-                  className="rounded-3xl border border-[var(--border)] bg-[var(--glass)] p-5 backdrop-blur-xl"
+                  className="glass glass-hover flex gap-4 rounded-3xl p-5"
                 >
-                  <feature.icon className="mb-4 text-[var(--accent)]" size={24} />
-                  <h2 className="text-xl font-black">{feature.title}</h2>
-                  <p className="mt-2 leading-7 text-[var(--muted)]">
-                    {feature.copy}
-                  </p>
+                  <span className="btn-gradient grid h-11 w-11 shrink-0 place-items-center rounded-2xl">
+                    <feature.icon size={20} />
+                  </span>
+                  <div>
+                    <h2 className="text-lg font-black text-(--text)">
+                      {feature.title}
+                    </h2>
+                    <p className="mt-1 text-sm leading-6 text-(--muted)">
+                      {feature.copy}
+                    </p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -81,4 +118,3 @@ export default function Home() {
     </main>
   );
 }
-

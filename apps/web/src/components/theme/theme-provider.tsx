@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Moon, Sun } from "lucide-react";
 
 type Theme = "light" | "dark";
 
@@ -31,17 +32,24 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   return (
-    <div className="min-h-full">
+    <div className="relative min-h-full">
+      <div className="aurora" aria-hidden="true">
+        <div className="orb orb-1" />
+        <div className="orb orb-2" />
+        <div className="orb orb-3" />
+        <div className="orb orb-4" />
+      </div>
+
       <button
         type="button"
         onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        className="fixed right-4 top-4 z-50 rounded-full border border-white/20 bg-[var(--glass)] px-4 py-2 text-xs font-semibold text-[var(--text)] shadow-lg shadow-black/10 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-[var(--glass-strong)]"
+        className="glass glass-hover fixed right-4 top-4 z-50 grid h-11 w-11 place-items-center rounded-full text-(--text)"
         aria-label="Toggle color theme"
       >
-        {theme === "dark" ? "Light" : "Dark"}
+        {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
       </button>
+
       {children}
     </div>
   );
 }
-

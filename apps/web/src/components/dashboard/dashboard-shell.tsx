@@ -3,6 +3,14 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Activity,
+  Building2,
+  FileText,
+  GitBranch,
+  LogOut,
+  ShieldCheck
+} from "lucide-react";
 
 import { type AuthOrganization, type AuthUser, getCurrentUser } from "@/lib/api";
 import { clearStoredToken, getStoredToken } from "@/lib/auth-storage";
@@ -53,7 +61,8 @@ export function DashboardShell() {
   if (status === "loading") {
     return (
       <main className="grid min-h-screen place-items-center px-5">
-        <div className="rounded-[2rem] border border-[var(--border)] bg-[var(--glass)] px-8 py-6 font-bold shadow-2xl shadow-black/10 backdrop-blur-2xl">
+        <div className="glass flex items-center gap-3 rounded-4xl px-8 py-6 font-bold text-(--text)">
+          <span className="pulse-dot h-2.5 w-2.5 rounded-full bg-(--accent)" />
           Loading dashboard...
         </div>
       </main>
@@ -65,64 +74,86 @@ export function DashboardShell() {
   }
 
   const statCards = [
-    ["Connected org", activeOrganization?.name ?? "No organization"],
-    ["Role", activeOrganization?.role ?? "N/A"],
-    ["Reports", "Coming next"],
-    ["Git sync", "Not connected"]
+    {
+      icon: Building2,
+      label: "Connected org",
+      value: activeOrganization?.name ?? "No organization"
+    },
+    {
+      icon: ShieldCheck,
+      label: "Role",
+      value: activeOrganization?.role ?? "N/A"
+    },
+    { icon: FileText, label: "Reports", value: "Coming next" },
+    { icon: GitBranch, label: "Git sync", value: "Not connected" }
   ];
 
   return (
     <main className="min-h-screen px-5 py-6 md:px-8">
       <div className="mx-auto max-w-7xl">
-        <header className="mb-8 flex flex-wrap items-center justify-between gap-4 rounded-[2rem] border border-[var(--border)] bg-[var(--glass)] px-5 py-4 shadow-xl shadow-black/5 backdrop-blur-2xl">
-          <Link href="/" className="text-sm font-black tracking-[0.22em]">
-            DEVINSIGHT
+        <header className="glass animate-rise mb-8 flex flex-wrap items-center justify-between gap-4 rounded-4xl px-5 py-4">
+          <Link href="/" className="flex items-center gap-2.5">
+            <span className="btn-gradient grid h-8 w-8 place-items-center rounded-xl">
+              <Activity size={16} strokeWidth={2.5} />
+            </span>
+            <span className="text-sm font-black tracking-[0.22em] text-(--text)">
+              DEVINSIGHT
+            </span>
           </Link>
-          <div className="flex items-center gap-3 pr-20 md:pr-24">
-            <span className="hidden text-sm font-bold text-[var(--muted)] sm:block">
+          <div className="flex items-center gap-3 pr-14 md:pr-16">
+            <span className="hidden text-sm font-bold text-(--muted) sm:block">
               {session.user.email}
             </span>
             <button
               type="button"
               onClick={handleLogout}
-              className="rounded-full border border-[var(--border)] bg-[var(--surface-soft)] px-4 py-2 text-sm font-bold transition hover:bg-[var(--glass-strong)]"
+              className="glass glass-hover inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold text-(--text)"
             >
+              <LogOut size={15} />
               Logout
             </button>
           </div>
         </header>
 
         <section className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-          <div className="rounded-[2.25rem] border border-[var(--border)] bg-[var(--glass)] p-7 shadow-2xl shadow-black/10 backdrop-blur-2xl md:p-10">
-            <p className="mb-4 text-xs font-black uppercase tracking-[0.32em] text-[var(--accent)]">
+          <div className="glass animate-rise relative overflow-hidden rounded-[2.25rem] p-7 [animation-delay:80ms] md:p-10">
+            <p className="mb-4 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
+              <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-(--accent)" />
               Dashboard
             </p>
-            <h1 className="text-4xl font-black tracking-tight md:text-6xl">
-              Welcome back, {session.user.name}.
+            <h1 className="text-4xl font-black tracking-tight text-(--text) md:text-6xl">
+              Welcome back,{" "}
+              <span className="text-gradient">{session.user.name}.</span>
             </h1>
-            <p className="mt-5 max-w-2xl text-lg leading-8 text-[var(--muted)]">
+            <p className="mt-5 max-w-2xl text-lg leading-8 text-(--muted)">
               Your foundation is ready. The next build step can add projects,
               employees, Git credentials, repository sync, and contributor
               mapping.
             </p>
           </div>
 
-          <aside className="rounded-[2.25rem] border border-[var(--border)] bg-[var(--surface-soft)] p-7">
-            <h2 className="text-xl font-black">Account</h2>
-            <dl className="mt-6 grid gap-5 text-sm">
+          <aside className="glass-soft animate-rise rounded-[2.25rem] p-7 [animation-delay:160ms]">
+            <h2 className="flex items-center gap-2 text-xl font-black text-(--text)">
+              <Building2 size={18} className="text-(--accent)" />
+              Account
+            </h2>
+            <div className="hairline my-5" />
+            <dl className="grid gap-5 text-sm">
               <div>
-                <dt className="font-bold text-[var(--muted)]">Name</dt>
-                <dd className="mt-1 font-black">{session.user.name}</dd>
+                <dt className="font-bold text-(--muted)">Name</dt>
+                <dd className="mt-1 font-black text-(--text)">
+                  {session.user.name}
+                </dd>
               </div>
               <div>
-                <dt className="font-bold text-[var(--muted)]">Organization</dt>
-                <dd className="mt-1 font-black">
+                <dt className="font-bold text-(--muted)">Organization</dt>
+                <dd className="mt-1 font-black text-(--text)">
                   {activeOrganization?.name ?? "No organization"}
                 </dd>
               </div>
               <div>
-                <dt className="font-bold text-[var(--muted)]">Slug</dt>
-                <dd className="mt-1 font-black">
+                <dt className="font-bold text-(--muted)">Slug</dt>
+                <dd className="mt-1 font-black text-(--text)">
                   {activeOrganization?.slug ?? "N/A"}
                 </dd>
               </div>
@@ -131,15 +162,20 @@ export function DashboardShell() {
         </section>
 
         <section className="mt-6 grid gap-4 md:grid-cols-4">
-          {statCards.map(([label, value]) => (
+          {statCards.map((card) => (
             <div
-              key={label}
-              className="rounded-[1.75rem] border border-[var(--border)] bg-[var(--glass)] p-5 shadow-xl shadow-black/5 backdrop-blur-2xl"
+              key={card.label}
+              className="glass glass-hover animate-rise rounded-[1.75rem] p-5"
             >
-              <p className="text-xs font-black uppercase tracking-[0.22em] text-[var(--muted)]">
-                {label}
+              <span className="btn-gradient mb-4 grid h-10 w-10 place-items-center rounded-2xl">
+                <card.icon size={18} />
+              </span>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-(--muted)">
+                {card.label}
               </p>
-              <p className="mt-3 text-xl font-black">{value}</p>
+              <p className="mt-2 text-xl font-black text-(--text)">
+                {card.value}
+              </p>
             </div>
           ))}
         </section>
@@ -147,4 +183,3 @@ export function DashboardShell() {
     </main>
   );
 }
-
