@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   FolderKanban,
+  GitBranch,
   LayoutDashboard,
   LogOut,
   Users
@@ -14,7 +15,8 @@ import {
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
-  { href: "/dashboard/employees", label: "Employees", icon: Users }
+  { href: "/dashboard/employees", label: "Employees", icon: Users },
+  { href: "/dashboard/git", label: "Git", icon: GitBranch }
 ];
 
 function isActive(pathname: string, href: string) {

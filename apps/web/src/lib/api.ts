@@ -214,6 +214,70 @@ export async function removeProjectMember(projectId: string, userId: string) {
   return response.data;
 }
 
+/* ------------------------------------------------------------------ */
+/* Git credentials                                                    */
+/* ------------------------------------------------------------------ */
+
+export type CredentialStatus = "CONNECTED" | "INVALID" | "DISCONNECTED";
+
+export type GitCredential = {
+  id: string;
+  provider: "GITHUB";
+  status: CredentialStatus;
+  tokenLast4: string | null;
+  accountLogin: string | null;
+  scopes: string[];
+  lastValidatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function listCredentials(organizationId: string) {
+  const response = await api.get<{ credentials: GitCredential[] }>(
+    "/api/git-credentials",
+    { params: { organizationId } }
+  );
+
+  return response.data.credentials;
+}
+
+export async function connectCredential(input: {
+  organizationId: string;
+  token: string;
+}) {
+  const response = await api.post<{ credential: GitCredential }>(
+    "/api/git-credentials",
+    input
+  );
+
+  return response.data.credential;
+}
+
+export async function validateCredential(credentialId: string) {
+  const response = await api.post<{ credential: GitCredential }>(
+    `/api/git-credentials/${credentialId}/validate`
+  );
+
+  return response.data.credential;
+}
+
+export async function reconnectCredential(credentialId: string, token: string) {
+  const response = await api.patch<{ credential: GitCredential }>(
+    `/api/git-credentials/${credentialId}/reconnect`,
+    { token }
+  );
+
+  return response.data.credential;
+}
+
+export async function deleteCredential(credentialId: string) {
+  const response = await api.delete<{ id: string }>(
+    `/api/git-credentials/${credentialId}`
+  );
+
+  return response.data;
+}
+
 export function getApiErrorMessage(error: unknown) {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { error?: { message?: string } } } })

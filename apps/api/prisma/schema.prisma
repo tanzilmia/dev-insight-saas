@@ -35,6 +35,18 @@ enum ProjectRole {
   REVIEWER
 }
 
+enum GitProvider {
+  GITHUB
+  GITLAB
+  BITBUCKET
+}
+
+enum CredentialStatus {
+  CONNECTED
+  INVALID
+  DISCONNECTED
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -46,6 +58,7 @@ model User {
 
   memberships        OrganizationMember[]
   projectMemberships ProjectMember[]
+  gitCredentials     GitCredential[]      @relation("CredentialCreator")
   requestLogs        RequestLog[]
   auditLogs          AuditLog[]           @relation("AuditActor")
 
@@ -61,6 +74,7 @@ model Organization {
 
   members     OrganizationMember[]
   projects    Project[]
+  credentials GitCredential[]
   requestLogs RequestLog[]
   auditLogs   AuditLog[]
 }
@@ -112,6 +126,27 @@ model ProjectMember {
   @@unique([projectId, userId])
   @@index([userId])
   @@index([projectId])
+}
+
+model GitCredential {
+  id              String           @id @default(cuid())
+  organizationId  String
+  provider        GitProvider      @default(GITHUB)
+  encryptedToken  String
+  tokenLast4      String?
+  accountLogin    String?
+  scopes          String?
+  status          CredentialStatus @default(CONNECTED)
+  lastValidatedAt DateTime?
+  createdById     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("CredentialCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
 }
 
 model RequestLog {
