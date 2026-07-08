@@ -24,6 +24,17 @@ enum UserStatus {
   DISABLED
 }
 
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ProjectRole {
+  LEAD
+  DEVELOPER
+  REVIEWER
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -33,9 +44,10 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  memberships OrganizationMember[]
-  requestLogs RequestLog[]
-  auditLogs   AuditLog[]           @relation("AuditActor")
+  memberships        OrganizationMember[]
+  projectMemberships ProjectMember[]
+  requestLogs        RequestLog[]
+  auditLogs          AuditLog[]           @relation("AuditActor")
 
   @@index([status])
 }
@@ -48,6 +60,7 @@ model Organization {
   updatedAt DateTime @updatedAt
 
   members     OrganizationMember[]
+  projects    Project[]
   requestLogs RequestLog[]
   auditLogs   AuditLog[]
 }
@@ -67,6 +80,38 @@ model OrganizationMember {
   @@unique([organizationId, userId])
   @@index([userId])
   @@index([organizationId, role])
+}
+
+model Project {
+  id             String        @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  status         ProjectStatus @default(ACTIVE)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members      ProjectMember[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+model ProjectMember {
+  id        String      @id @default(cuid())
+  projectId String
+  userId    String
+  role      ProjectRole @default(DEVELOPER)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@index([projectId])
 }
 
 model RequestLog {

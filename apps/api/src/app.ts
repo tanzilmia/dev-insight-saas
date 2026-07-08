@@ -5,7 +5,9 @@ import { pinoHttp } from "pino-http";
 
 import { errorHandler } from "./common/middleware/error-handler.js";
 import { authRouter } from "./modules/auth/auth.controller.js";
+import { employeesRouter } from "./modules/employees/employees.controller.js";
 import { organizationsRouter } from "./modules/organizations/organizations.controller.js";
+import { projectsRouter } from "./modules/projects/projects.controller.js";
 
 export function createApp() {
   const app = express();
@@ -24,6 +26,8 @@ export function createApp() {
 
   app.use("/api/auth", authRouter);
   app.use("/api/organizations", organizationsRouter);
+  app.use("/api/projects", projectsRouter);
+  app.use("/api/employees", employeesRouter);
   app.use(errorHandler);
 
   return app;

@@ -12,8 +12,8 @@ npm workspaces (`apps/*`, `packages/*`), Node ≥ 20.
 
 - `apps/api` — Express 5 + Prisma 7 backend (`@devinsight/api`). **ESM** (`"type": "module"`), TypeScript 6, NodeNext.
 - `apps/web` — Next.js 16 + React 19 dashboard (`@devinsight/web`). App Router, Tailwind 4, shadcn/ui.
-- `packages/shared` — shared TS types/constants (`@devinsight/shared`), consumed by both apps.
-- `docs/` — extensive product/architecture specs (two overlapping blueprint sets + `TECH_STACK.md`). Treat as intent, not current state.
+- `packages/shared` — shared TS types/constants (`@devinsight/shared`), intended for both apps but currently a stub (only exports `APP_NAME`) that nothing imports yet. It ships compiled output (`main: dist/index.js`), so run its `build` before any app can consume it.
+- `docs/` — extensive product/architecture specs (two overlapping blueprint sets + `TECH_STACK.md`). Treat as intent, not current state. The design specs under `docs/superpowers/specs/` describe what has actually been built (monorepo bootstrap, auth + org foundation) and track closest to reality.
 
 ## Commands
 
