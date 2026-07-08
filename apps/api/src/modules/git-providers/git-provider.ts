@@ -15,6 +15,14 @@ export type GitRepository = {
   defaultBranch: string | null;
 };
 
+/** Normalized contributor (a Git identity) as returned by any provider. */
+export type GitContributor = {
+  externalId: string;
+  username: string;
+  avatarUrl: string | null;
+  contributions: number;
+};
+
 /**
  * Common abstraction over Git hosting providers. GitHub is the only
  * implementation for the MVP; GitLab/Bitbucket can be added behind the same
@@ -24,4 +32,5 @@ export type GitRepository = {
 export interface GitProvider {
   validateCredential(token: string): Promise<CredentialValidationResult>;
   listRepositories(token: string): Promise<GitRepository[]>;
+  listContributors(token: string, owner: string, repo: string): Promise<GitContributor[]>;
 }

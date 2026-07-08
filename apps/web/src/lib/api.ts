@@ -363,6 +363,75 @@ export async function untrackRepository(repositoryId: string) {
   return response.data;
 }
 
+/* ------------------------------------------------------------------ */
+/* Contributors                                                       */
+/* ------------------------------------------------------------------ */
+
+export type ContributorMapping = {
+  userId: string;
+  name: string;
+  email: string;
+  isPrimary: boolean;
+};
+
+export type Contributor = {
+  id: string;
+  externalId: string;
+  username: string | null;
+  avatarUrl: string | null;
+  contributions: number;
+  ignored: boolean;
+  mapping: ContributorMapping | null;
+};
+
+export async function listRepositoryContributors(repositoryId: string) {
+  const response = await api.get<{ contributors: Contributor[] }>(
+    "/api/contributors",
+    { params: { repositoryId } }
+  );
+
+  return response.data.contributors;
+}
+
+export async function discoverContributors(repositoryId: string) {
+  const response = await api.post<{ contributors: Contributor[] }>(
+    "/api/contributors/discover",
+    { repositoryId }
+  );
+
+  return response.data.contributors;
+}
+
+export async function mapContributor(
+  contributorId: string,
+  userId: string,
+  isPrimary = false
+) {
+  const response = await api.post<{ contributor: Contributor }>(
+    `/api/contributors/${contributorId}/map`,
+    { userId, isPrimary }
+  );
+
+  return response.data.contributor;
+}
+
+export async function unmapContributor(contributorId: string) {
+  const response = await api.delete<{ contributor: Contributor }>(
+    `/api/contributors/${contributorId}/map`
+  );
+
+  return response.data.contributor;
+}
+
+export async function ignoreContributor(contributorId: string, ignored: boolean) {
+  const response = await api.post<{ contributor: Contributor }>(
+    `/api/contributors/${contributorId}/ignore`,
+    { ignored }
+  );
+
+  return response.data.contributor;
+}
+
 export function getApiErrorMessage(error: unknown) {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { error?: { message?: string } } } })

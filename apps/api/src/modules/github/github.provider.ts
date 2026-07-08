@@ -2,12 +2,13 @@ import { AppError } from "../../common/errors/app-error.js";
 import { env } from "../../config/env.js";
 import type {
   CredentialValidationResult,
+  GitContributor,
   GitProvider,
   GitRepository
 } from "../git-providers/git-provider.js";
 
 const PER_PAGE = 100;
-const MAX_PAGES = 10; // hard cap: up to 1000 repos, avoids runaway pagination
+const MAX_PAGES = 10; // hard cap: up to 1000 items, avoids runaway pagination
 
 type GitHubRepo = {
   id: number;
@@ -17,6 +18,13 @@ type GitHubRepo = {
   html_url: string;
   default_branch?: string;
   owner: { login: string };
+};
+
+type GitHubContributor = {
+  id: number;
+  login: string;
+  avatar_url?: string;
+  contributions: number;
 };
 
 /** GitHub implementation of {@link GitProvider} using the REST API. */
@@ -116,5 +124,69 @@ export class GitHubProvider implements GitProvider {
     }
 
     return repositories;
+  }
+
+  async listContributors(
+    token: string,
+    owner: string,
+    repo: string
+  ): Promise<GitContributor[]> {
+    const contributors: GitContributor[] = [];
+
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const response = await this.request(
+        `/repos/${owner}/${repo}/contributors?per_page=${PER_PAGE}&page=${page}`,
+        token
+      );
+
+      // An empty repository responds with 204 No Content.
+      if (response.status === 204) {
+        return contributors;
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        throw new AppError(
+          400,
+          "GitHub rejected the stored token. Reconnect the credential.",
+          "INVALID_CREDENTIAL"
+        );
+      }
+
+      if (response.status === 404) {
+        throw new AppError(404, "Repository not found on GitHub", "REPO_NOT_ON_PROVIDER");
+      }
+
+      if (!response.ok) {
+        throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+      }
+
+      const items = (await response.json()) as GitHubContributor[];
+
+      for (const item of items) {
+        // Anonymous contributors have no login; skip them.
+        if (!item.login) {
+          continue;
+        }
+
+        contributors.push({
+          externalId: String(item.id),
+          username: item.login,
+          avatarUrl: item.avatar_url ?? null,
+          contributions: item.contributions ?? 0
+        });
+      }
+
+      if (items.length < PER_PAGE) {
+        return contributors;
+      }
+
+      if (page === MAX_PAGES) {
+        console.warn(
+          `GitHubProvider.listContributors hit the ${MAX_PAGES}-page cap; some contributors may be omitted.`
+        );
+      }
+    }
+
+    return contributors;
   }
 }

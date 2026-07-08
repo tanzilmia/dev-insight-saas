@@ -5,6 +5,7 @@ import { pinoHttp } from "pino-http";
 
 import { errorHandler } from "./common/middleware/error-handler.js";
 import { authRouter } from "./modules/auth/auth.controller.js";
+import { contributorsRouter } from "./modules/contributors/contributors.controller.js";
 import { credentialsRouter } from "./modules/credentials/credentials.controller.js";
 import { employeesRouter } from "./modules/employees/employees.controller.js";
 import { organizationsRouter } from "./modules/organizations/organizations.controller.js";
@@ -32,6 +33,7 @@ export function createApp() {
   app.use("/api/employees", employeesRouter);
   app.use("/api/git-credentials", credentialsRouter);
   app.use("/api/repositories", repositoriesRouter);
+  app.use("/api/contributors", contributorsRouter);
   app.use(errorHandler);
 
   return app;

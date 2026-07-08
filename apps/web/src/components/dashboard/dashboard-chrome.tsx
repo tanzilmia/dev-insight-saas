@@ -10,6 +10,7 @@ import {
   GitBranch,
   LayoutDashboard,
   LogOut,
+  UserCheck,
   Users
 } from "lucide-react";
 
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
   { href: "/dashboard/employees", label: "Employees", icon: Users },
   { href: "/dashboard/repositories", label: "Repos", icon: FolderGit2 },
+  { href: "/dashboard/contributors", label: "Contributors", icon: UserCheck },
   { href: "/dashboard/git", label: "Git", icon: GitBranch }
 ];
 
