@@ -1,6 +1,7 @@
 import { prisma } from "../../config/database.js";
 import { AppError } from "../../common/errors/app-error.js";
 import { aggregateActivity } from "../activity/activity.service.js";
+import type { ChatMessage } from "../llm/llm-provider.js";
 import type { Period, ReportType } from "./openclaw.schemas.js";
 
 /**
@@ -20,8 +21,7 @@ export const OPENCLAW_TOOLS = [
   {
     name: "generate_report",
     description: "Build the Markdown report from activity via the LLM",
-    status: "pending",
-    pendingPhase: "Phase 10 (LLM Integration)"
+    status: "ready"
   },
   {
     name: "save_report",
@@ -184,13 +184,22 @@ export async function fetchGitActivity(input: {
   return { ...stats, pending: false };
 }
 
-type ReportContext = {
+export type ReportCommit = {
+  sha: string;
+  message: string;
+  author: string | null;
+  additions: number;
+  deletions: number;
+};
+
+export type ReportContext = {
   reportType: ReportType;
   range: DateRange;
   project?: { id: string; name: string };
   repository?: { id: string; fullName: string };
   employees: ResolvedEmployee[];
   activity: GitActivity;
+  sampleCommits: ReportCommit[];
   customPrompt?: string;
 };
 
@@ -198,20 +207,68 @@ function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-/**
- * generate_report — SCAFFOLD. The real Markdown is produced by the LLM in
- * Phase 10. For now this assembles a deterministic placeholder from the
- * resolved context so the end-to-end flow is verifiable.
- */
-export function buildReportMarkdown(context: ReportContext): { title: string; markdown: string } {
-  const target =
+function deriveTarget(context: ReportContext): string {
+  return (
     context.repository?.fullName ??
     context.project?.name ??
     (context.employees.length === 1
       ? context.employees[0]!.name
-      : `${context.employees.length} employees`);
+      : `${context.employees.length} employees`)
+  );
+}
 
-  const title = `${context.reportType} report — ${target}`;
+/** Deterministic title used in the report header regardless of generator. */
+export function deriveTitle(context: ReportContext): string {
+  return `${context.reportType} report — ${deriveTarget(context)}`;
+}
+
+/**
+ * Builds the LLM prompt from the resolved report context and real commit
+ * activity. The provider (OpenAI) turns this into the Markdown narrative.
+ */
+export function buildReportPrompt(context: ReportContext): ChatMessage[] {
+  const period = `${formatDate(context.range.from)} to ${formatDate(context.range.to)}`;
+  const commitLines =
+    context.sampleCommits
+      .map(
+        (commit) =>
+          `- ${commit.message} (${commit.author ?? "unknown"}, +${commit.additions}/-${commit.deletions})`
+      )
+      .join("\n") || "(no commits in this period)";
+
+  const system =
+    "You are DevInsight, an assistant that writes concise, factual developer work reports for engineering managers from Git commit activity. Write in Markdown. Be specific and reference actual commit themes. Never invent data. If there are no commits, say so plainly.";
+
+  const user = [
+    `Report type: ${context.reportType}`,
+    `Target: ${deriveTarget(context)}`,
+    `Period: ${period}`,
+    `Totals: ${context.activity.commits} commits, +${context.activity.additions}/-${context.activity.deletions} lines, ${context.activity.filesChanged} files.`,
+    context.employees.length
+      ? `Employees: ${context.employees.map((employee) => employee.name).join(", ")}`
+      : null,
+    context.customPrompt ? `Extra instructions: ${context.customPrompt}` : null,
+    "",
+    "Recent commits:",
+    commitLines,
+    "",
+    "Write the report in Markdown: a short title (H1), a 2-3 sentence summary, a bulleted list of key themes/work done grounded in the commits above, and a one-line note on volume. Keep it under 250 words."
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: user }
+  ];
+}
+
+/**
+ * generate_report fallback — a deterministic template used when no LLM is
+ * configured. Produces the same title as {@link deriveTitle}.
+ */
+export function buildReportMarkdown(context: ReportContext): { title: string; markdown: string } {
+  const title = deriveTitle(context);
   const period = `${formatDate(context.range.from)} → ${formatDate(context.range.to)}`;
 
   const lines = [

@@ -185,20 +185,17 @@ export async function getActivitySummary(actorId: string, repositoryId: string, 
   };
 }
 
-/**
- * Aggregates stored commit activity for a target (repo/project) and optional
- * set of Git usernames within a date range. Used by OpenClaw's
- * fetch_git_activity tool to power reports.
- */
-export async function aggregateActivity(input: {
+export type ActivityQuery = {
   organizationId: string;
   repositoryId?: string;
   projectId?: string;
   usernames?: string[];
   since: Date;
   until: Date;
-}) {
-  const where: Prisma.CommitWhereInput = {
+};
+
+function buildCommitWhere(input: ActivityQuery): Prisma.CommitWhereInput {
+  return {
     repository: {
       organizationId: input.organizationId,
       ...(input.projectId ? { projectId: input.projectId } : {})
@@ -207,9 +204,16 @@ export async function aggregateActivity(input: {
     ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
     ...(input.usernames?.length ? { username: { in: input.usernames } } : {})
   };
+}
 
+/**
+ * Aggregates stored commit activity for a target (repo/project) and optional
+ * set of Git usernames within a date range. Used by OpenClaw's
+ * fetch_git_activity tool to power reports.
+ */
+export async function aggregateActivity(input: ActivityQuery) {
   const totals = await prisma.commit.aggregate({
-    where,
+    where: buildCommitWhere(input),
     _count: { _all: true },
     _sum: { additions: true, deletions: true, changedFilesCount: true }
   });
@@ -220,4 +224,30 @@ export async function aggregateActivity(input: {
     deletions: totals._sum.deletions ?? 0,
     filesChanged: totals._sum.changedFilesCount ?? 0
   };
+}
+
+/** Recent commits for the same query, used to give the LLM real material. */
+export async function sampleCommits(input: ActivityQuery, limit = 30) {
+  const commits = await prisma.commit.findMany({
+    where: buildCommitWhere(input),
+    orderBy: { committedAt: "desc" },
+    take: limit,
+    select: {
+      sha: true,
+      message: true,
+      authorName: true,
+      username: true,
+      committedAt: true,
+      additions: true,
+      deletions: true
+    }
+  });
+
+  return commits.map((commit) => ({
+    sha: commit.sha.slice(0, 7),
+    message: commit.message.split("\n")[0]!.slice(0, 140),
+    author: commit.username ?? commit.authorName,
+    additions: commit.additions,
+    deletions: commit.deletions
+  }));
 }

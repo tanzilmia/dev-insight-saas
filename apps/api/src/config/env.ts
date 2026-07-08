@@ -15,7 +15,12 @@ const envSchema = z.object({
       "GIT_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key"
     ),
   // Overridable so tests can point the GitHub provider at a mock server.
-  GITHUB_API_BASE_URL: z.string().url().default("https://api.github.com")
+  GITHUB_API_BASE_URL: z.string().url().default("https://api.github.com"),
+  // LLM (OpenAI-compatible). Key is optional — reports fall back to a template
+  // when it is absent. Base URL is overridable so tests can use a mock server.
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1")
 });
 
 export const env = envSchema.parse(process.env);
