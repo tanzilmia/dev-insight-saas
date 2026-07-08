@@ -12,6 +12,7 @@ import {
   requireOrganizationRole
 } from "../../common/access/organization-access.js";
 import { decryptToken } from "../../common/crypto/token-cipher.js";
+import type { GitContributor } from "../git-providers/git-provider.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
 
 type IdentityWithMapping = ContributorIdentity & {
@@ -115,11 +116,42 @@ export async function discoverContributors(actorId: string, repositoryId: string
   }
 
   const token = decryptToken(credential.encryptedToken);
-  const discovered = await getGitProvider(credential.provider).listContributors(
+  const provider = getGitProvider(credential.provider);
+
+  const contributors = await provider.listContributors(
     token,
     repository.owner,
     repository.name
   );
+
+  // Collaborators (people granted repo access, possibly with no commits) are
+  // best-effort — listing them can require permissions the token lacks.
+  let collaborators: GitContributor[] = [];
+  try {
+    collaborators = await provider.listCollaborators(
+      token,
+      repository.owner,
+      repository.name
+    );
+  } catch (error) {
+    console.warn(
+      `Could not list collaborators for ${repository.fullName}; using commit contributors only.`,
+      error
+    );
+  }
+
+  // Merge: commit contributors keep their counts; collaborators who have not
+  // committed are added with 0 contributions so they can still be mapped.
+  const byExternalId = new Map<string, GitContributor>();
+  for (const contributor of contributors) {
+    byExternalId.set(contributor.externalId, contributor);
+  }
+  for (const collaborator of collaborators) {
+    if (!byExternalId.has(collaborator.externalId)) {
+      byExternalId.set(collaborator.externalId, collaborator);
+    }
+  }
+  const discovered = [...byExternalId.values()];
 
   await prisma.$transaction(async (tx) => {
     for (const contributor of discovered) {

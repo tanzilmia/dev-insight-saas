@@ -27,6 +27,12 @@ type GitHubContributor = {
   contributions: number;
 };
 
+type GitHubCollaborator = {
+  id: number;
+  login: string;
+  avatar_url?: string;
+};
+
 /** GitHub implementation of {@link GitProvider} using the REST API. */
 export class GitHubProvider implements GitProvider {
   private authHeaders(token: string) {
@@ -188,5 +194,65 @@ export class GitHubProvider implements GitProvider {
     }
 
     return contributors;
+  }
+
+  async listCollaborators(
+    token: string,
+    owner: string,
+    repo: string
+  ): Promise<GitContributor[]> {
+    const collaborators: GitContributor[] = [];
+
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const response = await this.request(
+        `/repos/${owner}/${repo}/collaborators?per_page=${PER_PAGE}&page=${page}&affiliation=all`,
+        token
+      );
+
+      if (response.status === 401) {
+        throw new AppError(
+          400,
+          "GitHub rejected the stored token. Reconnect the credential.",
+          "INVALID_CREDENTIAL"
+        );
+      }
+
+      // 403/404 → the token cannot list collaborators for this repo. This is
+      // non-fatal for discovery, so return what we have (usually empty).
+      if (response.status === 403 || response.status === 404) {
+        return collaborators;
+      }
+
+      if (!response.ok) {
+        throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+      }
+
+      const items = (await response.json()) as GitHubCollaborator[];
+
+      for (const item of items) {
+        if (!item.login) {
+          continue;
+        }
+
+        collaborators.push({
+          externalId: String(item.id),
+          username: item.login,
+          avatarUrl: item.avatar_url ?? null,
+          contributions: 0
+        });
+      }
+
+      if (items.length < PER_PAGE) {
+        return collaborators;
+      }
+
+      if (page === MAX_PAGES) {
+        console.warn(
+          `GitHubProvider.listCollaborators hit the ${MAX_PAGES}-page cap; some collaborators may be omitted.`
+        );
+      }
+    }
+
+    return collaborators;
   }
 }

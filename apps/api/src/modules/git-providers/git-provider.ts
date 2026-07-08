@@ -33,4 +33,9 @@ export interface GitProvider {
   validateCredential(token: string): Promise<CredentialValidationResult>;
   listRepositories(token: string): Promise<GitRepository[]>;
   listContributors(token: string, owner: string, repo: string): Promise<GitContributor[]>;
+  /**
+   * Repository collaborators (people granted access), regardless of whether
+   * they have committed. Returned in the same shape with contributions = 0.
+   */
+  listCollaborators(token: string, owner: string, repo: string): Promise<GitContributor[]>;
 }
