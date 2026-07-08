@@ -9,6 +9,7 @@ import { credentialsRouter } from "./modules/credentials/credentials.controller.
 import { employeesRouter } from "./modules/employees/employees.controller.js";
 import { organizationsRouter } from "./modules/organizations/organizations.controller.js";
 import { projectsRouter } from "./modules/projects/projects.controller.js";
+import { repositoriesRouter } from "./modules/repositories/repositories.controller.js";
 
 export function createApp() {
   const app = express();
@@ -30,6 +31,7 @@ export function createApp() {
   app.use("/api/projects", projectsRouter);
   app.use("/api/employees", employeesRouter);
   app.use("/api/git-credentials", credentialsRouter);
+  app.use("/api/repositories", repositoriesRouter);
   app.use(errorHandler);
 
   return app;

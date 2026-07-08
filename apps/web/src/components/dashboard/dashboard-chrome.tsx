@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
+  FolderGit2,
   FolderKanban,
   GitBranch,
   LayoutDashboard,
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
   { href: "/dashboard/employees", label: "Employees", icon: Users },
+  { href: "/dashboard/repositories", label: "Repos", icon: FolderGit2 },
   { href: "/dashboard/git", label: "Git", icon: GitBranch }
 ];
 

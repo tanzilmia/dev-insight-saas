@@ -278,6 +278,91 @@ export async function deleteCredential(credentialId: string) {
   return response.data;
 }
 
+/* ------------------------------------------------------------------ */
+/* Repositories                                                       */
+/* ------------------------------------------------------------------ */
+
+export type RepositoryInput = {
+  externalId: string;
+  owner: string;
+  name: string;
+  fullName: string;
+  remoteUrl: string;
+  isPrivate: boolean;
+  defaultBranch: string | null;
+};
+
+/** A repository available on the provider, with tracking status. */
+export type AvailableRepository = RepositoryInput & { tracked: boolean };
+
+/** A repository persisted (tracked) for the organization. */
+export type TrackedRepository = RepositoryInput & {
+  id: string;
+  provider: "GITHUB";
+  project: { id: string; name: string } | null;
+  lastSyncedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function listRepositories(organizationId: string) {
+  const response = await api.get<{ repositories: TrackedRepository[] }>(
+    "/api/repositories",
+    { params: { organizationId } }
+  );
+
+  return response.data.repositories;
+}
+
+export async function syncRepositories(organizationId: string) {
+  const response = await api.post<{ repositories: AvailableRepository[] }>(
+    "/api/repositories/sync",
+    { organizationId }
+  );
+
+  return response.data.repositories;
+}
+
+export async function selectRepositories(
+  organizationId: string,
+  repositories: RepositoryInput[]
+) {
+  const response = await api.post<{ repositories: TrackedRepository[] }>(
+    "/api/repositories/select",
+    { organizationId, repositories }
+  );
+
+  return response.data.repositories;
+}
+
+export async function assignRepositoryProject(
+  repositoryId: string,
+  projectId: string | null
+) {
+  const response = await api.patch<{ repository: TrackedRepository }>(
+    `/api/repositories/${repositoryId}`,
+    { projectId }
+  );
+
+  return response.data.repository;
+}
+
+export async function resyncRepository(repositoryId: string) {
+  const response = await api.post<{ repository: TrackedRepository }>(
+    `/api/repositories/${repositoryId}/resync`
+  );
+
+  return response.data.repository;
+}
+
+export async function untrackRepository(repositoryId: string) {
+  const response = await api.delete<{ id: string }>(
+    `/api/repositories/${repositoryId}`
+  );
+
+  return response.data;
+}
+
 export function getApiErrorMessage(error: unknown) {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { error?: { message?: string } } } })

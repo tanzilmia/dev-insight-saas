@@ -72,11 +72,12 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members     OrganizationMember[]
-  projects    Project[]
-  credentials GitCredential[]
-  requestLogs RequestLog[]
-  auditLogs   AuditLog[]
+  members      OrganizationMember[]
+  projects     Project[]
+  credentials  GitCredential[]
+  repositories Repository[]
+  requestLogs  RequestLog[]
+  auditLogs    AuditLog[]
 }
 
 model OrganizationMember {
@@ -107,6 +108,7 @@ model Project {
 
   organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   members      ProjectMember[]
+  repositories Repository[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -144,9 +146,37 @@ model GitCredential {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdBy    User?        @relation("CredentialCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  repositories Repository[]
 
   @@unique([organizationId, provider])
   @@index([organizationId])
+}
+
+model Repository {
+  id             String      @id @default(cuid())
+  organizationId String
+  projectId      String?
+  credentialId   String
+  provider       GitProvider @default(GITHUB)
+  externalId     String
+  owner          String
+  name           String
+  fullName       String
+  remoteUrl      String
+  isPrivate      Boolean     @default(false)
+  defaultBranch  String?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project      Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  credential   GitCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider, externalId])
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([credentialId])
 }
 
 model RequestLog {
