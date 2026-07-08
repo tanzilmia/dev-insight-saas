@@ -432,6 +432,56 @@ export async function ignoreContributor(contributorId: string, ignored: boolean)
   return response.data.contributor;
 }
 
+/* ------------------------------------------------------------------ */
+/* Reports (OpenClaw orchestration)                                   */
+/* ------------------------------------------------------------------ */
+
+export type ReportType = "repository" | "project" | "employee" | "team";
+export type ReportPeriod = "today" | "last_7_days" | "last_30_days" | "custom";
+
+export type GenerateReportInput = {
+  organizationId: string;
+  reportType: ReportType;
+  repositoryId?: string;
+  projectId?: string;
+  employeeIds?: string[];
+  period: ReportPeriod;
+  customRange?: { from: string; to: string };
+  customPrompt?: string;
+};
+
+export type GeneratedReport = {
+  reportType: ReportType;
+  title: string;
+  markdown: string;
+  period: { from: string; to: string };
+  project: { id: string; name: string } | null;
+  repository: { id: string; fullName: string } | null;
+  employees: {
+    id: string;
+    name: string;
+    email: string;
+    mappedIdentities: number;
+  }[];
+  statistics: {
+    commits: number;
+    additions: number;
+    deletions: number;
+    filesChanged: number;
+  };
+  status: "SCAFFOLD";
+  pending: string[];
+};
+
+export async function generateReport(input: GenerateReportInput) {
+  const response = await api.post<{ report: GeneratedReport }>(
+    "/api/openclaw/reports/generate",
+    input
+  );
+
+  return response.data.report;
+}
+
 export function getApiErrorMessage(error: unknown) {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { error?: { message?: string } } } })
