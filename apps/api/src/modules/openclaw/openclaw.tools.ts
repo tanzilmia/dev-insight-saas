@@ -1,6 +1,10 @@
 import { prisma } from "../../config/database.js";
 import { AppError } from "../../common/errors/app-error.js";
-import { aggregateActivity, type ActivityAnalysis } from "../activity/activity.service.js";
+import {
+  aggregateActivity,
+  type ActivityAnalysis,
+  type EmployeeLeaderboardRow
+} from "../activity/activity.service.js";
 import type { ChatMessage } from "../llm/llm-provider.js";
 import type { Period, ReportType } from "./openclaw.schemas.js";
 
@@ -211,6 +215,7 @@ export type ReportContext = {
   activity: GitActivity;
   sampleCommits: ReportCommit[];
   analysis?: ActivityAnalysis;
+  leaderboard?: EmployeeLeaderboardRow[];
   customPrompt?: string;
 };
 
@@ -261,6 +266,21 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
   const risksLine =
     analysis && analysis.risks.length ? `Risk signals: ${analysis.risks.join("; ")}.` : null;
 
+  const leaderboard = context.leaderboard ?? [];
+  const leaderboardLines = leaderboard.length
+    ? [
+        "",
+        "Contributor leaderboard (ranked by lines changed):",
+        ...leaderboard.map(
+          (row) =>
+            `${row.rank}. ${row.name}${row.mapped ? "" : " (unmapped)"} — ${row.commits} commit(s), +${row.additions}/-${row.deletions} (${row.lines} lines)` +
+            (row.sampleMessages.length
+              ? `\n   worked on: ${row.sampleMessages.join("; ")}`
+              : "")
+        )
+      ].join("\n")
+    : null;
+
   const system =
     "You are DevInsight, an assistant that writes concise, factual developer work reports for engineering managers from Git commit activity. Write in Markdown. Be specific and reference actual commit themes. Never invent data. If there are no commits, say so plainly.";
 
@@ -276,11 +296,12 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
       ? `Employees: ${context.employees.map((employee) => employee.name).join(", ")}`
       : null,
     context.customPrompt ? `Extra instructions: ${context.customPrompt}` : null,
+    leaderboardLines,
     "",
     "Recent commits:",
     commitLines,
     "",
-    "Write the report in Markdown: a short title (H1), a 2-3 sentence summary, a bulleted list of key themes/work done grounded in the commits and work breakdown above, a short note on any risk signals, and a one-line note on volume. Keep it under 250 words."
+    "Write the report in Markdown: a short title (H1), then a 2-3 sentence overview that names who did the most work. If a contributor leaderboard is provided, add a '## Who did what' section listing each contributor ranked most-active first (by lines changed), each with a one-line summary of what they worked on (grounded in their commits). Then a bulleted list of the key themes/work across the team, a short note on any risk signals, and a one-line note on volume. Never invent contributors or work. Keep it under 350 words."
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -298,6 +319,7 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
 export function buildReportMarkdown(context: ReportContext): { title: string; markdown: string } {
   const title = deriveTitle(context);
   const period = `${formatDate(context.range.from)} → ${formatDate(context.range.to)}`;
+  const leaderboard = context.leaderboard ?? [];
 
   const lines = [
     `# ${title}`,
@@ -314,6 +336,19 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
     "",
     "## Activity",
     `Commits: ${context.activity.commits} · +${context.activity.additions} / -${context.activity.deletions} · ${context.activity.filesChanged} files`,
+    ...(leaderboard.length
+      ? [
+          "",
+          "## Who did what (ranked by lines changed)",
+          "",
+          "| # | Contributor | Commits | +/- lines | Files |",
+          "| --- | --- | ---: | ---: | ---: |",
+          ...leaderboard.map(
+            (row) =>
+              `| ${row.rank} | ${row.name}${row.mapped ? "" : " _(unmapped)_"} | ${row.commits} | +${row.additions} / -${row.deletions} | ${row.filesChanged} |`
+          )
+        ]
+      : []),
     "",
     "## Summary",
     context.activity.commits > 0

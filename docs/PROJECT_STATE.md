@@ -540,9 +540,27 @@ Phases (build in this order, small & verifiable, update this doc after each):
 - **E — Background deep-history collection**: move collection to an in-process worker
   (Redis later), paginate full 1–2yr history respecting GitHub rate limits, lift the
   150-detail cap; progress/status tracking + UI.
-- **F — Per-employee project report (leaderboard)**: `aggregateByEmployee` (groupBy
-  username → map to employees → rank by lines changed) + per-person point-by-point
-  narrative in the prompt + ranked leaderboard UI in the report.
+- **F — Per-employee project report (leaderboard) — ✅ DONE.**
+  - `activity.service.ts` `buildEmployeeLeaderboard(query)`: `commit.groupBy(username)`
+    for stats, folds **multiple Git usernames of the same mapped employee together**
+    (via `EmployeeGitMapping`), ranks by **lines changed (additions+deletions)**, and
+    attaches a few recent commit messages per person. Unmapped usernames appear under
+    their own name (`mapped: false`); null-username commits bucket as "Unknown".
+    Returns `EmployeeLeaderboardRow[]` (rank, name, usernames, commits, +/-, lines,
+    sampleMessages). Works for any scope (project/repository/team/employee) — the
+    report's `buildCommitWhere` filter applies.
+  - `openclaw.tools.ts`: `ReportContext.leaderboard` feeds the prompt (LLM is told to
+    write a ranked "## Who did what" section — most-active first, one line each on what
+    they worked on) and the **template fallback renders a deterministic Markdown table**,
+    so the ranked view is guaranteed even without an LLM.
+  - `orchestrateReport` computes the leaderboard once (before the cache check) and
+    returns it structured (`leaderboard`) on both the cache-hit and generated paths; web
+    `GeneratedReport.leaderboard` + `EmployeeLeaderboardRow` typed. It renders inside the
+    report Markdown (shows live + in history + in chat via the existing `.report-md`
+    table styling — no duplicate UI table). Verified: typecheck + lint clean; merge/rank
+    logic checked (two usernames → one employee, ranked by lines).
+  - Follow-on: branch-filtered leaderboards (Phase D's `CommitBranch`) + a dedicated
+    chart UI belong with Statistics (Phase 13).
 
 Note (Phase A follow-up): `collectActivity`'s `DEFAULT_LOOKBACK_DAYS = 90` in
 `activity.service.ts` is still the fallback when a collect call omits a range; Phase C

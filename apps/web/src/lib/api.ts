@@ -483,6 +483,20 @@ export type GenerateReportInput = {
   customPrompt?: string;
 };
 
+export type EmployeeLeaderboardRow = {
+  rank: number;
+  employeeId: string | null;
+  name: string;
+  usernames: string[];
+  mapped: boolean;
+  commits: number;
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+  lines: number;
+  sampleMessages: string[];
+};
+
 export type GeneratedReport = {
   reportId: string;
   reportType: ReportType;
@@ -498,6 +512,7 @@ export type GeneratedReport = {
     mappedIdentities: number;
   }[];
   statistics: ReportStatistics;
+  leaderboard?: EmployeeLeaderboardRow[];
   status: ReportStatus;
   pending: string[];
 };

@@ -578,6 +578,124 @@ export async function sampleCommits(input: ActivityQuery, limit = 30) {
   }));
 }
 
+export type EmployeeLeaderboardRow = {
+  rank: number;
+  employeeId: string | null;
+  name: string;
+  usernames: string[];
+  mapped: boolean;
+  commits: number;
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+  lines: number;
+  sampleMessages: string[];
+};
+
+/**
+ * Per-contributor leaderboard (Phase F) for a scope + range: groups commits by
+ * Git username, folds multiple usernames of the same mapped employee together,
+ * ranks by lines changed (additions + deletions), and attaches a few recent
+ * commit messages per person for the "who did what" narrative. Unmapped Git
+ * usernames appear under their own name, flagged `mapped: false`.
+ */
+export async function buildEmployeeLeaderboard(
+  input: ActivityQuery,
+  samplePerEmployee = 5
+): Promise<EmployeeLeaderboardRow[]> {
+  const where = buildCommitWhere(input);
+
+  const grouped = await prisma.commit.groupBy({
+    by: ["username"],
+    where,
+    _count: { _all: true },
+    _sum: { additions: true, deletions: true, changedFilesCount: true }
+  });
+
+  if (!grouped.length) {
+    return [];
+  }
+
+  const mappings = await prisma.employeeGitMapping.findMany({
+    where: { organizationId: input.organizationId },
+    include: {
+      user: { select: { id: true, name: true } },
+      contributorIdentity: { select: { username: true } }
+    }
+  });
+  const employeeByUsername = new Map<string, { id: string; name: string }>();
+  for (const mapping of mappings) {
+    const username = mapping.contributorIdentity.username;
+    if (username) {
+      employeeByUsername.set(username, { id: mapping.user.id, name: mapping.user.name });
+    }
+  }
+
+  const keyFor = (username: string | null) => {
+    const employee = username ? employeeByUsername.get(username) : undefined;
+    return { key: employee?.id ?? username ?? "__unknown__", employee };
+  };
+
+  const rows = new Map<string, EmployeeLeaderboardRow>();
+  for (const group of grouped) {
+    const { key, employee } = keyFor(group.username);
+    const additions = group._sum.additions ?? 0;
+    const deletions = group._sum.deletions ?? 0;
+    const filesChanged = group._sum.changedFilesCount ?? 0;
+    const commits = group._count._all;
+    const existing = rows.get(key);
+
+    if (existing) {
+      existing.commits += commits;
+      existing.additions += additions;
+      existing.deletions += deletions;
+      existing.filesChanged += filesChanged;
+      existing.lines += additions + deletions;
+      if (group.username && !existing.usernames.includes(group.username)) {
+        existing.usernames.push(group.username);
+      }
+    } else {
+      rows.set(key, {
+        rank: 0,
+        employeeId: employee?.id ?? null,
+        name: employee?.name ?? group.username ?? "Unknown",
+        usernames: group.username ? [group.username] : [],
+        mapped: Boolean(employee),
+        commits,
+        additions,
+        deletions,
+        filesChanged,
+        lines: additions + deletions,
+        sampleMessages: []
+      });
+    }
+  }
+
+  // Recent commit messages per person for the point-by-point narrative.
+  const recent = await prisma.commit.findMany({
+    where,
+    orderBy: { committedAt: "desc" },
+    take: 400,
+    select: { username: true, message: true }
+  });
+  for (const commit of recent) {
+    const { key } = keyFor(commit.username);
+    const row = rows.get(key);
+    if (row && row.sampleMessages.length < samplePerEmployee) {
+      row.sampleMessages.push(commit.message.split("\n")[0]!.slice(0, 120));
+    }
+  }
+
+  const sorted = [...rows.values()].sort(
+    (a, b) => b.lines - a.lines || b.commits - a.commits
+  );
+  sorted.forEach((row, index) => {
+    row.rank = index + 1;
+  });
+
+  return sorted;
+}
+
 const LARGE_COMMIT_THRESHOLD = 400;
 const ANALYSIS_COMMIT_CAP = 500;
 const ANALYSIS_FILE_CAP = 3000;

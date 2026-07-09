@@ -2,6 +2,7 @@ import { prisma } from "../../config/database.js";
 import { requireOrganizationMember } from "../../common/access/organization-access.js";
 import {
   analyzeActivity,
+  buildEmployeeLeaderboard,
   ensureActivityCollected,
   sampleCommits
 } from "../activity/activity.service.js";
@@ -83,6 +84,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
 
   const activity = await fetchGitActivity(activityQuery);
   const analysis = await analyzeActivity(activityQuery);
+  const leaderboard = await buildEmployeeLeaderboard(activityQuery);
   const dataFingerprint = computeFingerprint(activity);
 
   const targetLabel =
@@ -125,6 +127,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
         employees,
         statistics,
         analysis,
+        leaderboard,
         status: "GENERATED" as const,
         pending: readyPending,
         cached: true,
@@ -144,6 +147,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     activity,
     sampleCommits: commits,
     analysis,
+    leaderboard,
     customPrompt: input.customPrompt
   };
 
@@ -222,6 +226,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     employees,
     statistics,
     analysis,
+    leaderboard,
     status,
     pending,
     cached: false,
