@@ -410,20 +410,26 @@ pass. **Next: the OpenClaw runtime + plugin + channels below.**
 5. **Channels** — configure Telegram/Discord in OpenClaw so managers can request
    reports by chat (`Chat → OpenClaw → DevInsight tools → report`). Not started.
 
-**STATUS (runtime is UP on this machine):** OpenClaw runs in Docker (repo cloned to
-`../openclaw`, image `ghcr.io/openclaw/openclaw:latest`, gateway healthy on 18789),
-configured with **Z.ai GLM-5.2** (Coding Plan endpoint — see `docs/OPENCLAW_SETUP.md`).
-The `apps/api/.env` is wired (`OPENCLAW_GATEWAY_URL/TOKEN/SERVICE_KEY`) and the
-**website chat box is LIVE end-to-end** (DevInsight `/api/openclaw/chat` → gateway →
-GLM-5.2 replies, verified, ~13s/call). The agent chats but **cannot yet generate
-reports** — the DevInsight plugin (below) is not installed into OpenClaw.
+**✅ STATUS — chat → REPORTS is LIVE end-to-end (verified on real data).** Full chain:
+`chat box → /api/openclaw/chat → OpenClaw gateway (Docker, GLM-5.2) → agent →
+DevInsight MCP server → /api/openclaw/tools/* → real Git report (with Phase 9
+breakdown + risk signals) → chat`. Natural requests work ("give me this month's report
+for the backend repo") — the agent picks the tools itself; **no SKILL needed**.
 
-**Remaining to make chat generate reports:** build + install the plugin at
-`integrations/devinsight-openclaw-plugin/` into the (Dockerized) OpenClaw and add the
-SKILL. Gotchas: the plugin path must be reachable inside the container (mount/copy);
-`npm run build` may need SDK-API fixes (it's not compiled against OpenClaw types here);
-configure `serviceUrl = http://host.docker.internal:4000`, `apiKey = OPENCLAW_SERVICE_KEY`,
-plus `organizationId`/`requesterId` (from `GET /api/auth/me`).
+How it was wired (this machine):
+- OpenClaw in Docker: repo cloned to `../openclaw`, image `ghcr.io/openclaw/openclaw:latest`,
+  gateway on 18789. LLM = **Z.ai GLM-5.2** on the **Coding Plan endpoint** (see
+  `docs/OPENCLAW_SETUP.md`). OpenAI-compat HTTP endpoint enabled
+  (`gateway.http.endpoints.chatCompletions`). Chat model alias = `openclaw/default`.
+- **Report tools via an MCP server, NOT the TS plugin.** `integrations/devinsight-mcp-server/`
+  (streamable-HTTP, host-run on :4100) exposes `devinsight_context` +
+  `devinsight_generate_report` calling `/api/openclaw/tools/*`. Registered with
+  `openclaw mcp set devinsight '{"url":"http://host.docker.internal:4100/mcp","transport":"streamable-http"}'`.
+  The `../devinsight-openclaw-plugin/` (TS plugin) was superseded by this — kept for reference.
+
+**To run the whole thing** (see `docs/OPENCLAW_SETUP.md` §"Run everything"): OpenClaw
+(Docker, persistent) + DevInsight `npm run dev` (web+api) + `integrations/devinsight-mcp-server/run.sh`.
+MVP is **single-org** (the MCP server is pinned to one org/requester via `run.sh`).
 
 Prereqs from the operator: run OpenClaw self-hosted (Docker) — **step-by-step guide in
 `docs/OPENCLAW_SETUP.md`** (clone openclaw repo → `./scripts/docker/setup.sh` → set the

@@ -94,6 +94,21 @@ In production (real domain/HTTPS): OpenClaw stays on a **private/internal** netw
 is never exposed publicly; only the DevInsight web + api are public over HTTPS. Only the
 URLs above change (env), no code changes — see PROJECT_STATE.md §11.4 / deployment notes.
 
+## Run everything (day-to-day)
+
+Chat → reports needs these running (ports: web 3000, api 4000, MCP 4100, OpenClaw 18789):
+
+1. **OpenClaw** (Docker, persistent — already up): from the cloned `openclaw` repo,
+   `docker compose up -d` (stop with `docker compose down`).
+2. **DevInsight web + api**: from the DevInsight repo root, `npm run dev`.
+3. **DevInsight MCP server**: `cd integrations/devinsight-mcp-server && ./run.sh`.
+
+Then open the dashboard → the **💬 chat box** → e.g. *"give me this month's report for
+the backend repo"*. The agent resolves the repo and returns the AI report in chat.
+
+One-time registration (already done): `openclaw mcp set devinsight
+'{"url":"http://host.docker.internal:4100/mcp","transport":"streamable-http"}'`.
+
 ## ✅ Working LLM config (Z.ai GLM-5.2) — RESOLVED
 
 The OpenClaw **default agent's base context is large (~21–30k tokens** — it loads
