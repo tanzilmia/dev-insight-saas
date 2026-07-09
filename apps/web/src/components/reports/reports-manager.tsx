@@ -39,6 +39,7 @@ const REPORT_TYPES: { value: ReportType; label: string }[] = [
 
 const PERIODS: { value: ReportPeriod; label: string }[] = [
   { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
   { value: "last_7_days", label: "Last 7 days" },
   { value: "last_30_days", label: "Last 30 days" },
   { value: "last_90_days", label: "Last 90 days" },

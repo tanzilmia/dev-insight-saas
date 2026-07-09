@@ -25,6 +25,7 @@ import {
 import { AreaChart, BarList, StatTile } from "./charts";
 
 const PERIODS: { value: StatPeriod; label: string }[] = [
+  { value: "yesterday", label: "Yesterday" },
   { value: "last_7_days", label: "Last 7 days" },
   { value: "last_30_days", label: "Last 30 days" },
   { value: "last_90_days", label: "Last 90 days" },

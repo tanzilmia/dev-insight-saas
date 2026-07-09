@@ -457,6 +457,7 @@ export async function ignoreContributor(contributorId: string, ignored: boolean)
 export type ReportType = "repository" | "project" | "employee" | "team";
 export type ReportPeriod =
   | "today"
+  | "yesterday"
   | "last_7_days"
   | "last_30_days"
   | "last_90_days"
@@ -592,6 +593,7 @@ export async function sendAssistantMessage(organizationId: string, message: stri
 
 export type StatPeriod =
   | "today"
+  | "yesterday"
   | "last_7_days"
   | "last_30_days"
   | "last_90_days"

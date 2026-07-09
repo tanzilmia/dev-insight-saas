@@ -42,7 +42,7 @@ function buildServer() {
 
   server.tool(
     "devinsight_generate_report",
-    "Generate a developer work report (repository/project/employee/team) over a period from real Git activity. Returns Markdown. Resolve ids via devinsight_context first if the user gave names. For an arbitrary window (e.g. 'Jan 1 to Mar 31', 'the first 3 months of 2025'), pass period='custom' with customRange {from, to} as ISO dates (YYYY-MM-DD). Named windows: today, last_7_days, last_30_days, last_90_days, this_month, last_month.",
+    "Generate a developer work report (repository/project/employee/team) over a period from real Git activity. Returns Markdown. Resolve ids via devinsight_context first if the user gave names. For an arbitrary window (e.g. 'Jan 1 to Mar 31', 'the first 3 months of 2025'), pass period='custom' with customRange {from, to} as ISO dates (YYYY-MM-DD). Named windows: today, yesterday, last_7_days, last_30_days, last_90_days, this_month, last_month.",
     {
       reportType: z.enum(["repository", "project", "employee", "team"]),
       repositoryId: z.string().optional(),
@@ -51,6 +51,7 @@ function buildServer() {
       period: z
         .enum([
           "today",
+          "yesterday",
           "last_7_days",
           "last_30_days",
           "last_90_days",

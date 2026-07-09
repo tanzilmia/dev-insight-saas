@@ -9,6 +9,7 @@ export const reportTypeSchema = z.enum([
 
 export const periodSchema = z.enum([
   "today",
+  "yesterday",
   "last_7_days",
   "last_30_days",
   "last_90_days",

@@ -80,6 +80,13 @@ export function resolvePeriod(
     return { from, to: now };
   }
 
+  if (period === "yesterday") {
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // `to` is the last millisecond of yesterday.
+    return { from, to: new Date(todayStart.getTime() - 1) };
+  }
+
   if (period === "this_month") {
     return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: now };
   }

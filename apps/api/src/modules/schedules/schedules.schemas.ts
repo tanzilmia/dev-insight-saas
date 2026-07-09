@@ -7,6 +7,7 @@ export const scheduleCadenceSchema = z.enum(["DAILY", "WEEKLY", "MONTHLY"]);
 // A recurring report uses a relative window (no fixed custom range).
 export const schedulePeriodSchema = z.enum([
   "today",
+  "yesterday",
   "last_7_days",
   "last_30_days",
   "last_90_days",
