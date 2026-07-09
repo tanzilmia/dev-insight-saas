@@ -2,9 +2,14 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { asyncHandler } from "../../common/http/async-handler.js";
+import { AppError } from "../../common/errors/app-error.js";
 import { requireOrganizationMember } from "../../common/access/organization-access.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import { chatWithAgent, isGatewayConfigured } from "./openclaw.gateway.js";
+import {
+  chatWithAgent,
+  isGatewayConfigured,
+  streamChatWithAgent
+} from "./openclaw.gateway.js";
 import { generateReportSchema } from "./openclaw.schemas.js";
 import { orchestrateReport } from "./openclaw.service.js";
 import { OPENCLAW_TOOLS } from "./openclaw.tools.js";
@@ -58,5 +63,42 @@ openclawRouter.post(
     });
 
     res.status(200).json({ reply });
+  })
+);
+
+// Streaming variant — the agent's reply is written to the response in text
+// chunks as it is produced, so the chat box can render it token-by-token.
+openclawRouter.post(
+  "/chat/stream",
+  asyncHandler(async (req, res) => {
+    const { organizationId, message } = chatSchema.parse(req.body);
+    await requireOrganizationMember(req.authUser!.id, organizationId);
+
+    // Validate reachability before committing to a streamed (headers-sent)
+    // response, so this failure can still be a normal JSON error.
+    if (!isGatewayConfigured()) {
+      throw new AppError(503, "OpenClaw chat is not configured yet", "OPENCLAW_NOT_CONFIGURED");
+    }
+
+    res.status(200);
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    try {
+      for await (const delta of streamChatWithAgent(message, {
+        organizationId,
+        requesterId: req.authUser!.id
+      })) {
+        res.write(delta);
+      }
+    } catch (error) {
+      // Headers are already sent, so surface the error inline in the stream.
+      const note = error instanceof AppError ? error.message : "Failed to generate a reply";
+      res.write(`\n\n_${note}_`);
+    } finally {
+      res.end();
+    }
   })
 );

@@ -470,6 +470,19 @@ operator has done that, the **next assistant task is the DevInsight tool plugin 
   multi-instance deploy needs a shared lock/queue (Phase E). Typecheck + lint clean.
   **Remaining in Phase 14:** 14b share/export (shareable link + Markdown/PDF), 14c channels
   (Telegram/Discord delivery).
+
+**Streaming chat (2026-07-10):** the website chat box now streams the assistant reply
+token-by-token (ChatGPT-style). `openclaw.gateway.ts` `streamChatWithAgent` asks the
+gateway for `stream: true` and yields OpenAI-compatible SSE `delta.content` chunks (falls
+back to yielding the whole reply once if the gateway ignores `stream`). New endpoint
+`POST /api/openclaw/chat/stream` writes those chunks to the response as plain text (checks
+`isGatewayConfigured` before flushing headers so config errors stay JSON; mid-stream
+errors are written inline). Web `streamAssistantMessage(orgId, msg, onDelta)` uses `fetch`
++ `response.body.getReader()` (not axios). `chat-widget.tsx` streams into a live bubble
+(`streamingText` state) and shows "Thinking…" only until the first chunk (covers the
+agent's tool-call phase). The old non-stream `/chat` + `sendAssistantMessage` remain.
+Note: token-by-token only if the OpenClaw gateway streams; otherwise one chunk (no
+regression). Typecheck + lint clean.
 - **Sharing**: `ReportShare` model + share action + channel placeholders.
 - **Tests**: set up Vitest + Supertest first (none installed). Unit-test
   `token-cipher`, permission helpers, commit classification; integration-test the

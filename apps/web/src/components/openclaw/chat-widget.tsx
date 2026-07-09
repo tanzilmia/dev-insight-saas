@@ -5,11 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Loader2, MessageCircle, Send, Sparkles, X } from "lucide-react";
 
-import {
-  getApiErrorMessage,
-  getChatStatus,
-  sendAssistantMessage
-} from "@/lib/api";
+import { getChatStatus, streamAssistantMessage } from "@/lib/api";
 import { useSession } from "@/lib/use-session";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -26,6 +22,7 @@ export function ChatWidget() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [streamingText, setStreamingText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -38,7 +35,7 @@ export function ChatWidget() {
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
-  }, [messages, open]);
+  }, [messages, streamingText, open]);
 
   async function handleSend(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -51,13 +48,17 @@ export function ChatWidget() {
     setError(null);
     setMessages((current) => [...current, { role: "user", content: text }]);
     setSending(true);
+    setStreamingText("");
 
     try {
-      const reply = await sendAssistantMessage(organizationId, text);
+      const reply = await streamAssistantMessage(organizationId, text, (delta) => {
+        setStreamingText((prev) => (prev ?? "") + delta);
+      });
       setMessages((current) => [...current, { role: "assistant", content: reply }]);
     } catch (caught) {
-      setError(getApiErrorMessage(caught));
+      setError(caught instanceof Error ? caught.message : "Something went wrong");
     } finally {
+      setStreamingText(null);
       setSending(false);
     }
   }
@@ -128,7 +129,15 @@ export function ChatWidget() {
               ))
             )}
 
-            {sending ? (
+            {streamingText ? (
+              <div className="flex justify-start">
+                <div className="report-md glass-soft max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm font-medium text-(--text)">
+                  <ReactMarkdown remarkPlugins={markdownPlugins}>{streamingText}</ReactMarkdown>
+                </div>
+              </div>
+            ) : null}
+
+            {sending && !streamingText ? (
               <div className="flex justify-start">
                 <div className="glass-soft inline-flex items-center gap-2 rounded-2xl px-3.5 py-2.5 text-sm text-(--muted)">
                   <Loader2 size={14} className="animate-spin" />

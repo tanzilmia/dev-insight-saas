@@ -587,6 +587,56 @@ export async function sendAssistantMessage(organizationId: string, message: stri
   return response.data.reply;
 }
 
+/**
+ * Streams the assistant reply. Uses fetch (not axios) so the response body can
+ * be read incrementally; `onDelta` fires for each text chunk. Returns the full
+ * reply once the stream ends.
+ */
+export async function streamAssistantMessage(
+  organizationId: string,
+  message: string,
+  onDelta: (delta: string) => void
+): Promise<string> {
+  const token = getStoredToken();
+  const response = await fetch(`${API_URL}/api/openclaw/chat/stream`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify({ organizationId, message })
+  });
+
+  if (!response.ok || !response.body) {
+    let messageText = "Request failed";
+    try {
+      const data = await response.json();
+      messageText = data?.error?.message ?? messageText;
+    } catch {
+      // Non-JSON error body — keep the default message.
+    }
+    throw new Error(messageText);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let full = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    const chunk = decoder.decode(value, { stream: true });
+    if (chunk) {
+      full += chunk;
+      onDelta(chunk);
+    }
+  }
+
+  return full;
+}
+
 /* ------------------------------------------------------------------ */
 /* Statistics (dashboard)                                             */
 /* ------------------------------------------------------------------ */
