@@ -441,7 +441,19 @@ operator has done that, the **next assistant task is the DevInsight tool plugin 
 
 ### 11.5 Later — Statistics (13), Sharing (14), Tests (15), Deployment (16)
 
-- **Statistics dashboard**: aggregate endpoints (per project/employee/team) + charts.
+- **Statistics dashboard — ✅ DONE (Phase 13, 2026-07-10).** Backend module
+  `apps/api/src/modules/statistics/` — `GET /api/statistics/overview?organizationId=&period=`
+  (JWT + org-member). `getStatisticsOverview` aggregates stored commits for the org over a
+  period (reuses `resolvePeriod`, `buildEmployeeLeaderboard`, `analyzeActivity`): headline
+  totals (commits, +/- lines, files, active repos, distinct contributors), a **gap-filled
+  daily commit series**, top contributors, per-repository + per-project breakdowns, and the
+  work-breakdown/risk summary. Reads only the DB — never hits Git. Frontend: the **Overview
+  page IS the dashboard now** (`components/statistics/statistics-dashboard.tsx` replaced
+  `dashboard-shell.tsx`, which was deleted) — period selector + KPI tiles + charts.
+  Charts are dependency-free `components/statistics/charts.tsx`: `StatTile`, `BarList`
+  (single-hue horizontal bars), `AreaChart` (SVG area+line, hover crosshair/tooltip) — all
+  single-series indigo (`--accent`), text in text tokens, recessive grid, per dataviz-skill
+  guidance. `getStatisticsOverview` + types in web `api.ts`. Typecheck + lint clean.
 - **Sharing**: `ReportShare` model + share action + channel placeholders.
 - **Tests**: set up Vitest + Supertest first (none installed). Unit-test
   `token-cipher`, permission helpers, commit classification; integration-test the

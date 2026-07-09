@@ -586,6 +586,48 @@ export async function sendAssistantMessage(organizationId: string, message: stri
   return response.data.reply;
 }
 
+/* ------------------------------------------------------------------ */
+/* Statistics (dashboard)                                             */
+/* ------------------------------------------------------------------ */
+
+export type StatPeriod =
+  | "today"
+  | "last_7_days"
+  | "last_30_days"
+  | "last_90_days"
+  | "this_month"
+  | "last_month";
+
+export type StatisticsOverview = {
+  period: { from: string; to: string };
+  totals: {
+    commits: number;
+    additions: number;
+    deletions: number;
+    filesChanged: number;
+    repositories: number;
+    contributors: number;
+  };
+  commitsOverTime: { date: string; commits: number; additions: number; deletions: number }[];
+  topContributors: EmployeeLeaderboardRow[];
+  byRepository: { id: string; name: string; commits: number; additions: number; deletions: number }[];
+  byProject: { id: string; name: string; commits: number }[];
+  categories: Record<string, number>;
+  topModules: { module: string; changes: number }[];
+  risks: string[];
+};
+
+export async function getStatisticsOverview(
+  organizationId: string,
+  period: StatPeriod = "last_30_days"
+) {
+  const response = await api.get<{ overview: StatisticsOverview }>("/api/statistics/overview", {
+    params: { organizationId, period }
+  });
+
+  return response.data.overview;
+}
+
 export function getApiErrorMessage(error: unknown) {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { error?: { message?: string } } } })

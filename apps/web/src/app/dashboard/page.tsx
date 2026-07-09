@@ -1,6 +1,5 @@
-import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { StatisticsDashboard } from "@/components/statistics/statistics-dashboard";
 
 export default function DashboardPage() {
-  return <DashboardShell />;
+  return <StatisticsDashboard />;
 }
-
