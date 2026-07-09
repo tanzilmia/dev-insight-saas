@@ -8,6 +8,12 @@ import {
   requireOrganizationRole
 } from "../../common/access/organization-access.js";
 import { decryptToken } from "../../common/crypto/token-cipher.js";
+import {
+  classifyCommit,
+  hasRiskKeyword,
+  isSensitivePath,
+  moduleFromPath
+} from "../report-engine/commit-classifier.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -250,4 +256,84 @@ export async function sampleCommits(input: ActivityQuery, limit = 30) {
     additions: commit.additions,
     deletions: commit.deletions
   }));
+}
+
+const LARGE_COMMIT_THRESHOLD = 400;
+const ANALYSIS_COMMIT_CAP = 500;
+const ANALYSIS_FILE_CAP = 3000;
+
+export type ActivityAnalysis = {
+  categories: Record<string, number>;
+  topModules: { module: string; changes: number }[];
+  risks: string[];
+};
+
+/**
+ * Report-engine layer (Phase 9): classifies commits (feature/fix/chore…),
+ * buckets changed files into modules, and surfaces risk signals. Feeds the LLM
+ * prompt so narratives are grounded in the shape of the work, not just counts.
+ */
+export async function analyzeActivity(input: ActivityQuery): Promise<ActivityAnalysis> {
+  const where = buildCommitWhere(input);
+
+  const commits = await prisma.commit.findMany({
+    where,
+    orderBy: { committedAt: "desc" },
+    take: ANALYSIS_COMMIT_CAP,
+    select: { id: true, message: true, additions: true, deletions: true }
+  });
+
+  const categories: Record<string, number> = {};
+  let riskyCommits = 0;
+  let largeCommits = 0;
+
+  for (const commit of commits) {
+    const category = classifyCommit(commit.message);
+    categories[category] = (categories[category] ?? 0) + 1;
+    if (hasRiskKeyword(commit.message)) {
+      riskyCommits += 1;
+    }
+    if (commit.additions + commit.deletions > LARGE_COMMIT_THRESHOLD) {
+      largeCommits += 1;
+    }
+  }
+
+  const files = commits.length
+    ? await prisma.changedFile.findMany({
+        where: { commitId: { in: commits.map((commit) => commit.id) } },
+        select: { filePath: true, changes: true },
+        take: ANALYSIS_FILE_CAP
+      })
+    : [];
+
+  const moduleChanges: Record<string, number> = {};
+  let sensitiveHits = 0;
+
+  for (const file of files) {
+    const bucket = moduleFromPath(file.filePath);
+    moduleChanges[bucket] = (moduleChanges[bucket] ?? 0) + (file.changes || 0);
+    if (isSensitivePath(file.filePath)) {
+      sensitiveHits += 1;
+    }
+  }
+
+  const topModules = Object.entries(moduleChanges)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([module, changes]) => ({ module, changes }));
+
+  const risks: string[] = [];
+  if (riskyCommits) {
+    risks.push(`${riskyCommits} commit(s) flagged by keyword (revert/hotfix/security)`);
+  }
+  if (largeCommits) {
+    risks.push(`${largeCommits} unusually large commit(s)`);
+  }
+  if (sensitiveHits) {
+    risks.push(
+      `${sensitiveHits} change(s) to sensitive paths (auth/security/migrations/.env)`
+    );
+  }
+
+  return { categories, topModules, risks };
 }

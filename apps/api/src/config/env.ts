@@ -20,7 +20,14 @@ const envSchema = z.object({
   // when it is absent. Base URL is overridable so tests can use a mock server.
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
-  OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1")
+  OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  // OpenClaw integration (all optional — features degrade gracefully when unset).
+  // Service key: the shared secret the OpenClaw plugin uses to call our tool
+  // endpoints. Gateway URL/token: how OUR backend reaches the OpenClaw runtime
+  // for the website chat proxy (kept server-side; never exposed to the browser).
+  OPENCLAW_SERVICE_KEY: z.string().optional(),
+  OPENCLAW_GATEWAY_URL: z.string().url().optional(),
+  OPENCLAW_GATEWAY_TOKEN: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);

@@ -1,6 +1,6 @@
 import { prisma } from "../../config/database.js";
 import { AppError } from "../../common/errors/app-error.js";
-import { aggregateActivity } from "../activity/activity.service.js";
+import { aggregateActivity, type ActivityAnalysis } from "../activity/activity.service.js";
 import type { ChatMessage } from "../llm/llm-provider.js";
 import type { Period, ReportType } from "./openclaw.schemas.js";
 
@@ -199,6 +199,7 @@ export type ReportContext = {
   employees: ResolvedEmployee[];
   activity: GitActivity;
   sampleCommits: ReportCommit[];
+  analysis?: ActivityAnalysis;
   customPrompt?: string;
 };
 
@@ -235,6 +236,20 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
       )
       .join("\n") || "(no commits in this period)";
 
+  const analysis = context.analysis;
+  const categoryLine =
+    analysis && Object.keys(analysis.categories).length
+      ? `Work breakdown: ${Object.entries(analysis.categories)
+          .map(([category, count]) => `${count} ${category}`)
+          .join(", ")}.`
+      : null;
+  const modulesLine =
+    analysis && analysis.topModules.length
+      ? `Most-changed areas: ${analysis.topModules.map((item) => item.module).join(", ")}.`
+      : null;
+  const risksLine =
+    analysis && analysis.risks.length ? `Risk signals: ${analysis.risks.join("; ")}.` : null;
+
   const system =
     "You are DevInsight, an assistant that writes concise, factual developer work reports for engineering managers from Git commit activity. Write in Markdown. Be specific and reference actual commit themes. Never invent data. If there are no commits, say so plainly.";
 
@@ -243,6 +258,9 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
     `Target: ${deriveTarget(context)}`,
     `Period: ${period}`,
     `Totals: ${context.activity.commits} commits, +${context.activity.additions}/-${context.activity.deletions} lines, ${context.activity.filesChanged} files.`,
+    categoryLine,
+    modulesLine,
+    risksLine,
     context.employees.length
       ? `Employees: ${context.employees.map((employee) => employee.name).join(", ")}`
       : null,
@@ -251,7 +269,7 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
     "Recent commits:",
     commitLines,
     "",
-    "Write the report in Markdown: a short title (H1), a 2-3 sentence summary, a bulleted list of key themes/work done grounded in the commits above, and a one-line note on volume. Keep it under 250 words."
+    "Write the report in Markdown: a short title (H1), a 2-3 sentence summary, a bulleted list of key themes/work done grounded in the commits and work breakdown above, a short note on any risk signals, and a one-line note on volume. Keep it under 250 words."
   ]
     .filter((line): line is string => line !== null)
     .join("\n");

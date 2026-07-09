@@ -44,6 +44,7 @@ The `docs/.../DevInsight_AI_Development_Roadmap.md` defines Phases 0–16. Built
 | 6 | Contributor discovery + mapping (contributors **and** collaborators → employees) | ✅ done |
 | 7 | OpenClaw orchestration (in-repo stand-in) + report tool layer | ✅ done (see §7) |
 | 8 | Git activity collection (commits + changed files, per-commit stats) | ✅ done |
+| 9 | Report engine (commit classification, module breakdown, risk signals → prompt) | ✅ done |
 | 10 | LLM report generation (provider-agnostic; OpenAI-compatible) | ✅ done |
 | 11 | Report persistence + history/detail in dashboard | ✅ done |
 
@@ -54,9 +55,14 @@ real commit messages, with correct line-change math), badge `GENERATED`.
 **Also done:** proper Markdown rendering on the Reports page (`react-markdown` +
 `remark-gfm`) instead of raw `<pre>` output.
 
-**NOT yet built:** Phase 9 (report engine: commit classification / risk scoring),
-Phase 12–16 (statistics dashboard, sharing, tests, deployment), and the **real
-external OpenClaw integration** (§7).
+**Real external OpenClaw integration — IN PROGRESS:** the **backend foundation +
+website chat box are DONE** (service-key tool endpoints, chat proxy, floating chat
+widget — see §11.4). The chat widget shows "not connected" until the OpenClaw
+runtime is up. **Next OpenClaw step = OpenClaw runtime (Docker, operator task) +
+DevInsight tool plugin + channels.**
+
+**NOT yet built:** the OpenClaw runtime/plugin/channels (§11.4), and
+Phase 12–16 (statistics dashboard, sharing, tests, deployment).
 
 ---
 
@@ -101,6 +107,9 @@ Added for provider integration (all have safe defaults / are optional):
 | `OPENAI_API_KEY` | *(unset)* | LLM key. **If unset, reports fall back to a deterministic template** (no crash). |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | any OpenAI-compatible endpoint |
 | `OPENAI_MODEL` | `gpt-4o-mini` | model id |
+| `OPENCLAW_SERVICE_KEY` | *(unset)* | shared secret the OpenClaw plugin uses to call our tool endpoints (`x-openclaw-key` header) |
+| `OPENCLAW_GATEWAY_URL` | *(unset)* | OpenClaw runtime base URL for the website chat proxy (e.g. `http://localhost:18789`) |
+| `OPENCLAW_GATEWAY_TOKEN` | *(unset)* | bearer token for the gateway (server-side only) |
 
 **Currently configured LLM:** Groq (OpenAI-compatible, free tier). The `.env` has:
 `OPENAI_BASE_URL="https://api.groq.com/openai/v1"`,
@@ -150,7 +159,10 @@ activity:      POST /repositories/:id/activity (collect commits), GET /repositor
 contributors:  GET /contributors?repositoryId=, GET /contributors/unmapped?repositoryId=,
                POST /contributors/discover, POST /contributors/:id/map, DELETE /contributors/:id/map,
                POST /contributors/:id/ignore
-openclaw:      GET /openclaw/tools, POST /openclaw/reports/generate
+openclaw:      GET /openclaw/tools, POST /openclaw/reports/generate  (JWT)
+               GET /openclaw/chat/status, POST /openclaw/chat        (JWT — website chat proxy)
+               POST /openclaw/tools/generate-report, GET /openclaw/tools/context  (service-key)
+reports:       GET /reports, GET /reports/:id                       (persisted report history)
 reports:       GET /reports?organizationId=&reportType=&limit=, GET /reports/:id
 ```
 
@@ -170,6 +182,7 @@ Applied migrations (in `apps/api/prisma/migrations/`):
 - **ContributorIdentity** — per-repo Git identity: `externalId`, `username`, `authorName?`, `authorEmail?`, `avatarUrl?`, `contributions`, `ignored`. Unique per `[repositoryId, externalId]`. One-to-one optional `mapping`.
 - **EmployeeGitMapping** — maps `userId ↔ contributorIdentityId` (identity `@unique` → one identity → one employee).
 - **Commit** — `sha`, `message`, `authorName/authorEmail/username`, `committedAt`, `additions`, `deletions`, `changedFilesCount`. Unique per `[repositoryId, sha]`. **ChangedFile** — per-file `filePath/status/additions/deletions/changes`.
+- **Report** (Phase 11) — persisted generated report: `organizationId`, `requestedById?`, `reportType`, `targetLabel`, `repositoryId?/projectId?` (snapshot, no FK), `periodStart/End`, `title`, `markdownContent`, `statisticsJson`, `status` (`GENERATED|PARTIAL`), `generatedBy` (`llm|template`). **ReportContributor** — per-report contributor snapshot. Migration `20260709111500_reports`. Reads via `GET /api/reports` + `/api/reports/:id`.
 - **Report** — immutable report snapshot: `reportType`, `targetLabel`,
   `repositoryId?`, `projectId?` (snapshot ids, no FK), `periodStart/End`,
   `title`, `markdownContent`, `statisticsJson`, `status`, `generatedBy`,
@@ -311,52 +324,114 @@ Phase 11 is implemented:
 - `components/reports/reports-manager.tsx` shows saved report history and loads
   saved details into the same Markdown preview.
 
-### 11.3 Phase 9 — Report engine (richer signal for the LLM)
+### 11.3 Completed — Phase 9 Report engine (richer signal for the LLM)
 
-Improve what the LLM is given (mostly no schema change):
-- `modules/activity/` (or a new `report-engine`): `classifyCommit(message)` → category
-  from conventional-commit prefixes (`feat|fix|chore|docs|refactor|test|perf|build`);
-  bucket file paths into modules from the top path segment. Compute a breakdown
-  (counts per category, top modules) over the sampled commits.
-- Simple **risk signals**: large net deletions, changes to sensitive paths
-  (`auth`, `security`, `.env`, `migrations`), unusually large commits.
-- Extend `buildReportPrompt()` (in `openclaw.tools.ts`) to include the category
-  breakdown + risk flags so the narrative is richer. Add a `risk` report type path.
-- Optional schema: add `category`/`module` to `ChangedFile` (docs model has them) if
-  you want to persist classification rather than compute per request.
+Done (verified — categories/modules/risks correct on mock data):
+- `modules/report-engine/commit-classifier.ts` — pure helpers: `classifyCommit`
+  (conventional-commit prefix + keyword fallback → Feature/Fix/Refactor/Docs/Test/
+  Chore/Perf/Build/Other), `hasRiskKeyword`, `isSensitivePath`, `moduleFromPath`.
+- `activity.service.ts` `analyzeActivity(query)` (reuses `buildCommitWhere`, capped) →
+  `{ categories, topModules, risks }`: category tally, top modules by changes, and
+  risk signals (risky-keyword commits, unusually large commits, sensitive-path hits).
+- `openclaw.tools.ts` — `ReportContext.analysis` + `buildReportPrompt` now includes a
+  work breakdown, most-changed areas, and risk signals so the LLM narrative is grounded.
+- `openclaw.service.ts` — `orchestrateReport` calls `analyzeActivity` and returns
+  `analysis` on the report response.
+- Optional follow-up: persist `analysis` in `Report.statisticsJson`; add a dedicated
+  `risk` report type; add `category`/`module` columns to `ChangedFile`.
 
-### 11.4 Real OpenClaw integration (external runtime) — larger, separate track
+### 11.4 Real OpenClaw integration (external runtime) — IN PROGRESS
 
-Goal: route dashboard **and** chat (Telegram/Discord) report requests through the
-real OpenClaw runtime, reusing the backend tools. Contract (researched, see §7):
+Goal: route the **website chat box** first, then chat (Telegram/Discord) report
+requests, through the real OpenClaw runtime, reusing the backend tools. Order:
+website chat → Telegram → Discord (each later channel is just OpenClaw config, no
+rework). Contract (researched, see §7).
 
-1. **Backend service-key auth** — add `OPENCLAW_SERVICE_KEY` to `env.ts`; a
-   `requireServiceKey` middleware (checks an `X-OpenClaw-Key` / bearer header). Expose
-   the tool data behind `/api/openclaw/tools/*` endpoints callable with the service
-   key (they take `organizationId` + `requesterId` in the body and still enforce org
-   access). These wrap the existing functions in `openclaw.tools.ts`.
-2. **DevInsight OpenClaw plugin** — a separate small package (its own `package.json`
-   with `"openclaw": { "extensions": ["./dist/index.js"] }`, `peerDependencies:
-   openclaw`, `typebox`). Use `defineToolPlugin` with **TypeBox** schemas; each tool's
-   `execute(params, config)` calls the DevInsight backend (`config.serviceUrl` +
-   `config.apiKey`). Tools: `generate_report`, `resolve_project`, `resolve_employee`,
-   `fetch_git_activity`. Build with `openclaw plugins build`, install with
-   `openclaw plugins install <path>`, configure `serviceUrl`/`apiKey`.
-3. **Backend → OpenClaw HTTP bridge** — add `OPENCLAW_GATEWAY_URL`
-   (e.g. `http://localhost:18789`) + `OPENCLAW_GATEWAY_TOKEN` to `env.ts`. Change
-   `POST /api/openclaw/reports/generate` to POST to the gateway `/v1/chat/completions`
-   (`model: "openclaw:main"`, bearer token) with the structured request, returning the
-   agent's report. Keep the current in-repo orchestrator as a fallback when the
-   gateway is not configured.
-4. **`SKILL.md`** — instruct the agent when/how to use the DevInsight report tools and
-   how to format the Markdown report.
+**✅ DONE — Milestone 1: backend foundation** (verified with mock GitHub + a mock
+gateway; no OpenClaw runtime required to build/test):
+- `env.ts`: `OPENCLAW_SERVICE_KEY`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GATEWAY_TOKEN`
+  (all optional; features degrade gracefully when unset).
+- `openclaw.middleware.ts` — `requireServiceKey` (timing-safe `x-openclaw-key` check).
+- `openclaw.service-tools.controller.ts` — service-key tool endpoints:
+  `POST /api/openclaw/tools/generate-report` (body has `requesterId` + the report
+  input; wraps `orchestrateReport`, still enforces org membership → 403 for
+  non-members) and `GET /api/openclaw/tools/context` (repos/projects/employees for
+  name resolution). Mounted **before** the JWT `openclawRouter` at `/api/openclaw`,
+  using **per-route** `requireServiceKey` so non-matching paths fall through.
+- `openclaw.gateway.ts` + controller — `POST /api/openclaw/chat` (JWT: browser sends
+  `{organizationId, message}`, backend enforces membership, forwards to the gateway
+  `/v1/chat/completions` with the server-side token + org/requester context) and
+  `GET /api/openclaw/chat/status` (so the UI knows if chat is available). Returns a
+  clear 503 when the gateway isn't configured.
+
+**✅ DONE — Milestone 1b: frontend chat box.** `lib/api.ts` `getChatStatus()` +
+`sendAssistantMessage()`; `components/openclaw/chat-widget.tsx` (floating widget,
+bottom-right, rendered inside `dashboard-chrome.tsx` so it's on every dashboard
+page). Shows a "not connected" state until `OPENCLAW_GATEWAY_URL`/`TOKEN` are set;
+renders assistant replies with `react-markdown` (`.report-md`). typecheck/lint/build
+pass. **Next: the OpenClaw runtime + plugin + channels below.**
+
+<details><summary>Original 1b plan (for reference)</summary>
+1. **Frontend chat box** (Milestone 1b). Concrete plan:
+   - `lib/api.ts`: add `getChatStatus()` → `GET /api/openclaw/chat/status` (returns
+     `boolean`), and `sendAssistantMessage(organizationId, message)` →
+     `POST /api/openclaw/chat` (returns `reply` string). (Interceptor already adds the
+     JWT; follow the existing helper style; `getApiErrorMessage` exists for errors.)
+   - `components/openclaw/chat-widget.tsx` (client) — a **floating widget** (fixed
+     bottom-right button → glass panel). Gets `organizationId` from `useSession()`
+     (`activeOrganization`). On mount, call `getChatStatus()` (via a `.then` effect to
+     respect the `set-state-in-effect` rule). States: `loading` (spinner), `unconfigured`
+     (friendly "assistant will be available once OpenClaw is connected", input disabled),
+     `configured` (chat UI: message list of `{role:'user'|'assistant', content}`, input +
+     send). On send: append the user message, `POST /chat`, append the assistant reply
+     (render with the existing `react-markdown` + `remark-gfm`); on error use
+     `getApiErrorMessage`. Use the design tokens (`glass`, `btn-gradient`, `field`,
+     `--text/--muted/--accent`) and lucide icons (`MessageCircle`, `Send`, `X`, `Loader2`).
+   - Render `<ChatWidget />` inside `components/dashboard/dashboard-chrome.tsx` (it's
+     `position: fixed`, so it appears on every dashboard page). No nav item needed.
+   - Verify: `npm run typecheck && lint && build` for web; the widget shows the
+     "not connected" state until `OPENCLAW_GATEWAY_URL`/`TOKEN` are set on the API.
+</details>
+
+2. **DevInsight OpenClaw plugin — WRITTEN (verify-pending on the runtime).** Lives in
+   `integrations/devinsight-openclaw-plugin/` (NOT an app workspace — deployed into
+   OpenClaw). `defineToolPlugin` (TypeBox), config `{serviceUrl, apiKey, organizationId,
+   requesterId}`, tools `devinsight_context` + `devinsight_generate_report` calling
+   `/api/openclaw/tools/*` with `x-openclaw-key`. **Not compiled against OpenClaw types
+   here** — the operator runs `npm install && npm run build` in that dir and fixes any
+   SDK-API mismatch (esp. the `defineToolPlugin` import path), then `openclaw plugins
+   install <path>` + configures the 4 keys. See its `README.md`.
+3. **Backend chat proxy** — DONE (§11.4 Milestone 1: `POST /api/openclaw/chat` already
+   forwards to the gateway `/v1/chat/completions` with `model: "openclaw:main"`). The
+   dashboard form still uses the in-repo orchestrator; only the chat box uses OpenClaw.
+4. **`SKILL.md`** — WRITTEN at `integrations/devinsight-openclaw-plugin/SKILL.md`
+   (teaches the agent to resolve names via `devinsight_context`, then call
+   `devinsight_generate_report`, and relay the Markdown).
 5. **Channels** — configure Telegram/Discord in OpenClaw so managers can request
-   reports by chat (`Chat → OpenClaw → DevInsight tools → report`).
+   reports by chat (`Chat → OpenClaw → DevInsight tools → report`). Not started.
 
-Prereqs from the operator: run OpenClaw self-hosted (`npm i -g openclaw` →
-`openclaw onboard`), set an OpenAI-compatible key + model in OpenClaw, set a gateway
-token. The LLM used by chat is OpenClaw's own; the website path can keep using the
-backend `LLMProvider`.
+**STATUS (runtime is UP on this machine):** OpenClaw runs in Docker (repo cloned to
+`../openclaw`, image `ghcr.io/openclaw/openclaw:latest`, gateway healthy on 18789),
+configured with **Z.ai GLM-5.2** (Coding Plan endpoint — see `docs/OPENCLAW_SETUP.md`).
+The `apps/api/.env` is wired (`OPENCLAW_GATEWAY_URL/TOKEN/SERVICE_KEY`) and the
+**website chat box is LIVE end-to-end** (DevInsight `/api/openclaw/chat` → gateway →
+GLM-5.2 replies, verified, ~13s/call). The agent chats but **cannot yet generate
+reports** — the DevInsight plugin (below) is not installed into OpenClaw.
+
+**Remaining to make chat generate reports:** build + install the plugin at
+`integrations/devinsight-openclaw-plugin/` into the (Dockerized) OpenClaw and add the
+SKILL. Gotchas: the plugin path must be reachable inside the container (mount/copy);
+`npm run build` may need SDK-API fixes (it's not compiled against OpenClaw types here);
+configure `serviceUrl = http://host.docker.internal:4000`, `apiKey = OPENCLAW_SERVICE_KEY`,
+plus `organizationId`/`requesterId` (from `GET /api/auth/me`).
+
+Prereqs from the operator: run OpenClaw self-hosted (Docker) — **step-by-step guide in
+`docs/OPENCLAW_SETUP.md`** (clone openclaw repo → `./scripts/docker/setup.sh` → set the
+Groq `models.openaiCompatible` provider → copy the gateway token + set
+`OPENCLAW_SERVICE_KEY` into `apps/api/.env`). Gateway is on port 18789. Once the
+operator has done that, the **next assistant task is the DevInsight tool plugin +
+`SKILL.md`** so the chat box goes live. Networking (dev): DevInsight backend → gateway
+= `http://localhost:18789`; plugin (in container) → DevInsight API = `http://host.docker.internal:4000`.
 
 ### 11.5 Later — Statistics (13), Sharing (14), Tests (15), Deployment (16)
 

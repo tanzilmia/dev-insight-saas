@@ -10,6 +10,7 @@ import { contributorsRouter } from "./modules/contributors/contributors.controll
 import { credentialsRouter } from "./modules/credentials/credentials.controller.js";
 import { employeesRouter } from "./modules/employees/employees.controller.js";
 import { openclawRouter } from "./modules/openclaw/openclaw.controller.js";
+import { openclawServiceRouter } from "./modules/openclaw/openclaw.service-tools.controller.js";
 import { organizationsRouter } from "./modules/organizations/organizations.controller.js";
 import { projectsRouter } from "./modules/projects/projects.controller.js";
 import { reportsRouter } from "./modules/reports/reports.controller.js";
@@ -38,6 +39,9 @@ export function createApp() {
   app.use("/api/repositories", repositoriesRouter);
   app.use("/api/repositories", activityRouter);
   app.use("/api/contributors", contributorsRouter);
+  // Service-key tool endpoints must be mounted BEFORE the JWT-guarded router so
+  // OpenClaw's (non-JWT) tool calls reach them; unmatched paths fall through.
+  app.use("/api/openclaw", openclawServiceRouter);
   app.use("/api/openclaw", openclawRouter);
   app.use("/api/reports", reportsRouter);
   app.use(errorHandler);

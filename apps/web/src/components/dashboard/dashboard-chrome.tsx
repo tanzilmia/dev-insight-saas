@@ -15,6 +15,8 @@ import {
   Users
 } from "lucide-react";
 
+import { ChatWidget } from "@/components/openclaw/chat-widget";
+
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
@@ -101,6 +103,8 @@ export function DashboardChrome({
 
         {children}
       </div>
+
+      <ChatWidget />
     </main>
   );
 }

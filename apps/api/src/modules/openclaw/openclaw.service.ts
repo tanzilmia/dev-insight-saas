@@ -1,6 +1,6 @@
 import { prisma } from "../../config/database.js";
 import { requireOrganizationMember } from "../../common/access/organization-access.js";
-import { sampleCommits } from "../activity/activity.service.js";
+import { analyzeActivity, sampleCommits } from "../activity/activity.service.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
 import { createReport } from "../reports/reports.service.js";
 import type { GenerateReportInput } from "./openclaw.schemas.js";
@@ -65,6 +65,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
 
   const activity = await fetchGitActivity(activityQuery);
   const commits = await sampleCommits(activityQuery);
+  const analysis = await analyzeActivity(activityQuery);
 
   const context: ReportContext = {
     reportType: input.reportType,
@@ -74,6 +75,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     employees,
     activity,
     sampleCommits: commits,
+    analysis,
     customPrompt: input.customPrompt
   };
 
@@ -158,6 +160,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
       deletions: activity.deletions,
       filesChanged: activity.filesChanged
     },
+    analysis,
     status,
     pending
   };

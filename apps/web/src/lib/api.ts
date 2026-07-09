@@ -545,6 +545,24 @@ export async function getReport(reportId: string) {
   return response.data.report;
 }
 
+/* ------------------------------------------------------------------ */
+/* OpenClaw assistant (website chat)                                  */
+/* ------------------------------------------------------------------ */
+
+export async function getChatStatus() {
+  const response = await api.get<{ configured: boolean }>("/api/openclaw/chat/status");
+  return response.data.configured;
+}
+
+export async function sendAssistantMessage(organizationId: string, message: string) {
+  const response = await api.post<{ reply: string }>("/api/openclaw/chat", {
+    organizationId,
+    message
+  });
+
+  return response.data.reply;
+}
+
 export function getApiErrorMessage(error: unknown) {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { error?: { message?: string } } } })

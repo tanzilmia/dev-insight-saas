@@ -1,0 +1,24 @@
+{
+  "name": "devinsight-openclaw-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenClaw tool plugin that generates DevInsight developer work reports.",
+  "files": ["dist", "openclaw.plugin.json", "README.md", "SKILL.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "manifest": "openclaw plugins build --entry ./dist/index.js"
+  },
+  "dependencies": {
+    "typebox": "^1.1.38"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  },
+  "openclaw": {
+    "extensions": ["./dist/index.js"]
+  }
+}
