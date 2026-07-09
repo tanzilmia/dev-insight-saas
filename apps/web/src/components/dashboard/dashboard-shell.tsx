@@ -45,12 +45,12 @@ export function DashboardShell() {
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
       <section className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-        <div className="glass animate-rise relative overflow-hidden rounded-[2.25rem] p-7 [animation-delay:80ms] md:p-10">
+        <div className="glass animate-rise relative overflow-hidden rounded-xl p-7 [animation-delay:80ms] md:p-7">
           <p className="mb-4 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
             <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-(--accent)" />
             Dashboard
           </p>
-          <h1 className="text-4xl font-black tracking-tight text-(--text) md:text-6xl">
+          <h1 className="text-2xl font-bold tracking-tight text-(--text) md:text-3xl">
             Welcome back,{" "}
             <span className="text-gradient">{session.user.name}.</span>
           </h1>
@@ -76,7 +76,7 @@ export function DashboardShell() {
           </div>
         </div>
 
-        <aside className="glass-soft animate-rise rounded-[2.25rem] p-7 [animation-delay:160ms]">
+        <aside className="glass-soft animate-rise rounded-xl p-7 [animation-delay:160ms]">
           <h2 className="flex items-center gap-2 text-xl font-black text-(--text)">
             <Building2 size={18} className="text-(--accent)" />
             Account
@@ -109,7 +109,7 @@ export function DashboardShell() {
         {statCards.map((card) => (
           <div
             key={card.label}
-            className="glass glass-hover animate-rise rounded-[1.75rem] p-5"
+            className="glass glass-hover animate-rise rounded-xl p-5"
           >
             <span className="btn-gradient mb-4 grid h-10 w-10 place-items-center rounded-2xl">
               <card.icon size={18} />

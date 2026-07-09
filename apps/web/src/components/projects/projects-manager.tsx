@@ -36,7 +36,7 @@ import {
 const PROJECT_ROLES: ProjectRole[] = ["LEAD", "DEVELOPER", "REVIEWER"];
 
 const fieldClass =
-  "field w-full rounded-2xl px-4 py-3 font-medium text-(--text) placeholder:font-normal";
+  "field w-full rounded-lg px-3.5 py-2.5 text-sm font-medium text-(--text) placeholder:font-normal";
 
 function statusTone(status: Project["status"]) {
   return status === "ACTIVE"
@@ -254,12 +254,12 @@ export function ProjectsManager() {
       <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
         <section className="grid gap-6">
           {manageable ? (
-            <div className="glass animate-rise rounded-[2rem] p-6 md:p-7">
+            <div className="glass animate-rise rounded-xl p-5">
               <p className="mb-2 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
                 <FolderKanban size={14} />
                 Projects
               </p>
-              <h1 className="text-3xl font-black tracking-tight text-(--text)">
+              <h1 className="text-xl font-bold tracking-tight text-(--text)">
                 New project
               </h1>
               <form onSubmit={handleCreate} className="mt-5 grid gap-4">
@@ -294,7 +294,7 @@ export function ProjectsManager() {
                 <button
                   type="submit"
                   disabled={creating}
-                  className="btn-gradient inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-black"
+                  className="btn-gradient inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold"
                 >
                   {creating ? (
                     <Loader2 size={16} className="animate-spin" />
@@ -313,15 +313,15 @@ export function ProjectsManager() {
             </h2>
 
             {loading ? (
-              <div className="glass grid place-items-center rounded-[1.75rem] p-10 text-(--muted)">
+              <div className="glass grid place-items-center rounded-xl p-10 text-(--muted)">
                 <Loader2 size={20} className="animate-spin" />
               </div>
             ) : loadError ? (
-              <div className="glass rounded-[1.75rem] p-6 text-sm font-bold text-red-600 dark:text-red-400">
+              <div className="glass rounded-xl p-6 text-sm font-bold text-red-600 dark:text-red-400">
                 {loadError}
               </div>
             ) : projects.length === 0 ? (
-              <div className="glass rounded-[1.75rem] p-8 text-center text-sm font-bold text-(--muted)">
+              <div className="glass rounded-xl p-8 text-center text-sm font-bold text-(--muted)">
                 No projects yet.
               </div>
             ) : (
@@ -331,7 +331,7 @@ export function ProjectsManager() {
                     <button
                       type="button"
                       onClick={() => handleSelect(project.id)}
-                      className={`glass glass-hover w-full rounded-[1.5rem] p-5 text-left ${
+                      className={`glass glass-hover w-full rounded-lg p-5 text-left ${
                         selectedId === project.id
                           ? "ring-2 ring-(--accent-2)"
                           : ""
@@ -366,19 +366,19 @@ export function ProjectsManager() {
 
         <section className="animate-rise [animation-delay:80ms] lg:sticky lg:top-6">
           {!selectedId ? (
-            <div className="glass-soft grid place-items-center rounded-[2rem] p-12 text-center text-sm font-bold text-(--muted)">
+            <div className="glass-soft grid place-items-center rounded-xl p-10 text-center text-sm font-bold text-(--muted)">
               Select a project to view members and settings.
             </div>
           ) : detailLoading ? (
-            <div className="glass grid place-items-center rounded-[2rem] p-12 text-(--muted)">
+            <div className="glass grid place-items-center rounded-xl p-10 text-(--muted)">
               <Loader2 size={20} className="animate-spin" />
             </div>
           ) : detailError ? (
-            <div className="glass rounded-[2rem] p-6 text-sm font-bold text-red-600 dark:text-red-400">
+            <div className="glass rounded-xl p-6 text-sm font-bold text-red-600 dark:text-red-400">
               {detailError}
             </div>
           ) : detail ? (
-            <div className="glass rounded-[2rem] p-6 md:p-7">
+            <div className="glass rounded-xl p-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
                   <h2 className="text-2xl font-black tracking-tight text-(--text)">

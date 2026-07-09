@@ -20,10 +20,10 @@ import {
 const ROLE_OPTIONS: AssignableRole[] = ["EMPLOYEE", "MANAGER", "ADMIN"];
 
 const fieldClass =
-  "field w-full rounded-2xl px-4 py-3 font-medium text-(--text) placeholder:font-normal";
+  "field w-full rounded-lg px-3.5 py-2.5 text-sm font-medium text-(--text) placeholder:font-normal";
 
 const roleBadgeClass =
-  "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-black uppercase tracking-wide";
+  "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide";
 
 function statusTone(status: Employee["status"]) {
   if (status === "ACTIVE") {
@@ -149,24 +149,21 @@ export function EmployeesManager() {
 
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
-      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
-        <section className="glass animate-rise rounded-[2rem] p-6 md:p-7">
-          <p className="mb-2 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
+      <div className="grid gap-6 lg:grid-cols-[340px_1fr] lg:items-start">
+        <section className="glass animate-rise rounded-xl p-5">
+          <p className="mb-1.5 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-(--accent)">
             <Users size={14} />
             Employees
           </p>
-          <h1 className="text-3xl font-black tracking-tight text-(--text)">
-            Team members
-          </h1>
-          <p className="mt-3 text-sm leading-6 text-(--muted)">
-            Add the people in {activeOrganization?.name ?? "your organization"}.
-            They can be assigned to projects and, later, mapped to their Git
-            identities.
+          <h1 className="text-xl font-bold tracking-tight text-(--text)">Team members</h1>
+          <p className="mt-1.5 text-sm leading-6 text-(--muted)">
+            Add the people in {activeOrganization?.name ?? "your organization"}. They can be
+            assigned to projects and mapped to their Git identities.
           </p>
 
           {manageable ? (
-            <form onSubmit={handleAdd} className="mt-6 grid gap-4">
-              <label className="grid gap-2 text-sm font-bold text-(--text)">
+            <form onSubmit={handleAdd} className="mt-5 grid gap-3.5">
+              <label className="grid gap-1.5 text-sm font-semibold text-(--text)">
                 Name
                 <input
                   value={name}
@@ -177,7 +174,7 @@ export function EmployeesManager() {
                   placeholder="Rahim Uddin"
                 />
               </label>
-              <label className="grid gap-2 text-sm font-bold text-(--text)">
+              <label className="grid gap-1.5 text-sm font-semibold text-(--text)">
                 Email
                 <input
                   value={email}
@@ -188,13 +185,11 @@ export function EmployeesManager() {
                   placeholder="rahim@example.com"
                 />
               </label>
-              <label className="grid gap-2 text-sm font-bold text-(--text)">
+              <label className="grid gap-1.5 text-sm font-semibold text-(--text)">
                 Role
                 <select
                   value={role}
-                  onChange={(event) =>
-                    setRole(event.target.value as AssignableRole)
-                  }
+                  onChange={(event) => setRole(event.target.value as AssignableRole)}
                   className={fieldClass}
                 >
                   {ROLE_OPTIONS.map((option) => (
@@ -206,7 +201,7 @@ export function EmployeesManager() {
               </label>
 
               {formError ? (
-                <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-600 dark:text-red-400">
+                <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm font-medium text-red-600 dark:text-red-400">
                   {formError}
                 </p>
               ) : null}
@@ -214,7 +209,7 @@ export function EmployeesManager() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="btn-gradient inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-black"
+                className="btn-gradient inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold"
               >
                 {submitting ? (
                   <Loader2 size={16} className="animate-spin" />
@@ -225,108 +220,125 @@ export function EmployeesManager() {
               </button>
             </form>
           ) : (
-            <p className="mt-6 rounded-2xl border border-(--border) bg-(--surface-soft) px-4 py-3 text-sm font-bold text-(--muted)">
-              You have read-only access. Ask an owner or manager to add
-              employees.
+            <p className="mt-5 rounded-lg border border-(--border) bg-(--surface-soft) px-3.5 py-2.5 text-sm font-medium text-(--muted)">
+              You have read-only access. Ask an owner or manager to add employees.
             </p>
           )}
         </section>
 
         <section className="animate-rise [animation-delay:80ms]">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-black text-(--text)">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-bold text-(--text)">
               {employees.length} member{employees.length === 1 ? "" : "s"}
             </h2>
           </div>
 
           {rowError ? (
-            <p className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-600 dark:text-red-400">
+            <p className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm font-medium text-red-600 dark:text-red-400">
               {rowError}
             </p>
           ) : null}
 
           {loading ? (
-            <div className="glass grid place-items-center rounded-[1.75rem] p-10 text-sm font-bold text-(--muted)">
+            <div className="glass grid place-items-center rounded-xl p-10 text-sm font-medium text-(--muted)">
               <Loader2 size={20} className="animate-spin" />
             </div>
           ) : loadError ? (
-            <div className="glass rounded-[1.75rem] p-6 text-sm font-bold text-red-600 dark:text-red-400">
+            <div className="glass rounded-xl p-6 text-sm font-medium text-red-600 dark:text-red-400">
               {loadError}
             </div>
           ) : employees.length === 0 ? (
-            <div className="glass rounded-[1.75rem] p-8 text-center text-sm font-bold text-(--muted)">
+            <div className="glass rounded-xl p-8 text-center text-sm font-medium text-(--muted)">
               No employees yet.
             </div>
           ) : (
-            <ul className="grid gap-3">
-              {employees.map((employee) => {
-                const isOwner = employee.role === "OWNER";
-                const busy = busyId === employee.id;
+            <div className="glass overflow-hidden rounded-xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-(--border) text-left text-[11px] uppercase tracking-wide text-(--muted)">
+                      <th className="px-4 py-2.5 font-semibold">Member</th>
+                      <th className="px-4 py-2.5 font-semibold">Status</th>
+                      <th className="px-4 py-2.5 font-semibold">Role</th>
+                      {manageable ? (
+                        <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
+                      ) : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.map((employee) => {
+                      const isOwner = employee.role === "OWNER";
+                      const busy = busyId === employee.id;
 
-                return (
-                  <li
-                    key={employee.id}
-                    className="glass glass-hover rounded-[1.5rem] p-5"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="truncate text-base font-black text-(--text)">
-                          {employee.name}
-                        </p>
-                        <p className="truncate text-sm font-medium text-(--muted)">
-                          {employee.email}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`${roleBadgeClass} ${statusTone(employee.status)}`}>
-                          {employee.status}
-                        </span>
-                        {manageable && !isOwner ? (
-                          <select
-                            value={employee.role}
-                            disabled={busy}
-                            onChange={(event) =>
-                              handleRoleChange(
-                                employee,
-                                event.target.value as AssignableRole
-                              )
-                            }
-                            className="field rounded-full px-3 py-1.5 text-xs font-bold text-(--text)"
-                          >
-                            {ROLE_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="glass-soft inline-flex items-center rounded-full px-3 py-1.5 text-xs font-black text-(--text)">
-                            {employee.role}
-                          </span>
-                        )}
-                        {manageable && !isOwner ? (
-                          <button
-                            type="button"
-                            onClick={() => handleStatusToggle(employee)}
-                            disabled={busy}
-                            className="glass glass-hover inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-(--text)"
-                          >
-                            {busy ? (
-                              <Loader2 size={13} className="animate-spin" />
-                            ) : employee.status === "ACTIVE" ? (
-                              <Ban size={13} />
+                      return (
+                        <tr
+                          key={employee.id}
+                          className="border-b border-(--border) transition last:border-0 hover:bg-(--surface-soft)"
+                        >
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-(--text)">{employee.name}</p>
+                            <p className="text-xs text-(--muted)">{employee.email}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`${roleBadgeClass} ${statusTone(employee.status)}`}>
+                              {employee.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {manageable && !isOwner ? (
+                              <select
+                                value={employee.role}
+                                disabled={busy}
+                                onChange={(event) =>
+                                  handleRoleChange(
+                                    employee,
+                                    event.target.value as AssignableRole
+                                  )
+                                }
+                                className="field rounded-md px-2.5 py-1.5 text-xs font-semibold text-(--text)"
+                              >
+                                {ROLE_OPTIONS.map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
                             ) : (
-                              <CheckCircle2 size={13} />
+                              <span className="text-xs font-bold text-(--text)">
+                                {employee.role}
+                              </span>
                             )}
-                            {employee.status === "ACTIVE" ? "Disable" : "Enable"}
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                          </td>
+                          {manageable ? (
+                            <td className="px-4 py-3 text-right">
+                              {!isOwner ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStatusToggle(employee)}
+                                  disabled={busy}
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-(--border) px-3 py-1.5 text-xs font-semibold text-(--text) transition hover:bg-(--surface)"
+                                >
+                                  {busy ? (
+                                    <Loader2 size={13} className="animate-spin" />
+                                  ) : employee.status === "ACTIVE" ? (
+                                    <Ban size={13} />
+                                  ) : (
+                                    <CheckCircle2 size={13} />
+                                  )}
+                                  {employee.status === "ACTIVE" ? "Disable" : "Enable"}
+                                </button>
+                              ) : (
+                                <span className="text-xs text-(--muted)">—</span>
+                              )}
+                            </td>
+                          ) : null}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </section>
       </div>

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Activity } from "lucide-react";
 
+import { ThemeToggle } from "@/components/theme/theme-toggle";
+
 export function PublicNav() {
   return (
     <header className="fixed left-0 right-0 top-0 z-40 px-4 py-4 md:px-8">
@@ -13,10 +15,10 @@ export function PublicNav() {
             DEVINSIGHT
           </span>
         </Link>
-        <div className="flex items-center gap-1.5 pr-16 text-sm font-semibold md:pr-20">
+        <div className="flex items-center gap-1.5 text-sm font-semibold">
           <Link
             href="/login"
-            className="rounded-full px-4 py-2 text-(--muted) transition hover:bg-(--glass-strong) hover:text-(--text)"
+            className="rounded-full px-4 py-2 text-(--muted) transition hover:bg-(--surface-soft) hover:text-(--text)"
           >
             Login
           </Link>
@@ -26,6 +28,7 @@ export function PublicNav() {
           >
             Dashboard
           </Link>
+          <ThemeToggle className="ml-1" />
         </div>
       </nav>
     </header>

@@ -562,6 +562,46 @@ Phases (build in this order, small & verifiable, update this doc after each):
   - Follow-on: branch-filtered leaderboards (Phase D's `CommitBranch`) + a dedicated
     chart UI belong with Statistics (Phase 13).
 
+**UX fix (2026-07-09):** opening a saved report from History now syncs the generate
+form to it (`syncFormToReport` in `reports-manager.tsx` — report type, repo/project,
+employee selection from contributors, and period shown as a custom range since only
+exact dates are stored). Previously the form kept its old selection while the panel
+showed a different saved report.
+
+**UI redesign — lightweight, sidebar layout (2026-07-09):** replaced the heavy
+glassmorphism look (animated aurora orbs, backdrop-blur, gradient shadows) with a flat,
+professional design and a persistent **sidebar + header + main** shell.
+- `globals.css`: new flat token palette (solid `--surface`/`--border`, subtle
+  `--card-shadow`, indigo `--accent`; `--card-shadow`/`--accent-soft`/`--btn` tokens),
+  light+dark. Utility classes `.glass`/`.glass-soft`/`.glass-hover`/`.btn-gradient`/
+  `.field` redefined to flat (no blur) so **all pages restyle without per-page edits**.
+  Added `.nav-link`/`.nav-link-active` + `.theme-icon-*`. Removed `.aurora`/`.orb-*` +
+  the body grid overlay.
+- Shell lives in `app/dashboard/layout.tsx` (persistent) → `DashboardSidebar`
+  (vertical nav + logo + user/logout) + `DashboardTopbar` (page title + org + theme
+  toggle) + `<main>` (max-w-7xl). Mobile: sidebar becomes a drawer.
+  `DashboardChrome` is now a pass-through (`email`/`onLogout` props kept optional so the
+  page managers compile unchanged); `ChatWidget` moved into the layout.
+- Theme: `theme-provider.tsx` now exposes a `useTheme()` context (no aurora/global
+  button); `theme/theme-toggle.tsx` renders both icons with CSS visibility keyed on
+  `[data-theme]` (identical server/client HTML → no hydration mismatch). The toggle sits
+  in the dashboard header and in `PublicNav` (landing + login).
+- Verified: typecheck + lint clean; all routes 200; hydration error gone. Per-page
+  spacing/rounding can still be tightened iteratively.
+
+**UI polish round 2 (2026-07-09):**
+- Theme toggle rewritten to be hydration-safe via `useSyncExternalStore` (renders a
+  stable icon during SSR + first client render, then the real theme icon) — single
+  correct icon, no set-state-in-effect, no mismatch. Removed the `.theme-icon-*` CSS.
+- **Card lists → tables:** Employees and Repositories manager lists are now real
+  `<table>`s (Member/Status/Role/Actions; Repository/Visibility/Project/Actions) inside a
+  `.glass` container, instead of stacked cards.
+- **Tightened form density** across projects/reports/git/contributors/overview: card
+  radius `rounded-[2rem]`/`[2.25rem]` → `rounded-xl`, padding `p-6 md:p-7` → `p-5`,
+  headings `text-3xl`/`text-4xl…md:text-6xl` → `text-xl`/`text-2xl…md:text-3xl`, buttons
+  `rounded-2xl px-5 py-3.5 font-black` → `rounded-lg px-4 py-2.5 font-bold`, and the
+  shared `fieldClass` → `rounded-lg px-3.5 py-2.5 text-sm`. Typecheck + lint clean.
+
 Note (Phase A follow-up): `collectActivity`'s `DEFAULT_LOOKBACK_DAYS = 90` in
 `activity.service.ts` is still the fallback when a collect call omits a range; Phase C
 drives collection with explicit ranges, so this becomes a fallback-only default.

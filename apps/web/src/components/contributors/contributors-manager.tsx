@@ -150,12 +150,12 @@ export function ContributorsManager() {
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
       <div className="grid gap-6">
-        <section className="glass animate-rise rounded-[2rem] p-6 md:p-7">
+        <section className="glass animate-rise rounded-xl p-5">
           <p className="mb-2 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
             <UserCheck size={14} />
             Contributors
           </p>
-          <h1 className="text-3xl font-black tracking-tight text-(--text)">
+          <h1 className="text-xl font-bold tracking-tight text-(--text)">
             Map Git identities to employees
           </h1>
           <p className="mt-2 max-w-xl text-sm leading-6 text-(--muted)">
@@ -213,15 +213,15 @@ export function ContributorsManager() {
 
         <section className="animate-rise [animation-delay:60ms]">
           {loading ? (
-            <div className="glass grid place-items-center rounded-[1.75rem] p-10 text-(--muted)">
+            <div className="glass grid place-items-center rounded-xl p-10 text-(--muted)">
               <Loader2 size={20} className="animate-spin" />
             </div>
           ) : loadError ? (
-            <div className="glass rounded-[1.75rem] p-6 text-sm font-bold text-red-600 dark:text-red-400">
+            <div className="glass rounded-xl p-6 text-sm font-bold text-red-600 dark:text-red-400">
               {loadError}
             </div>
           ) : contributors.length === 0 ? (
-            <div className="glass rounded-[1.75rem] p-8 text-center text-sm font-bold text-(--muted)">
+            <div className="glass rounded-xl p-8 text-center text-sm font-bold text-(--muted)">
               No contributors discovered yet.
               {manageable ? " Use “Discover contributors” above." : ""}
             </div>
@@ -232,7 +232,7 @@ export function ContributorsManager() {
                 return (
                   <li
                     key={contributor.id}
-                    className={`glass glass-hover rounded-[1.5rem] p-5 ${
+                    className={`glass glass-hover rounded-lg p-5 ${
                       contributor.ignored ? "opacity-60" : ""
                     }`}
                   >

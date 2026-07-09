@@ -29,7 +29,7 @@ import {
 } from "@/components/dashboard/dashboard-chrome";
 
 const fieldClass =
-  "field w-full rounded-2xl px-4 py-3 font-mono text-sm text-(--text) placeholder:font-sans placeholder:font-normal";
+  "field w-full rounded-lg px-3.5 py-2.5 font-mono text-sm text-(--text) placeholder:font-sans placeholder:font-normal";
 
 function statusTone(status: GitCredential["status"]) {
   if (status === "CONNECTED") {
@@ -182,12 +182,12 @@ export function GitConnection() {
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
       <div className="mx-auto max-w-2xl">
-        <div className="glass animate-rise rounded-[2rem] p-6 md:p-8">
+        <div className="glass animate-rise rounded-xl p-5">
           <p className="mb-2 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
             <GitBranch size={14} />
             Git connection
           </p>
-          <h1 className="text-3xl font-black tracking-tight text-(--text)">
+          <h1 className="text-xl font-bold tracking-tight text-(--text)">
             GitHub access
           </h1>
           <p className="mt-3 text-sm leading-6 text-(--muted)">
@@ -355,7 +355,7 @@ export function GitConnection() {
               <button
                 type="submit"
                 disabled={connecting}
-                className="btn-gradient inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-black"
+                className="btn-gradient inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold"
               >
                 {connecting ? (
                   <Loader2 size={16} className="animate-spin" />

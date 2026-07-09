@@ -48,7 +48,7 @@ const PERIODS: { value: ReportPeriod; label: string }[] = [
 ];
 
 const fieldClass =
-  "field w-full rounded-2xl px-4 py-3 text-sm font-medium text-(--text) placeholder:font-normal";
+  "field w-full rounded-lg px-3.5 py-2.5 text-sm font-medium text-(--text) placeholder:font-normal";
 
 const reportMarkdownPlugins = [remarkGfm];
 const emptyStats: ReportStatistics = {
@@ -212,6 +212,25 @@ export function ReportsManager() {
     }
   }
 
+  // Reflect an opened history report back into the form, so the selected type,
+  // target, and period match what is shown. Reports store exact dates (not a
+  // period keyword), so the period is shown as a custom range.
+  function syncFormToReport(detail: ReportDetail) {
+    setReportType(detail.reportType);
+    setRepositoryId(detail.repositoryId ?? "");
+    setProjectId(detail.projectId ?? "");
+    setSelectedEmployeeIds(
+      new Set(
+        detail.contributors
+          .map((contributor) => contributor.userId)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+    setPeriod("custom");
+    setCustomFrom(detail.period.from.slice(0, 10));
+    setCustomTo(detail.period.to.slice(0, 10));
+  }
+
   async function handleOpenSavedReport(reportId: string) {
     setSelectedReportId(reportId);
     setSelectedReport(null);
@@ -220,7 +239,9 @@ export function ReportsManager() {
     setDetailError(null);
 
     try {
-      setSelectedReport(await getReport(reportId));
+      const detail = await getReport(reportId);
+      setSelectedReport(detail);
+      syncFormToReport(detail);
     } catch (caught) {
       setDetailError(getApiErrorMessage(caught));
     } finally {
@@ -261,13 +282,13 @@ export function ReportsManager() {
     <DashboardChrome email={session.user.email} onLogout={logout}>
       <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
         <div className="grid gap-5">
-          <form onSubmit={handleSubmit} className="glass animate-rise grid gap-5 rounded-[2rem] p-6 md:p-7">
+          <form onSubmit={handleSubmit} className="glass animate-rise grid gap-4 rounded-xl p-5">
             <div>
               <p className="mb-2 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
                 <Sparkles size={14} />
                 Reports
               </p>
-              <h1 className="text-3xl font-black tracking-tight text-(--text)">
+              <h1 className="text-xl font-bold tracking-tight text-(--text)">
                 Generate a report
               </h1>
               <p className="mt-2 text-sm leading-6 text-(--muted)">
@@ -433,7 +454,7 @@ export function ReportsManager() {
             <button
               type="submit"
               disabled={generating || !canSubmit}
-              className="btn-gradient inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-black"
+              className="btn-gradient inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold"
             >
               {generating ? (
                 <Loader2 size={16} className="animate-spin" />
@@ -444,7 +465,7 @@ export function ReportsManager() {
             </button>
           </form>
 
-          <section className="glass animate-rise grid gap-4 rounded-[2rem] p-6 [animation-delay:70ms] md:p-7">
+          <section className="glass animate-rise grid gap-4 rounded-xl p-6 [animation-delay:70ms] md:p-7">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="mb-1 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] text-(--accent)">
@@ -501,19 +522,19 @@ export function ReportsManager() {
 
         <section className="animate-rise [animation-delay:80ms] lg:sticky lg:top-6">
           {detailLoading ? (
-            <div className="glass-soft grid min-h-64 place-items-center rounded-[2rem] p-12 text-(--muted)">
+            <div className="glass-soft grid min-h-64 place-items-center rounded-xl p-10 text-(--muted)">
               <Loader2 size={22} className="animate-spin" />
             </div>
           ) : detailError ? (
-            <div className="glass rounded-[2rem] p-6 text-sm font-bold text-red-600 dark:text-red-400">
+            <div className="glass rounded-xl p-6 text-sm font-bold text-red-600 dark:text-red-400">
               {detailError}
             </div>
           ) : !renderedReport ? (
-            <div className="glass-soft grid min-h-64 place-items-center rounded-[2rem] p-12 text-center text-sm font-bold text-(--muted)">
+            <div className="glass-soft grid min-h-64 place-items-center rounded-xl p-10 text-center text-sm font-bold text-(--muted)">
               Your generated report will appear here.
             </div>
           ) : (
-            <div className="glass rounded-[2rem] p-6 md:p-7">
+            <div className="glass rounded-xl p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-xl font-black tracking-tight text-(--text)">
                   {renderedReport.title}

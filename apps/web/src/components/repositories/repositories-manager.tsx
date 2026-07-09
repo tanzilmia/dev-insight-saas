@@ -265,18 +265,18 @@ export function RepositoriesManager() {
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
       <div className="grid gap-6">
-        <section className="glass animate-rise flex flex-wrap items-center justify-between gap-4 rounded-[2rem] p-6 md:p-7">
+        <section className="glass animate-rise flex flex-wrap items-center justify-between gap-4 rounded-xl p-5">
           <div>
-            <p className="mb-2 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
+            <p className="mb-1.5 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-(--accent)">
               <FolderGit2 size={14} />
               Repositories
             </p>
-            <h1 className="text-3xl font-black tracking-tight text-(--text)">
+            <h1 className="text-xl font-bold tracking-tight text-(--text)">
               Tracked repositories
             </h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-(--muted)">
-              Sync repositories from GitHub and choose which ones DevInsight
-              should track for reports.
+            <p className="mt-1.5 max-w-xl text-sm leading-6 text-(--muted)">
+              Sync repositories from GitHub and choose which ones DevInsight should track
+              for reports.
             </p>
           </div>
           {manageable ? (
@@ -284,7 +284,7 @@ export function RepositoriesManager() {
               type="button"
               onClick={handleSync}
               disabled={syncing}
-              className="btn-gradient inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-black"
+              className="btn-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold"
             >
               {syncing ? (
                 <Loader2 size={16} className="animate-spin" />
@@ -448,97 +448,117 @@ export function RepositoriesManager() {
                   No repositories match “{trackedQuery}”.
                 </p>
               ) : (
-                <ul className="grid gap-3">
-                  {filteredTracked.map((repo) => {
-                const busy = busyId === repo.id;
-                return (
-                  <li
-                    key={repo.id}
-                    className="glass glass-hover rounded-[1.5rem] p-5"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <a
-                          href={repo.remoteUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="truncate text-base font-black text-(--text) hover:text-(--accent)"
-                        >
-                          {repo.fullName}
-                        </a>
-                        <p className="mt-1 text-xs font-bold text-(--muted)">
-                          {repo.commitCount} commit{repo.commitCount === 1 ? "" : "s"}
-                          {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ""}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <PrivacyBadge isPrivate={repo.isPrivate} />
-                        {manageable ? (
-                          <select
-                            value={repo.project?.id ?? ""}
-                            disabled={busy}
-                            onChange={(event) =>
-                              handleAssignProject(repo, event.target.value)
-                            }
-                            className="field rounded-full px-3 py-1.5 text-xs font-bold text-(--text)"
-                          >
-                            <option value="">No project</option>
-                            {projects.map((project) => (
-                              <option key={project.id} value={project.id}>
-                                {project.name}
-                              </option>
-                            ))}
-                          </select>
-                        ) : repo.project ? (
-                          <span className="glass-soft inline-flex items-center rounded-full px-3 py-1.5 text-xs font-black text-(--text)">
-                            {repo.project.name}
-                          </span>
-                        ) : null}
-                        {manageable ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleCollect(repo)}
-                              disabled={busy}
-                              className="glass glass-hover inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-(--text)"
+                <div className="glass overflow-hidden rounded-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-(--border) text-left text-[11px] uppercase tracking-wide text-(--muted)">
+                          <th className="px-4 py-2.5 font-semibold">Repository</th>
+                          <th className="px-4 py-2.5 font-semibold">Visibility</th>
+                          <th className="px-4 py-2.5 font-semibold">Project</th>
+                          {manageable ? (
+                            <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
+                          ) : null}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredTracked.map((repo) => {
+                          const busy = busyId === repo.id;
+                          return (
+                            <tr
+                              key={repo.id}
+                              className="border-b border-(--border) transition last:border-0 hover:bg-(--surface-soft)"
                             >
-                              {busy ? (
-                                <Loader2 size={13} className="animate-spin" />
-                              ) : (
-                                <History size={13} />
-                              )}
-                              Collect
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleResync(repo)}
-                              disabled={busy}
-                              aria-label="Resync"
-                              className="glass glass-hover grid h-8 w-8 place-items-center rounded-full text-(--text)"
-                            >
-                              {busy ? (
-                                <Loader2 size={14} className="animate-spin" />
-                              ) : (
-                                <RefreshCw size={14} />
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleUntrack(repo)}
-                              disabled={busy}
-                              aria-label="Untrack"
-                              className="grid h-8 w-8 place-items-center rounded-full text-(--muted) transition hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-400"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-                  </li>
-                );
-                  })}
-                </ul>
+                              <td className="px-4 py-3">
+                                <a
+                                  href={repo.remoteUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-semibold text-(--text) hover:text-(--accent)"
+                                >
+                                  {repo.fullName}
+                                </a>
+                                <p className="mt-0.5 text-xs text-(--muted)">
+                                  {repo.commitCount} commit{repo.commitCount === 1 ? "" : "s"}
+                                  {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ""}
+                                </p>
+                              </td>
+                              <td className="px-4 py-3">
+                                <PrivacyBadge isPrivate={repo.isPrivate} />
+                              </td>
+                              <td className="px-4 py-3">
+                                {manageable ? (
+                                  <select
+                                    value={repo.project?.id ?? ""}
+                                    disabled={busy}
+                                    onChange={(event) =>
+                                      handleAssignProject(repo, event.target.value)
+                                    }
+                                    className="field rounded-md px-2.5 py-1.5 text-xs font-semibold text-(--text)"
+                                  >
+                                    <option value="">No project</option>
+                                    {projects.map((project) => (
+                                      <option key={project.id} value={project.id}>
+                                        {project.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : repo.project ? (
+                                  <span className="text-xs font-semibold text-(--text)">
+                                    {repo.project.name}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-(--muted)">—</span>
+                                )}
+                              </td>
+                              {manageable ? (
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCollect(repo)}
+                                      disabled={busy}
+                                      className="inline-flex items-center gap-1.5 rounded-md border border-(--border) px-3 py-1.5 text-xs font-semibold text-(--text) transition hover:bg-(--surface)"
+                                    >
+                                      {busy ? (
+                                        <Loader2 size={13} className="animate-spin" />
+                                      ) : (
+                                        <History size={13} />
+                                      )}
+                                      Collect
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResync(repo)}
+                                      disabled={busy}
+                                      aria-label="Resync"
+                                      className="grid h-8 w-8 place-items-center rounded-md border border-(--border) text-(--text) transition hover:bg-(--surface)"
+                                    >
+                                      {busy ? (
+                                        <Loader2 size={14} className="animate-spin" />
+                                      ) : (
+                                        <RefreshCw size={14} />
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUntrack(repo)}
+                                      disabled={busy}
+                                      aria-label="Untrack"
+                                      className="grid h-8 w-8 place-items-center rounded-md text-(--muted) transition hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                </td>
+                              ) : null}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
             </>
           )}
