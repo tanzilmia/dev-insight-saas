@@ -15,6 +15,7 @@ import { organizationsRouter } from "./modules/organizations/organizations.contr
 import { projectsRouter } from "./modules/projects/projects.controller.js";
 import { reportsRouter } from "./modules/reports/reports.controller.js";
 import { repositoriesRouter } from "./modules/repositories/repositories.controller.js";
+import { schedulesRouter } from "./modules/schedules/schedules.controller.js";
 import { statisticsRouter } from "./modules/statistics/statistics.controller.js";
 
 export function createApp() {
@@ -46,6 +47,7 @@ export function createApp() {
   app.use("/api/openclaw", openclawRouter);
   app.use("/api/reports", reportsRouter);
   app.use("/api/statistics", statisticsRouter);
+  app.use("/api/schedules", schedulesRouter);
   app.use(errorHandler);
 
   return app;

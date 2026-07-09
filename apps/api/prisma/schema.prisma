@@ -47,6 +47,12 @@ enum CredentialStatus {
   DISCONNECTED
 }
 
+enum ScheduleCadence {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -61,6 +67,7 @@ model User {
   gitCredentials     GitCredential[]      @relation("CredentialCreator")
   gitMappings        EmployeeGitMapping[]
   reportsRequested   Report[]             @relation("ReportsRequested")
+  reportSchedules    ReportSchedule[]     @relation("ScheduleCreator")
   requestLogs        RequestLog[]
   auditLogs          AuditLog[]           @relation("AuditActor")
 
@@ -81,6 +88,7 @@ model Organization {
   contributorIdentities ContributorIdentity[]
   gitMappings           EmployeeGitMapping[]
   reports               Report[]
+  reportSchedules       ReportSchedule[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
 }
@@ -365,6 +373,38 @@ model ReportContributor {
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   @@index([reportId])
+}
+
+/**
+ * A recurring report (Phase 14a). A background scheduler runs due schedules,
+ * generates the report through OpenClaw orchestration, and records the result.
+ */
+model ReportSchedule {
+  id             String          @id @default(cuid())
+  organizationId String
+  createdById    String?
+  name           String
+  reportType     String
+  repositoryId   String?
+  projectId      String?
+  employeeIds    String[]
+  period         String
+  cadence        ScheduleCadence
+  customPrompt   String?
+  enabled        Boolean         @default(true)
+  nextRunAt      DateTime
+  lastRunAt      DateTime?
+  lastReportId   String?
+  lastStatus     String?
+  lastError      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("ScheduleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([enabled, nextRunAt])
 }
 
 model RequestLog {

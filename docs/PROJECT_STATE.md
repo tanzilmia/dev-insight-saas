@@ -454,6 +454,22 @@ operator has done that, the **next assistant task is the DevInsight tool plugin 
   (single-hue horizontal bars), `AreaChart` (SVG area+line, hover crosshair/tooltip) — all
   single-series indigo (`--accent`), text in text tokens, recessive grid, per dataviz-skill
   guidance. `getStatisticsOverview` + types in web `api.ts`. Typecheck + lint clean.
+- **Scheduled reports — ✅ DONE (Phase 14a, 2026-07-09).** `ReportSchedule` model + enum
+  `ScheduleCadence` (DAILY/WEEKLY/MONTHLY) (migration `report_schedules`). Backend module
+  `apps/api/src/modules/schedules/`: CRUD + `runScheduleNow` + `runDueSchedules` (service),
+  `computeNextRun` per cadence, and an **in-process scheduler** (`scheduler.ts`,
+  `setInterval` every 60s, `startScheduler()` called from `main.ts` after listen). Due
+  schedules run `orchestrateReport` (so they auto-collect + cache via the smart engine),
+  record `lastRunAt`/`lastReportId`/`lastStatus`/`lastError`, and advance `nextRunAt` even
+  on failure (no tight retry loop). Routes `GET/POST /api/schedules`, `PATCH/DELETE
+  /api/schedules/:id`, `POST /api/schedules/:id/run` (JWT; create/update/delete/run gated to
+  MANAGER_ROLES). Frontend: new **Schedules** page + nav item (`CalendarClock`) +
+  `schedules-manager.tsx` (create form: name/type/target/period/cadence + a schedules table
+  with Run-now / Pause-resume / Delete, next/last-run status, link to the last report).
+  `main.ts` had to be edited to start the scheduler. Note: single-instance scheduler — a
+  multi-instance deploy needs a shared lock/queue (Phase E). Typecheck + lint clean.
+  **Remaining in Phase 14:** 14b share/export (shareable link + Markdown/PDF), 14c channels
+  (Telegram/Discord delivery).
 - **Sharing**: `ReportShare` model + share action + channel placeholders.
 - **Tests**: set up Vitest + Supertest first (none installed). Unit-test
   `token-cipher`, permission helpers, commit classification; integration-test the

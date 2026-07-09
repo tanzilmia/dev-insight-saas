@@ -628,6 +628,82 @@ export async function getStatisticsOverview(
   return response.data.overview;
 }
 
+/* ------------------------------------------------------------------ */
+/* Scheduled reports (Phase 14a)                                      */
+/* ------------------------------------------------------------------ */
+
+export type ScheduleCadence = "DAILY" | "WEEKLY" | "MONTHLY";
+
+export type ReportSchedule = {
+  id: string;
+  name: string;
+  reportType: ReportType;
+  repositoryId: string | null;
+  projectId: string | null;
+  employeeIds: string[];
+  period: StatPeriod;
+  cadence: ScheduleCadence;
+  customPrompt: string | null;
+  enabled: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastReportId: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  createdAt: string;
+};
+
+export type CreateScheduleInput = {
+  organizationId: string;
+  name: string;
+  reportType: ReportType;
+  repositoryId?: string;
+  projectId?: string;
+  employeeIds?: string[];
+  period: StatPeriod;
+  cadence: ScheduleCadence;
+  customPrompt?: string;
+};
+
+export async function listSchedules(organizationId: string) {
+  const response = await api.get<{ schedules: ReportSchedule[] }>("/api/schedules", {
+    params: { organizationId }
+  });
+  return response.data.schedules;
+}
+
+export async function createSchedule(input: CreateScheduleInput) {
+  const response = await api.post<{ schedule: ReportSchedule }>("/api/schedules", input);
+  return response.data.schedule;
+}
+
+export async function updateSchedule(
+  id: string,
+  patch: {
+    organizationId: string;
+    name?: string;
+    period?: StatPeriod;
+    cadence?: ScheduleCadence;
+    enabled?: boolean;
+    customPrompt?: string | null;
+  }
+) {
+  const response = await api.patch<{ schedule: ReportSchedule }>(`/api/schedules/${id}`, patch);
+  return response.data.schedule;
+}
+
+export async function deleteSchedule(id: string) {
+  await api.delete(`/api/schedules/${id}`);
+}
+
+export async function runScheduleNow(id: string) {
+  const response = await api.post<{ reportId: string; status: string }>(
+    `/api/schedules/${id}/run`,
+    {}
+  );
+  return response.data;
+}
+
 export function getApiErrorMessage(error: unknown) {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { error?: { message?: string } } } })
