@@ -23,6 +23,13 @@ export type GitContributor = {
   contributions: number;
 };
 
+/** A branch as returned by any provider. */
+export type GitBranch = {
+  name: string;
+  headSha: string;
+  isProtected: boolean;
+};
+
 /** A commit's metadata (without per-file stats). */
 export type GitCommit = {
   sha: string;
@@ -70,6 +77,8 @@ export interface GitProvider {
    * they have committed. Returned in the same shape with contributions = 0.
    */
   listCollaborators(token: string, owner: string, repo: string): Promise<GitContributor[]>;
+  /** All branches of a repository (name + head sha). */
+  listBranches(token: string, owner: string, repo: string): Promise<GitBranch[]>;
   /** Commits in a date range on a branch (metadata only). */
   listCommits(
     token: string,

@@ -33,6 +33,7 @@ type CreateReportInput = {
   statistics: ReportStatistics;
   status: "GENERATED" | "PARTIAL";
   generatedBy: "llm" | "template";
+  dataFingerprint?: string;
   contributors?: CreateReportContributorInput[];
 };
 
@@ -96,6 +97,7 @@ export async function createReport(input: CreateReportInput) {
         statisticsJson,
         status: input.status,
         generatedBy: input.generatedBy,
+        dataFingerprint: input.dataFingerprint ?? null,
         contributors: input.contributors?.length
           ? {
               create: input.contributors.map((contributor) => ({
@@ -129,6 +131,60 @@ export async function createReport(input: CreateReportInput) {
   });
 
   return toDetail(report);
+}
+
+function startOfDay(date: Date) {
+  const day = new Date(date);
+  day.setHours(0, 0, 0, 0);
+  return day;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+type CacheLookupInput = {
+  organizationId: string;
+  reportType: ReportType;
+  repositoryId?: string;
+  projectId?: string;
+  targetLabel: string;
+  periodStart: Date;
+  periodEnd: Date;
+  dataFingerprint: string;
+};
+
+/**
+ * Report cache (Phase C): returns a previously LLM-generated report that can be
+ * safely reused for an identical request — same scope, same day-bucketed period,
+ * and identical data fingerprint — so the LLM is not re-run. Day-bucketing lets a
+ * relative window (e.g. "last 30 days") hit the cache within the same day, while
+ * the fingerprint forces a fresh report as soon as new commits are collected.
+ */
+export async function findCachedReport(input: CacheLookupInput) {
+  const startDay = startOfDay(input.periodStart);
+  const endDay = startOfDay(input.periodEnd);
+
+  const report = await prisma.report.findFirst({
+    where: {
+      organizationId: input.organizationId,
+      reportType: input.reportType,
+      repositoryId: input.repositoryId ?? null,
+      projectId: input.projectId ?? null,
+      targetLabel: input.targetLabel,
+      dataFingerprint: input.dataFingerprint,
+      generatedBy: "llm",
+      status: "GENERATED",
+      periodStart: { gte: startDay, lt: addDays(startDay, 1) },
+      periodEnd: { gte: endDay, lt: addDays(endDay, 1) }
+    },
+    orderBy: { createdAt: "desc" },
+    include: { contributors: true }
+  });
+
+  return report ? toDetail(report) : null;
 }
 
 export async function listReports(

@@ -41,6 +41,9 @@ const PERIODS: { value: ReportPeriod; label: string }[] = [
   { value: "today", label: "Today" },
   { value: "last_7_days", label: "Last 7 days" },
   { value: "last_30_days", label: "Last 30 days" },
+  { value: "last_90_days", label: "Last 90 days" },
+  { value: "this_month", label: "This month" },
+  { value: "last_month", label: "Last month" },
   { value: "custom", label: "Custom range" }
 ];
 

@@ -76,7 +76,18 @@ export function resolvePeriod(
     return { from, to: now };
   }
 
-  const days = period === "last_30_days" ? 30 : 7;
+  if (period === "this_month") {
+    return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: now };
+  }
+
+  if (period === "last_month") {
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    // `to` is the last millisecond of the previous month.
+    return { from: lastMonthStart, to: new Date(thisMonthStart.getTime() - 1) };
+  }
+
+  const days = period === "last_90_days" ? 90 : period === "last_30_days" ? 30 : 7;
   return { from: new Date(now.getTime() - days * DAY_MS), to: now };
 }
 

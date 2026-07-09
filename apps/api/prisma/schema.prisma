@@ -179,6 +179,8 @@ model Repository {
   credential   GitCredential         @relation(fields: [credentialId], references: [id], onDelete: Cascade)
   contributors ContributorIdentity[]
   commits      Commit[]
+  coverage     RepositoryCoverage[]
+  branches     Branch[]
 
   @@unique([organizationId, provider, externalId])
   @@index([organizationId])
@@ -241,8 +243,9 @@ model Commit {
   changedFilesCount Int      @default(0)
   createdAt         DateTime @default(now())
 
-  repository   Repository    @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  repository   Repository     @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   changedFiles ChangedFile[]
+  branches     CommitBranch[]
 
   @@unique([repositoryId, sha])
   @@index([repositoryId, committedAt])
@@ -263,6 +266,67 @@ model ChangedFile {
   @@index([commitId])
 }
 
+/**
+ * Coverage ledger (Phase B): records which [rangeStart, rangeEnd] windows of a
+ * repository's history have already been collected, per branch. Lets the report
+ * engine (Phase C) decide whether a requested range is in the DB (serve locally)
+ * or must be fetched from Git (collect only the missing sub-ranges). Intervals
+ * for a (repository, branch) are kept merged/non-overlapping.
+ */
+model RepositoryCoverage {
+  id           String   @id @default(cuid())
+  repositoryId String
+  branch       String
+  rangeStart   DateTime
+  rangeEnd     DateTime
+  commitCount  Int      @default(0)
+  collectedAt  DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId, branch])
+}
+
+/**
+ * A branch of a repository (Phase D). Multi-branch collection lets reports show
+ * in-progress (unmerged) work, not just what has landed on the default branch.
+ */
+model Branch {
+  id           String   @id @default(cuid())
+  repositoryId String
+  name         String
+  isDefault    Boolean  @default(false)
+  headSha      String?
+  isProtected  Boolean  @default(false)
+  lastSyncedAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  repository Repository     @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  commits    CommitBranch[]
+
+  @@unique([repositoryId, name])
+  @@index([repositoryId])
+}
+
+/**
+ * Join between a commit and the branches it is reachable from. A commit's SHA is
+ * stored once (deduped) in Commit; this records every branch it appears on, so a
+ * commit merged into several branches is not double-counted.
+ */
+model CommitBranch {
+  commitId String
+  branchId String
+
+  commit Commit @relation(fields: [commitId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([commitId, branchId])
+  @@index([branchId])
+}
+
 model Report {
   id              String   @id @default(cuid())
   organizationId  String
@@ -278,6 +342,7 @@ model Report {
   statisticsJson  Json?
   status          String
   generatedBy     String?
+  dataFingerprint String?
   createdAt       DateTime @default(now())
 
   organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -286,6 +351,7 @@ model Report {
 
   @@index([organizationId, createdAt])
   @@index([organizationId, reportType])
+  @@index([organizationId, reportType, dataFingerprint])
 }
 
 model ReportContributor {

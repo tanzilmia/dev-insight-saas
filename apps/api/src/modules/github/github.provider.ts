@@ -2,6 +2,7 @@ import { AppError } from "../../common/errors/app-error.js";
 import { env } from "../../config/env.js";
 import type {
   CredentialValidationResult,
+  GitBranch,
   GitCommit,
   GitCommitDetail,
   GitContributor,
@@ -34,6 +35,12 @@ type GitHubCollaborator = {
   id: number;
   login: string;
   avatar_url?: string;
+};
+
+type GitHubBranch = {
+  name: string;
+  commit: { sha: string };
+  protected?: boolean;
 };
 
 type GitHubCommit = {
@@ -274,6 +281,55 @@ export class GitHubProvider implements GitProvider {
     }
 
     return collaborators;
+  }
+
+  async listBranches(token: string, owner: string, repo: string): Promise<GitBranch[]> {
+    const branches: GitBranch[] = [];
+
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const response = await this.request(
+        `/repos/${owner}/${repo}/branches?per_page=${PER_PAGE}&page=${page}`,
+        token
+      );
+
+      if (response.status === 401 || response.status === 403) {
+        throw new AppError(
+          400,
+          "GitHub rejected the stored token. Reconnect the credential.",
+          "INVALID_CREDENTIAL"
+        );
+      }
+
+      if (response.status === 404) {
+        throw new AppError(404, "Repository not found on GitHub", "REPO_NOT_ON_PROVIDER");
+      }
+
+      if (!response.ok) {
+        throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+      }
+
+      const items = (await response.json()) as GitHubBranch[];
+
+      for (const item of items) {
+        branches.push({
+          name: item.name,
+          headSha: item.commit.sha,
+          isProtected: item.protected ?? false
+        });
+      }
+
+      if (items.length < PER_PAGE) {
+        return branches;
+      }
+
+      if (page === MAX_PAGES) {
+        console.warn(
+          `GitHubProvider.listBranches hit the ${MAX_PAGES}-page cap; some branches may be omitted.`
+        );
+      }
+    }
+
+    return branches;
   }
 
   async listCommits(

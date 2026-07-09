@@ -308,9 +308,10 @@ export type TrackedRepository = RepositoryInput & {
 
 export type CollectActivityResult = {
   range: { since: string; until: string };
-  totalInRange: number;
   newCollected: number;
-  detailCapped: number;
+  branchesChecked: number;
+  branchesCollected: number;
+  rangesCollected: number;
 };
 
 export async function collectActivity(repositoryId: string) {
@@ -454,7 +455,14 @@ export async function ignoreContributor(contributorId: string, ignored: boolean)
 /* ------------------------------------------------------------------ */
 
 export type ReportType = "repository" | "project" | "employee" | "team";
-export type ReportPeriod = "today" | "last_7_days" | "last_30_days" | "custom";
+export type ReportPeriod =
+  | "today"
+  | "last_7_days"
+  | "last_30_days"
+  | "last_90_days"
+  | "this_month"
+  | "last_month"
+  | "custom";
 export type ReportStatus = "GENERATED" | "PARTIAL";
 
 export type ReportStatistics = {

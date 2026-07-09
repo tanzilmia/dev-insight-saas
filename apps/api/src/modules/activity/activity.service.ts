@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Branch, Prisma, Repository } from "@prisma/client";
 
 import { prisma } from "../../config/database.js";
 import { AppError } from "../../common/errors/app-error.js";
@@ -15,14 +15,85 @@ import {
   moduleFromPath
 } from "../report-engine/commit-classifier.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
+import { mergeIntervals, subtractCovered, type Interval } from "./coverage.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_DAYS = 90;
 // Detail (stats + files) is one API call per commit — bound it per collection.
 const MAX_DETAIL_COMMITS = 150;
 const MAX_FILES_PER_COMMIT = 300;
+// Multi-branch collection is one listCommits call per branch — bound it. The
+// default branch is always collected first.
+const MAX_BRANCHES = 25;
 
 type Range = { since?: string; until?: string };
+
+/**
+ * Records a fully-collected [since, until] window into the coverage ledger,
+ * merging it with any existing intervals for the same (repository, branch) so
+ * the ledger stays compact and non-overlapping. Only call this once the range
+ * is fully collected (not detail-capped), or the ledger would claim coverage
+ * for commits that were never fetched.
+ */
+export async function recordCoverage(
+  repositoryId: string,
+  branch: string,
+  since: Date,
+  until: Date
+) {
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.repositoryCoverage.findMany({
+      where: { repositoryId, branch },
+      select: { rangeStart: true, rangeEnd: true }
+    });
+
+    const merged = mergeIntervals([
+      ...existing.map((row) => ({ start: row.rangeStart, end: row.rangeEnd })),
+      { start: since, end: until }
+    ]);
+
+    await tx.repositoryCoverage.deleteMany({ where: { repositoryId, branch } });
+
+    for (const interval of merged) {
+      const commitCount = await tx.commit.count({
+        where: { repositoryId, committedAt: { gte: interval.start, lte: interval.end } }
+      });
+      await tx.repositoryCoverage.create({
+        data: {
+          repositoryId,
+          branch,
+          rangeStart: interval.start,
+          rangeEnd: interval.end,
+          commitCount
+        }
+      });
+    }
+  });
+}
+
+/**
+ * Returns the sub-ranges of [from, until] that are NOT yet in the coverage
+ * ledger for a (repository, branch) — i.e. what still has to be fetched from
+ * Git. An empty array means the whole window is already collected. Used by the
+ * smart report engine (Phase C).
+ */
+export async function getMissingRanges(
+  repositoryId: string,
+  branch: string,
+  from: Date,
+  until: Date
+): Promise<Interval[]> {
+  const covered = await prisma.repositoryCoverage.findMany({
+    where: { repositoryId, branch },
+    select: { rangeStart: true, rangeEnd: true }
+  });
+
+  return subtractCovered(
+    from,
+    until,
+    covered.map((row) => ({ start: row.rangeStart, end: row.rangeEnd }))
+  );
+}
 
 async function loadRepository(repositoryId: string) {
   const repository = await prisma.repository.findUnique({ where: { id: repositoryId } });
@@ -43,9 +114,9 @@ function resolveRange(range: Range) {
 }
 
 /**
- * Fetches commits (and per-commit stats/files) from the provider for a date
- * range and stores any that are new. Existing commits are skipped so repeated
- * collection is cheap.
+ * Manual collection endpoint: fetches commits across all branches of a
+ * repository for a date range and stores any that are new. Existing commits are
+ * skipped so repeated collection is cheap.
  */
 export async function collectActivity(actorId: string, repositoryId: string, range: Range) {
   const repository = await loadRepository(repositoryId);
@@ -63,18 +134,104 @@ export async function collectActivity(actorId: string, repositoryId: string, ran
   const token = decryptToken(credential.encryptedToken);
   const provider = getGitProvider(credential.provider);
 
+  const result = await ingestRepository(repository, token, provider, since, until);
+
+  await prisma.auditLog.create({
+    data: {
+      organizationId: repository.organizationId,
+      actorId,
+      action: "activity.collect",
+      entityType: "Repository",
+      entityId: repositoryId,
+      metadataJson: {
+        collected: result.newCollected,
+        branchesChecked: result.branchesChecked,
+        rangesCollected: result.rangesCollected
+      }
+    }
+  });
+
+  return { range: { since, until }, ...result };
+}
+
+/**
+ * Lists the repository's branches from the provider and upserts a {@link Branch}
+ * row for each (default branch first, capped at {@link MAX_BRANCHES}). Returns
+ * the stored rows so collection can key coverage + commit links by branch.
+ */
+async function syncBranches(
+  repository: Repository,
+  token: string,
+  provider: ReturnType<typeof getGitProvider>
+): Promise<Branch[]> {
+  const remote = await provider.listBranches(token, repository.owner, repository.name);
+
+  // Default branch first so it is always within the cap.
+  const ordered = [...remote]
+    .sort((a, b) => {
+      const aDefault = a.name === repository.defaultBranch ? 0 : 1;
+      const bDefault = b.name === repository.defaultBranch ? 0 : 1;
+      return aDefault - bDefault;
+    })
+    .slice(0, MAX_BRANCHES);
+
+  const rows: Branch[] = [];
+  for (const branch of ordered) {
+    const isDefault = branch.name === repository.defaultBranch;
+    const row = await prisma.branch.upsert({
+      where: { repositoryId_name: { repositoryId: repository.id, name: branch.name } },
+      create: {
+        repositoryId: repository.id,
+        name: branch.name,
+        isDefault,
+        headSha: branch.headSha,
+        isProtected: branch.isProtected
+      },
+      update: {
+        isDefault,
+        headSha: branch.headSha,
+        isProtected: branch.isProtected,
+        lastSyncedAt: new Date()
+      }
+    });
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+/**
+ * Core ingestion for a single branch + window: lists the branch's commits,
+ * stores new ones (with per-commit stats/files), links every stored commit to
+ * the branch via CommitBranch (a shared commit is deduped but linked to each
+ * branch), and records per-branch coverage when the window was fully collected.
+ * Does NO access checks — callers gate access.
+ */
+async function ingestBranchRange(
+  repository: Repository,
+  branch: Branch,
+  token: string,
+  provider: ReturnType<typeof getGitProvider>,
+  since: Date,
+  until: Date
+) {
   const commits = await provider.listCommits(token, repository.owner, repository.name, {
     since: since.toISOString(),
     until: until.toISOString(),
-    branch: repository.defaultBranch ?? undefined
+    branch: branch.name
   });
 
+  if (!commits.length) {
+    await recordCoverage(repository.id, branch.name, since, until);
+    return { newCollected: 0, detailCapped: false };
+  }
+
   const existing = await prisma.commit.findMany({
-    where: { repositoryId, sha: { in: commits.map((commit) => commit.sha) } },
-    select: { sha: true }
+    where: { repositoryId: repository.id, sha: { in: commits.map((commit) => commit.sha) } },
+    select: { id: true, sha: true }
   });
-  const existingShas = new Set(existing.map((commit) => commit.sha));
-  const newCommits = commits.filter((commit) => !existingShas.has(commit.sha));
+  const idBySha = new Map(existing.map((commit) => [commit.sha, commit.id]));
+  const newCommits = commits.filter((commit) => !idBySha.has(commit.sha));
   const toCollect = newCommits.slice(0, MAX_DETAIL_COMMITS);
 
   let collected = 0;
@@ -86,10 +243,10 @@ export async function collectActivity(actorId: string, repositoryId: string, ran
       commit.sha
     );
 
-    await prisma.$transaction(async (tx) => {
+    const createdId = await prisma.$transaction(async (tx) => {
       const created = await tx.commit.create({
         data: {
-          repositoryId,
+          repositoryId: repository.id,
           sha: commit.sha,
           message: commit.message,
           authorName: commit.authorName,
@@ -114,28 +271,169 @@ export async function collectActivity(actorId: string, repositoryId: string, ran
           }))
         });
       }
+
+      return created.id;
     });
 
+    idBySha.set(commit.sha, createdId);
     collected += 1;
   }
 
-  await prisma.auditLog.create({
-    data: {
-      organizationId: repository.organizationId,
-      actorId,
-      action: "activity.collect",
-      entityType: "Repository",
-      entityId: repositoryId,
-      metadataJson: { collected, totalInRange: commits.length }
-    }
+  // Link every stored commit in this window to the branch (idempotent).
+  const links = commits
+    .map((commit) => idBySha.get(commit.sha))
+    .filter((commitId): commitId is string => Boolean(commitId))
+    .map((commitId) => ({ commitId, branchId: branch.id }));
+  if (links.length) {
+    await prisma.commitBranch.createMany({ data: links, skipDuplicates: true });
+  }
+
+  const detailCapped = newCommits.length > MAX_DETAIL_COMMITS;
+  // Only mark the window covered when it was fully collected — a capped run left
+  // commits unfetched, so the range must stay "missing" for a later pass.
+  if (!detailCapped) {
+    await recordCoverage(repository.id, branch.name, since, until);
+  }
+
+  return { newCollected: collected, detailCapped };
+}
+
+/**
+ * Collects a repository across all (capped) branches for a window. Fast-paths to
+ * zero Git calls when every already-known branch fully covers the window (so a
+ * repeat request for a fixed past range does nothing); otherwise refreshes the
+ * branch list (catching new branches) and fetches only each branch's missing
+ * sub-ranges.
+ */
+async function ingestRepository(
+  repository: Repository,
+  token: string,
+  provider: ReturnType<typeof getGitProvider>,
+  since: Date,
+  until: Date
+) {
+  const known = await prisma.branch.findMany({
+    where: { repositoryId: repository.id },
+    select: { name: true }
   });
 
-  return {
-    range: { since, until },
-    totalInRange: commits.length,
-    newCollected: collected,
-    detailCapped: Math.max(0, newCommits.length - MAX_DETAIL_COMMITS)
-  };
+  if (known.length) {
+    let allCovered = true;
+    for (const branch of known) {
+      const missing = await getMissingRanges(repository.id, branch.name, since, until);
+      if (missing.length) {
+        allCovered = false;
+        break;
+      }
+    }
+    if (allCovered) {
+      return { branchesChecked: known.length, branchesCollected: 0, rangesCollected: 0, newCollected: 0 };
+    }
+  }
+
+  const branches = await syncBranches(repository, token, provider);
+  let branchesCollected = 0;
+  let rangesCollected = 0;
+  let newCollected = 0;
+
+  for (const branch of branches) {
+    const missing = await getMissingRanges(repository.id, branch.name, since, until);
+    if (!missing.length) {
+      continue;
+    }
+    for (const gap of missing) {
+      const result = await ingestBranchRange(repository, branch, token, provider, gap.start, gap.end);
+      rangesCollected += 1;
+      newCollected += result.newCollected;
+    }
+    branchesCollected += 1;
+  }
+
+  return { branchesChecked: branches.length, branchesCollected, rangesCollected, newCollected };
+}
+
+export type CollectScope = {
+  organizationId: string;
+  repositoryId?: string;
+  projectId?: string;
+  employeeIds?: string[];
+};
+
+/** Resolves the repositories a report scope touches, so we know what to collect. */
+async function resolveScopeRepositories(scope: CollectScope): Promise<Repository[]> {
+  if (scope.repositoryId) {
+    const repository = await prisma.repository.findFirst({
+      where: { id: scope.repositoryId, organizationId: scope.organizationId }
+    });
+    return repository ? [repository] : [];
+  }
+
+  if (scope.projectId) {
+    return prisma.repository.findMany({
+      where: { organizationId: scope.organizationId, projectId: scope.projectId }
+    });
+  }
+
+  if (scope.employeeIds?.length) {
+    // Employee/team scope → only the repos those employees are mapped into.
+    const mappings = await prisma.employeeGitMapping.findMany({
+      where: { organizationId: scope.organizationId, userId: { in: scope.employeeIds } },
+      include: { contributorIdentity: { select: { repositoryId: true } } }
+    });
+    const repositoryIds = [
+      ...new Set(mappings.map((mapping) => mapping.contributorIdentity.repositoryId))
+    ];
+    if (!repositoryIds.length) {
+      return [];
+    }
+    return prisma.repository.findMany({
+      where: { id: { in: repositoryIds }, organizationId: scope.organizationId }
+    });
+  }
+
+  // No specific target → every repo in the org (bounded fallback).
+  return prisma.repository.findMany({ where: { organizationId: scope.organizationId } });
+}
+
+/**
+ * Smart-engine entry point (Phase C): before a report is built, make sure the
+ * [from, until] window is in the DB for every repository the report touches.
+ * For each repo it consults the coverage ledger and fetches ONLY the missing
+ * sub-ranges from Git (using the org's stored credential — never a personal
+ * PAT). Resilient: a repo that has no credential or errors is skipped with a
+ * warning so the report is still produced from whatever is already stored.
+ */
+export async function ensureActivityCollected(
+  scope: CollectScope,
+  from: Date,
+  until: Date
+): Promise<{ repositoriesChecked: number; rangesCollected: number; warnings: string[] }> {
+  const repositories = await resolveScopeRepositories(scope);
+  const warnings: string[] = [];
+  let rangesCollected = 0;
+
+  for (const repository of repositories) {
+    try {
+      const credential = await prisma.gitCredential.findUnique({
+        where: { id: repository.credentialId }
+      });
+      if (!credential) {
+        warnings.push(`${repository.fullName}: no Git credential, skipped`);
+        continue;
+      }
+
+      const token = decryptToken(credential.encryptedToken);
+      const provider = getGitProvider(credential.provider);
+      const result = await ingestRepository(repository, token, provider, from, until);
+      rangesCollected += result.rangesCollected;
+    } catch (error) {
+      warnings.push(
+        `${repository.fullName}: collection failed (${(error as Error).message})`
+      );
+    }
+  }
+
+  return { repositoriesChecked: repositories.length, rangesCollected, warnings };
 }
 
 export async function getActivitySummary(actorId: string, repositoryId: string, range: Range) {
@@ -189,6 +487,28 @@ export async function getActivitySummary(actorId: string, repositoryId: string, 
       changedFilesCount: commit.changedFilesCount
     }))
   };
+}
+
+/** Lists a repository's tracked branches with per-branch commit counts (Phase D). */
+export async function getRepositoryBranches(actorId: string, repositoryId: string) {
+  const repository = await loadRepository(repositoryId);
+  await requireOrganizationMember(actorId, repository.organizationId);
+
+  const branches = await prisma.branch.findMany({
+    where: { repositoryId },
+    orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    include: { _count: { select: { commits: true } } }
+  });
+
+  return branches.map((branch) => ({
+    id: branch.id,
+    name: branch.name,
+    isDefault: branch.isDefault,
+    isProtected: branch.isProtected,
+    headSha: branch.headSha,
+    commitCount: branch._count.commits,
+    lastSyncedAt: branch.lastSyncedAt
+  }));
 }
 
 export type ActivityQuery = {

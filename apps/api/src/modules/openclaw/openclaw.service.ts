@@ -1,8 +1,12 @@
 import { prisma } from "../../config/database.js";
 import { requireOrganizationMember } from "../../common/access/organization-access.js";
-import { analyzeActivity, sampleCommits } from "../activity/activity.service.js";
+import {
+  analyzeActivity,
+  ensureActivityCollected,
+  sampleCommits
+} from "../activity/activity.service.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
-import { createReport } from "../reports/reports.service.js";
+import { createReport, findCachedReport } from "../reports/reports.service.js";
 import type { GenerateReportInput } from "./openclaw.schemas.js";
 import {
   buildReportMarkdown,
@@ -17,14 +21,14 @@ import {
   type ReportContext
 } from "./openclaw.tools.js";
 
-function deriveTargetLabel(context: ReportContext) {
-  return (
-    context.repository?.fullName ??
-    context.project?.name ??
-    (context.employees.length === 1
-      ? context.employees[0]!.name
-      : `${context.employees.length} employees`)
-  );
+/** A cheap fingerprint of the underlying data; identical data ⇒ reuse the report. */
+function computeFingerprint(activity: {
+  commits: number;
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+}) {
+  return `c${activity.commits}-a${activity.additions}-d${activity.deletions}-f${activity.filesChanged}`;
 }
 
 /**
@@ -54,6 +58,20 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     ? await resolveEmployeeUsernames(input.organizationId, input.employeeIds)
     : undefined;
 
+  // Smart engine (Phase C): make sure the requested window is in the DB before we
+  // read it — auto-collect only the sub-ranges missing from the coverage ledger,
+  // per repository the report touches. Uses the org's stored credential.
+  const collection = await ensureActivityCollected(
+    {
+      organizationId: input.organizationId,
+      repositoryId: repository?.id,
+      projectId: project?.id,
+      employeeIds: input.employeeIds
+    },
+    range.from,
+    range.to
+  );
+
   const activityQuery = {
     organizationId: input.organizationId,
     repositoryId: repository?.id,
@@ -64,8 +82,58 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
   };
 
   const activity = await fetchGitActivity(activityQuery);
-  const commits = await sampleCommits(activityQuery);
   const analysis = await analyzeActivity(activityQuery);
+  const dataFingerprint = computeFingerprint(activity);
+
+  const targetLabel =
+    repository?.fullName ??
+    project?.name ??
+    (employees.length === 1 ? employees[0]!.name : `${employees.length} employees`);
+
+  const statistics = {
+    commits: activity.commits,
+    additions: activity.additions,
+    deletions: activity.deletions,
+    filesChanged: activity.filesChanged
+  };
+
+  const readyPending = ["Statistics dashboard (Phase 13)", "Report sharing (Phase 14)"];
+
+  // Report cache: an identical prior request with the same data reuses the saved
+  // report and skips the LLM. Custom prompts are one-off, so they always regenerate.
+  if (!input.customPrompt) {
+    const cached = await findCachedReport({
+      organizationId: input.organizationId,
+      reportType: input.reportType,
+      repositoryId: repository?.id,
+      projectId: project?.id,
+      targetLabel,
+      periodStart: range.from,
+      periodEnd: range.to,
+      dataFingerprint
+    });
+
+    if (cached) {
+      return {
+        reportId: cached.id,
+        reportType: input.reportType,
+        title: cached.title,
+        markdown: cached.markdown,
+        period: { from: range.from, to: range.to },
+        project: project ?? null,
+        repository: repository ?? null,
+        employees,
+        statistics,
+        analysis,
+        status: "GENERATED" as const,
+        pending: readyPending,
+        cached: true,
+        collection
+      };
+    }
+  }
+
+  const commits = await sampleCommits(activityQuery);
 
   const context: ReportContext = {
     reportType: input.reportType,
@@ -94,7 +162,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     try {
       markdown = await llm.complete(buildReportPrompt(context));
       status = "GENERATED";
-      pending = ["Statistics dashboard (Phase 13)", "Report sharing (Phase 14)"];
+      pending = readyPending;
     } catch (error) {
       // Fall back to the template so a report is always returned.
       console.warn("LLM report generation failed; using template.", error);
@@ -105,21 +173,18 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     organizationId: input.organizationId,
     requestedById: requesterId,
     reportType: input.reportType,
-    targetLabel: deriveTargetLabel(context),
+    targetLabel,
     repositoryId: repository?.id,
     projectId: project?.id,
     periodStart: range.from,
     periodEnd: range.to,
     title,
     markdownContent: markdown,
-    statistics: {
-      commits: activity.commits,
-      additions: activity.additions,
-      deletions: activity.deletions,
-      filesChanged: activity.filesChanged
-    },
+    statistics,
     status,
     generatedBy: status === "GENERATED" ? "llm" : "template",
+    // Only fingerprint LLM reports — the cache reuses those, never the template.
+    dataFingerprint: status === "GENERATED" ? dataFingerprint : undefined,
     contributors: employees.map((employee) => ({
       userId: employee.id,
       name: employee.name,
@@ -140,7 +205,8 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
         projectId: input.projectId ?? null,
         employeeCount: employees.length,
         generatedBy: status === "GENERATED" ? "llm" : "template",
-        reportId: savedReport.id
+        reportId: savedReport.id,
+        rangesCollected: collection.rangesCollected
       }
     }
   });
@@ -154,14 +220,11 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     project: project ?? null,
     repository: repository ?? null,
     employees,
-    statistics: {
-      commits: activity.commits,
-      additions: activity.additions,
-      deletions: activity.deletions,
-      filesChanged: activity.filesChanged
-    },
+    statistics,
     analysis,
     status,
-    pending
+    pending,
+    cached: false,
+    collection
   };
 }

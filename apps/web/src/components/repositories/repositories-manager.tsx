@@ -242,7 +242,7 @@ export function RepositoriesManager() {
     try {
       const result = await collectActivity(repo.id);
       setRowNotice(
-        `Collected ${result.newCollected} new commit(s) from ${repo.fullName} (last 90 days).`
+        `Collected ${result.newCollected} new commit(s) across ${result.branchesChecked} branch(es) from ${repo.fullName} (last 90 days).`
       );
       await refresh();
     } catch (error) {

@@ -11,6 +11,9 @@ export const periodSchema = z.enum([
   "today",
   "last_7_days",
   "last_30_days",
+  "last_90_days",
+  "this_month",
+  "last_month",
   "custom"
 ]);
 
