@@ -448,3 +448,102 @@ operator has done that, the **next assistant task is the DevInsight tool plugin 
   report flow with a mocked GitProvider/LLMProvider.
 - **Deployment**: Dockerfiles (web, api) + `docker-compose.yml` (add postgres) +
   production env guide.
+
+### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
+
+Goal (from product owner): reports over **any date window** (not just last 90 days) —
+e.g. the first 90 days of a year, a specific month, an arbitrary `from→to`. A report
+request must be **self-sufficient**: the backend decides whether the requested range
+is already in the DB (serve from DB, no Git call) or must be collected first
+(auto-collect only the missing sub-range from Git, using the org's stored credential —
+never a personal PAT). Generated reports are cached so identical requests skip the LLM.
+Plus multi-branch awareness, deep/background history, and a per-employee leaderboard.
+**Key architectural decision: the "decide / auto-collect / cache" logic lives in the
+DevInsight backend report service — NOT in the MCP server or OpenClaw.** OpenClaw just
+asks; the backend is smart, so every channel (dashboard, chat, future Telegram) benefits.
+
+Phases (build in this order, small & verifiable, update this doc after each):
+
+- **A — Flexible date range everywhere — ✅ DONE.**
+  - `periodSchema` (`openclaw.schemas.ts`) + `ReportPeriod` (web `api.ts`) now include
+    `last_90_days`, `this_month`, `last_month` (plus existing `custom` `{from,to}`).
+  - `resolvePeriod` (`openclaw.tools.ts`) computes the new windows (month math handles
+    year boundary; `last_month` = full previous calendar month).
+  - MCP tool `devinsight_generate_report` (`integrations/devinsight-mcp-server/server.mjs`)
+    exposes all periods **+ `customRange`**, so the chat agent can request any window
+    ("Jan 1 to Mar 31"). Frontend `PERIODS` selector lists the new options.
+  - Verified: `npm run typecheck` clean (all workspaces); date-math sanity-checked.
+- **B — Coverage ledger — ✅ DONE.**
+  - New model `RepositoryCoverage` (repositoryId, branch, rangeStart, rangeEnd,
+    commitCount, collectedAt) — migration `repository_coverage` applied.
+  - Pure interval math in `apps/api/src/modules/activity/coverage.ts`:
+    `mergeIntervals` (compact, non-overlapping) + `subtractCovered(from, to, covered)`
+    (returns uncovered sub-ranges). Sanity-checked on 6 edge cases incl. "ask 15 days
+    when 30 days already collected → fully covered, no Git call".
+  - `activity.service.ts`: `recordCoverage(repoId, branch, since, until)` merges the
+    window into the ledger (branch = `coverageBranch(repo)` = defaultBranch ?? "default");
+    `getMissingRanges(repoId, branch, from, until)` returns the gaps for Phase C.
+  - `collectActivity` records coverage **only when the run was not detail-capped**
+    (a capped run left commits unfetched, so the range stays "missing"); returns
+    `coverageRecorded`. Reminder: run `npx prisma generate` after schema edits or tsc
+    won't see the new model.
+- **C — Smart report engine — ✅ DONE.**
+  - `activity.service.ts`: extracted `ingestCommitRange(repo, token, provider, since,
+    until)` (core fetch+store+coverage, no access checks — shared by manual collect and
+    auto-collect). New `ensureActivityCollected(scope, from, until)`: resolves the repos
+    a report touches (`resolveScopeRepositories`: repository → project's repos →
+    employees' mapped repos → all org repos) and, per repo, fetches ONLY the ledger's
+    missing sub-ranges from Git using the **org's stored credential**. Resilient:
+    per-repo try/catch, a repo with no credential / a Git error is skipped with a
+    warning so the report is still produced from stored data.
+  - `reports.service.ts`: `Report.dataFingerprint` column (migration
+    `report_data_fingerprint`) + `findCachedReport(...)` — reuses a prior **LLM**
+    report when scope + day-bucketed period + fingerprint all match (skips the LLM).
+  - `openclaw.service.ts` `orchestrateReport`: now (1) `ensureActivityCollected`
+    BEFORE reading the DB, (2) computes `computeFingerprint(activity)` =
+    `c{commits}-a{adds}-d{dels}-f{files}`, (3) on a cache hit returns the saved report
+    (no LLM), else generates + saves with the fingerprint. Custom prompts always
+    regenerate. Response gained `cached: boolean` + `collection` summary
+    (`repositoriesChecked`, `rangesCollected`, `warnings`).
+  - Behaviour: **fixed past ranges** (e.g. `last_month`, custom `from→to`) → repeat
+    request does ZERO Git calls + ZERO LLM. **Relative windows** (`today`,
+    `last_30_days`) → one cheap `listCommits` per repo to collect the fresh tail; if no
+    new commits, fingerprint is unchanged → cache hit (no LLM). "Ask last-15 when
+    last-30 is collected" → served from DB (only a tiny tail fetch). Verified via
+    typecheck + lint + 4 cache-decision logic checks.
+  - Note: report auto-collect is gated only by `requireOrganizationMember` (any member
+    who can request the report), and always uses the org credential — not the manual
+    collect endpoint's MANAGER-role check. Intentional (report data is org-visible).
+- **D — Multi-branch — ✅ DONE.**
+  - `GitProvider.listBranches` + GitHub impl (`GitBranch` = name/headSha/isProtected,
+    paginated). New models `Branch` (per repo; isDefault/headSha/isProtected) +
+    `CommitBranch` join (migration `branches_and_commit_branch`). A commit's SHA is
+    stored once (deduped); `CommitBranch` records every branch it is reachable from,
+    so a commit merged into several branches is **not double-counted** in reports.
+  - `activity.service.ts` ingestion is now branch-aware: `syncBranches` (upserts Branch
+    rows, default first, capped at `MAX_BRANCHES = 25`), `ingestBranchRange` (collects a
+    branch's window, links stored commits via `CommitBranch`, per-branch coverage),
+    `ingestRepository` (drives all branches; **fast-path: 0 Git calls when every known
+    branch already covers the window** — preserves "fixed-range repeat = no Git"). Both
+    manual `collectActivity` and report auto-collect (`ensureActivityCollected`) use it.
+  - Coverage ledger is now keyed by the **real branch name** (Phase B/C used
+    `defaultBranch ?? "default"`; `coverageBranch` helper removed). Old coverage rows are
+    harmless — at worst a one-time re-collect.
+  - Visibility: `getRepositoryBranches` + `GET /api/repositories/:id/branches` (branches
+    with per-branch commit counts). `collectActivity` response now returns
+    `newCollected` + `branchesChecked`/`branchesCollected`/`rangesCollected` (web
+    `CollectActivityResult` + the collect toast updated).
+  - **Product note:** reports/aggregates read the Commit table across ALL branches
+    (deduped) — so in-progress (unmerged) work is now included, which is intended. A
+    branch-filtered report (via `CommitBranch`) is a future option (relevant to Phase F).
+    Typecheck + lint clean.
+- **E — Background deep-history collection**: move collection to an in-process worker
+  (Redis later), paginate full 1–2yr history respecting GitHub rate limits, lift the
+  150-detail cap; progress/status tracking + UI.
+- **F — Per-employee project report (leaderboard)**: `aggregateByEmployee` (groupBy
+  username → map to employees → rank by lines changed) + per-person point-by-point
+  narrative in the prompt + ranked leaderboard UI in the report.
+
+Note (Phase A follow-up): `collectActivity`'s `DEFAULT_LOOKBACK_DAYS = 90` in
+`activity.service.ts` is still the fallback when a collect call omits a range; Phase C
+drives collection with explicit ranges, so this becomes a fallback-only default.
