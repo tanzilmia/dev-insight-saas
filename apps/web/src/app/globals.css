@@ -246,6 +246,126 @@ input {
   background: linear-gradient(90deg, transparent, var(--border), transparent);
 }
 
+/* ---------- Generated report markdown ---------- */
+.report-md {
+  color: var(--text);
+  font-size: 0.925rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.report-md > * + * {
+  margin-top: 0.9rem;
+}
+.report-md h1,
+.report-md h2,
+.report-md h3 {
+  color: var(--text);
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+.report-md h1 {
+  font-size: 1.45rem;
+}
+.report-md h2 {
+  margin-top: 1.35rem;
+  font-size: 1.2rem;
+}
+.report-md h3 {
+  margin-top: 1.15rem;
+  font-size: 1.02rem;
+}
+.report-md p {
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+}
+.report-md strong {
+  color: var(--text);
+  font-weight: 950;
+}
+.report-md ul,
+.report-md ol {
+  display: grid;
+  gap: 0.45rem;
+  padding-left: 1.25rem;
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+}
+.report-md ul {
+  list-style: disc;
+}
+.report-md ol {
+  list-style: decimal;
+}
+.report-md li::marker {
+  color: var(--accent);
+  font-weight: 900;
+}
+.report-md code {
+  border: 1px solid var(--field-border);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--accent-2) 10%, var(--surface-soft));
+  padding: 0.12rem 0.35rem;
+  color: var(--accent-strong);
+  font-size: 0.86em;
+  font-weight: 800;
+}
+.report-md pre {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface) 74%, var(--field));
+  padding: 1rem;
+}
+.report-md pre code {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+.report-md blockquote {
+  border-left: 4px solid var(--accent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  padding: 0.85rem 1rem;
+  color: var(--text);
+}
+.report-md a {
+  color: var(--accent-strong);
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.report-md table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  font-size: 0.86rem;
+}
+.report-md th,
+.report-md td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+}
+.report-md th {
+  background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+  color: var(--text);
+  font-weight: 950;
+}
+.report-md tr:last-child td {
+  border-bottom: 0;
+}
+.report-md hr {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+}
+
 /* ---------- Entrance animation ---------- */
 @keyframes rise-in {
   from {

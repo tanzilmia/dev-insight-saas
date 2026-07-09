@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FileText, Loader2, Sparkles } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import {
   type Employee,
@@ -39,6 +41,16 @@ const PERIODS: { value: ReportPeriod; label: string }[] = [
 
 const fieldClass =
   "field w-full rounded-2xl px-4 py-3 text-sm font-medium text-(--text) placeholder:font-normal";
+
+const reportMarkdownPlugins = [remarkGfm];
+
+function ReportMarkdown({ markdown }: { markdown: string }) {
+  return (
+    <div className="report-md glass-soft max-h-96 overflow-auto rounded-2xl p-5">
+      <ReactMarkdown remarkPlugins={reportMarkdownPlugins}>{markdown}</ReactMarkdown>
+    </div>
+  );
+}
 
 export function ReportsManager() {
   const { session, status, activeOrganization, logout } = useSession();
@@ -360,9 +372,7 @@ export function ReportsManager() {
                 ))}
               </div>
 
-              <pre className="glass-soft max-h-96 overflow-auto whitespace-pre-wrap rounded-2xl p-5 text-sm leading-6 text-(--text)">
-                {result.markdown}
-              </pre>
+              <ReportMarkdown markdown={result.markdown} />
 
               <div className="mt-4 rounded-2xl border border-(--border) bg-(--surface-soft) p-4">
                 <p className="text-xs font-black uppercase tracking-wide text-(--muted)">
