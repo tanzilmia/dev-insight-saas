@@ -12,6 +12,7 @@ import { employeesRouter } from "./modules/employees/employees.controller.js";
 import { openclawRouter } from "./modules/openclaw/openclaw.controller.js";
 import { organizationsRouter } from "./modules/organizations/organizations.controller.js";
 import { projectsRouter } from "./modules/projects/projects.controller.js";
+import { reportsRouter } from "./modules/reports/reports.controller.js";
 import { repositoriesRouter } from "./modules/repositories/repositories.controller.js";
 
 export function createApp() {
@@ -38,8 +39,8 @@ export function createApp() {
   app.use("/api/repositories", activityRouter);
   app.use("/api/contributors", contributorsRouter);
   app.use("/api/openclaw", openclawRouter);
+  app.use("/api/reports", reportsRouter);
   app.use(errorHandler);
 
   return app;
 }
-

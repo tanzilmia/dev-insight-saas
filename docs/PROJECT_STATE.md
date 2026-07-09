@@ -30,7 +30,7 @@ important nuance about what OpenClaw actually is vs. what is built today.
 
 ---
 
-## 2. Current status — what is built (Phases 2–10)
+## 2. Current status — what is built (Phases 2–11)
 
 The `docs/.../DevInsight_AI_Development_Roadmap.md` defines Phases 0–16. Built so far:
 
@@ -45,15 +45,18 @@ The `docs/.../DevInsight_AI_Development_Roadmap.md` defines Phases 0–16. Built
 | 7 | OpenClaw orchestration (in-repo stand-in) + report tool layer | ✅ done (see §7) |
 | 8 | Git activity collection (commits + changed files, per-commit stats) | ✅ done |
 | 10 | LLM report generation (provider-agnostic; OpenAI-compatible) | ✅ done |
+| 11 | Report persistence + history/detail in dashboard | ✅ done |
 
 **Verified working on real data:** a repository report for a real repo produced an
 accurate AI narrative (e.g. correctly summarized "RADIUS CoA controls" work from
 real commit messages, with correct line-change math), badge `GENERATED`.
 
+**Also done:** proper Markdown rendering on the Reports page (`react-markdown` +
+`remark-gfm`) instead of raw `<pre>` output.
+
 **NOT yet built:** Phase 9 (report engine: commit classification / risk scoring),
-Phase 11 (report persistence + history), Phase 12–16 (statistics dashboard,
-sharing, tests, deployment), the **real external OpenClaw integration** (§7), and
-proper Markdown rendering of reports on the frontend (currently shown as raw text).
+Phase 12–16 (statistics dashboard, sharing, tests, deployment), and the **real
+external OpenClaw integration** (§7).
 
 ---
 
@@ -148,6 +151,7 @@ contributors:  GET /contributors?repositoryId=, GET /contributors/unmapped?repos
                POST /contributors/discover, POST /contributors/:id/map, DELETE /contributors/:id/map,
                POST /contributors/:id/ignore
 openclaw:      GET /openclaw/tools, POST /openclaw/reports/generate
+reports:       GET /reports?organizationId=&reportType=&limit=, GET /reports/:id
 ```
 
 ---
@@ -156,7 +160,8 @@ openclaw:      GET /openclaw/tools, POST /openclaw/reports/generate
 
 Applied migrations (in `apps/api/prisma/migrations/`):
 `auth_organization_foundation`, `projects_and_project_members`, `git_credentials`,
-`repositories`, `contributor_identity_mapping`, `commits_and_changed_files`.
+`repositories`, `contributor_identity_mapping`, `commits_and_changed_files`,
+`reports`.
 
 - **User, Organization, OrganizationMember** (role + status), **RequestLog**, **AuditLog** — foundation.
 - **Project**, **ProjectMember** (`ProjectStatus`, `ProjectRole` enums).
@@ -165,6 +170,12 @@ Applied migrations (in `apps/api/prisma/migrations/`):
 - **ContributorIdentity** — per-repo Git identity: `externalId`, `username`, `authorName?`, `authorEmail?`, `avatarUrl?`, `contributions`, `ignored`. Unique per `[repositoryId, externalId]`. One-to-one optional `mapping`.
 - **EmployeeGitMapping** — maps `userId ↔ contributorIdentityId` (identity `@unique` → one identity → one employee).
 - **Commit** — `sha`, `message`, `authorName/authorEmail/username`, `committedAt`, `additions`, `deletions`, `changedFilesCount`. Unique per `[repositoryId, sha]`. **ChangedFile** — per-file `filePath/status/additions/deletions/changes`.
+- **Report** — immutable report snapshot: `reportType`, `targetLabel`,
+  `repositoryId?`, `projectId?` (snapshot ids, no FK), `periodStart/End`,
+  `title`, `markdownContent`, `statisticsJson`, `status`, `generatedBy`,
+  `requestedById`, `createdAt`.
+- **ReportContributor** — rows attached to saved reports for resolved employees
+  (`userId?`, `contributorIdentityId?`, `name?`, `commitCount`).
 
 Enums: `OrgRole`, `MemberStatus`, `UserStatus`, `ProjectStatus`, `ProjectRole`,
 `GitProvider (GITHUB|GITLAB|BITBUCKET)`, `CredentialStatus (CONNECTED|INVALID|DISCONNECTED)`.
@@ -184,11 +195,13 @@ open-source, self-hosted AI-agent runtime that connects chat channels
 that plays OpenClaw's role for the dashboard/website path:
 - `openclaw.tools.ts` — the resolvable "tools": `resolve_project`, `resolve_employee`,
   `resolve_repository`, `resolve_period`, `fetch_git_activity` (real — aggregates
-  stored commits), `generate_report` (LLM), plus the prompt builder + template fallback.
+  stored commits), `generate_report` (LLM), `save_report` (real persistence),
+  plus the prompt builder + template fallback.
 - `openclaw.service.ts` — `orchestrateReport()`: resolves target/period → gathers
   real commit activity (filtered by employees' mapped Git usernames for
   employee/team reports) → calls the LLM to write the Markdown, or falls back to a
-  deterministic template if no LLM is configured or the call errors (never crashes).
+  deterministic template if no LLM is configured or the call errors (never crashes)
+  → persists the generated report snapshot and returns `reportId`.
 - Report `status`: `GENERATED` (LLM) or `PARTIAL` (template fallback).
 
 **What is NOT built (future):** the real OpenClaw integration — running the external
@@ -225,13 +238,13 @@ Dashboard shell = `components/dashboard/dashboard-chrome.tsx` (nav: Overview,
 Projects, Employees, Repos, Contributors, Reports, Git). Pages under
 `app/dashboard/*` render manager components in `components/<area>/*-manager.tsx`.
 Reports page (`components/reports/reports-manager.tsx`) posts a structured request to
-`/api/openclaw/reports/generate` and renders the returned Markdown.
+`/api/openclaw/reports/generate`, renders the returned Markdown, and shows saved
+report history from `/api/reports`.
 Report types: `repository | project | employee | team`; periods:
 `today | last_7_days | last_30_days | custom` (custom needs a from/to range).
 
-⚠️ Reports currently render the Markdown as **raw text in a `<pre>`** — headings
-(`#`), bold (`**`), and bullets (`*`) show as literal characters. A quick, high-value
-improvement is proper Markdown rendering.
+Reports use `react-markdown` + `remark-gfm` and `.report-md` styles in
+`app/globals.css`; saved report detail reuses the same renderer.
 
 ---
 
@@ -259,18 +272,11 @@ Before committing nontrivial changes: `npm run typecheck` + `npm run lint` +
 ## 10. Remaining roadmap & recommended next steps
 
 Recommended order:
-1. **Markdown rendering polish (frontend)** — render report Markdown properly
-   (headings/bold/lists) instead of raw `<pre>`. Small, high visual impact.
-2. **Phase 11 — Report persistence** — add a `Report` model (`docs/.../Database_Design`
-   has the shape: `reportType`, `periodStart/End`, `title`, `markdownContent`,
-   `statisticsJson`, `status`, `requestedById`, …) + `ReportContributor`/`ReportShare`.
-   Wire the `save_report` tool (currently pending), save on generate, add
-   `/dashboard/reports` history/detail.
-3. **Phase 9 — Report engine** — classify commits (feature/fix/chore from messages
+1. **Phase 9 — Report engine** — classify commits (feature/fix/chore from messages
    + file categories), risk detection, richer statistics; feed into the LLM prompt.
-4. **Real OpenClaw integration (§7)** — external runtime + DevInsight tool plugin +
+2. **Real OpenClaw integration (§7)** — external runtime + DevInsight tool plugin +
    HTTP bridge + service-key auth + `SKILL.md`, then Telegram/Discord channels.
-5. **Phase 13 Statistics dashboard, Phase 14 Sharing, Phase 15 Tests
+3. **Phase 13 Statistics dashboard, Phase 14 Sharing, Phase 15 Tests
    (set up Vitest/Supertest first), Phase 16 Deployment (Docker).**
 
 ### Guardrails to preserve
@@ -288,87 +294,22 @@ Concrete, pattern-matching plans for the next items. Follow the existing module
 conventions (§5) and frontend patterns (§8). After each: `npm run typecheck && npm
 run lint && npm run build` for both workspaces, then drive it via the running app.
 
-### 11.1 Markdown rendering polish (frontend, quick) — do first
+### 11.1 Completed — Markdown rendering polish
 
-Reports render Markdown as raw text today. Render it properly.
+Reports now use `react-markdown` + `remark-gfm`; `.report-md` in
+`apps/web/src/app/globals.css` styles headings, lists, strong text, code,
+blockquote, links, and tables.
 
-1. `apps/web`: add deps `react-markdown` and `remark-gfm`.
-2. In `components/reports/reports-manager.tsx`, replace the `<pre>` that shows
-   `result.markdown` with:
-   ```tsx
-   import ReactMarkdown from "react-markdown";
-   import remarkGfm from "remark-gfm";
-   // ...
-   <div className="report-md">
-     <ReactMarkdown remarkGfm={[remarkGfm]}>{result.markdown}</ReactMarkdown>
-   </div>
-   ```
-   (pass `remarkPlugins={[remarkGfm]}`.)
-3. Add a `.report-md` style block in `app/globals.css` styling `h1/h2/h3, p, ul, ol,
-   li, strong, code, a` with the existing design tokens (`--text`, `--muted`,
-   `--accent`) — the project does **not** use `@tailwindcss/typography`, so style
-   manually (headings bold + spacing, `ul` list-disc pl-5, `strong` font-black, etc.).
-4. Verify: generate a report → headings/bold/bullets render; no raw `#`/`*`.
+### 11.2 Completed — Report persistence + history
 
-### 11.2 Phase 11 — Report persistence + history
-
-Persist generated reports and expose history/detail.
-
-**Prisma** (`apps/api/prisma/schema.prisma`) — new models, then
-`npx prisma migrate dev --name reports && npx prisma generate` (from `apps/api`):
-```prisma
-model Report {
-  id              String   @id @default(cuid())
-  organizationId  String
-  requestedById   String?
-  reportType      String   // "repository" | "employee" | "project" | "team"
-  targetLabel     String   // snapshot, e.g. repo fullName / employee name
-  repositoryId    String?  // snapshot ids for filtering (no FK — keep history immutable)
-  projectId       String?
-  periodStart     DateTime
-  periodEnd       DateTime
-  title           String
-  markdownContent String
-  statisticsJson  Json?
-  status          String   // "GENERATED" | "PARTIAL"
-  generatedBy     String?  // "llm" | "template"
-  createdAt       DateTime @default(now())
-
-  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  requestedBy  User?               @relation("ReportsRequested", fields: [requestedById], references: [id], onDelete: SetNull)
-  contributors ReportContributor[]
-
-  @@index([organizationId, createdAt])
-  @@index([organizationId, reportType])
-}
-
-model ReportContributor {
-  id                    String  @id @default(cuid())
-  reportId              String
-  userId                String?
-  contributorIdentityId String?
-  name                  String?
-  commitCount           Int     @default(0)
-  report                Report  @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  @@index([reportId])
-}
-```
-Add back-relations: `Organization.reports Report[]`, `User.reportsRequested Report[] @relation("ReportsRequested")`.
-
-**Backend** — new `modules/reports/`:
-- `reports.service.ts`:
-  - `createReport(input)` — persists a Report (+ ReportContributor rows for resolved employees). Called from `openclaw.service.ts` at the end of `orchestrateReport()` (this realizes the pending `save_report` tool). Return the saved id; include it in the orchestrate response.
-  - `listReports(actorId, organizationId, { reportType?, limit? })` — `requireOrganizationMember`; newest first; return summaries (no markdown).
-  - `getReport(actorId, reportId)` — load; `requireOrganizationMember(report.organizationId)`; return full report.
-- `reports.controller.ts` (mount `app.use("/api/reports", reportsRouter)`):
-  `GET /api/reports?organizationId=&reportType=&limit=`, `GET /api/reports/:id`.
-- In `openclaw.service.ts`: after computing `{title, markdown, status, statistics, ...}`, call `createReport(...)` and add `reportId` to the returned object. Keep the template/LLM fallback logic unchanged.
-
-**Frontend** (`components/reports/reports-manager.tsx` + `lib/api.ts`):
-- `lib/api.ts`: `listReports(organizationId)`, `getReport(id)`, types `ReportSummary`, `ReportDetail`.
-- Reports page: below the generator, add a **History** list (calls `listReports`), refreshed after each generate. Row = title · type · date · status badge. Click → load `getReport(id)` and show its markdown (reuse the `.report-md` renderer). Optionally a separate `/dashboard/reports/[id]` client route using `useParams()`.
-
-**Verify:** generate → `GET /api/reports` shows it → `GET /api/reports/:id` returns markdown; cross-org read → 403; report survives after the source repo is untracked (snapshot fields).
+Phase 11 is implemented:
+- Prisma migration `20260709111500_reports` adds `Report` and
+  `ReportContributor`.
+- `modules/reports/` exposes `GET /api/reports` and `GET /api/reports/:id`.
+- `openclaw.service.ts` saves every generated/template report and returns
+  `reportId`.
+- `components/reports/reports-manager.tsx` shows saved report history and loads
+  saved details into the same Markdown preview.
 
 ### 11.3 Phase 9 — Report engine (richer signal for the LLM)
 

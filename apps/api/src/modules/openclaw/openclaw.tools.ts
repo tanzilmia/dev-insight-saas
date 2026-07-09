@@ -26,8 +26,7 @@ export const OPENCLAW_TOOLS = [
   {
     name: "save_report",
     description: "Persist the generated report and statistics",
-    status: "pending",
-    pendingPhase: "Phase 11 (Report Persistence)"
+    status: "ready"
   },
   {
     name: "share_report",

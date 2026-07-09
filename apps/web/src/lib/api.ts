@@ -455,6 +455,14 @@ export async function ignoreContributor(contributorId: string, ignored: boolean)
 
 export type ReportType = "repository" | "project" | "employee" | "team";
 export type ReportPeriod = "today" | "last_7_days" | "last_30_days" | "custom";
+export type ReportStatus = "GENERATED" | "PARTIAL";
+
+export type ReportStatistics = {
+  commits: number;
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+};
 
 export type GenerateReportInput = {
   organizationId: string;
@@ -468,6 +476,7 @@ export type GenerateReportInput = {
 };
 
 export type GeneratedReport = {
+  reportId: string;
   reportType: ReportType;
   title: string;
   markdown: string;
@@ -480,14 +489,38 @@ export type GeneratedReport = {
     email: string;
     mappedIdentities: number;
   }[];
-  statistics: {
-    commits: number;
-    additions: number;
-    deletions: number;
-    filesChanged: number;
-  };
-  status: string;
+  statistics: ReportStatistics;
+  status: ReportStatus;
   pending: string[];
+};
+
+export type ReportSummary = {
+  id: string;
+  organizationId: string;
+  reportType: ReportType;
+  targetLabel: string;
+  title: string;
+  status: ReportStatus;
+  generatedBy: "llm" | "template" | null;
+  period: { from: string; to: string };
+  statistics: ReportStatistics | null;
+  createdAt: string;
+};
+
+export type ReportContributor = {
+  id: string;
+  userId: string | null;
+  contributorIdentityId: string | null;
+  name: string | null;
+  commitCount: number;
+};
+
+export type ReportDetail = ReportSummary & {
+  markdown: string;
+  repositoryId: string | null;
+  projectId: string | null;
+  requestedById: string | null;
+  contributors: ReportContributor[];
 };
 
 export async function generateReport(input: GenerateReportInput) {
@@ -496,6 +529,19 @@ export async function generateReport(input: GenerateReportInput) {
     input
   );
 
+  return response.data.report;
+}
+
+export async function listReports(organizationId: string, reportType?: ReportType) {
+  const response = await api.get<{ reports: ReportSummary[] }>("/api/reports", {
+    params: { organizationId, ...(reportType ? { reportType } : {}) }
+  });
+
+  return response.data.reports;
+}
+
+export async function getReport(reportId: string) {
+  const response = await api.get<{ report: ReportDetail }>(`/api/reports/${reportId}`);
   return response.data.report;
 }
 
@@ -508,4 +554,3 @@ export function getApiErrorMessage(error: unknown) {
 
   return "Something went wrong";
 }
-

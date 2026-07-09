@@ -2,6 +2,7 @@ import { prisma } from "../../config/database.js";
 import { requireOrganizationMember } from "../../common/access/organization-access.js";
 import { sampleCommits } from "../activity/activity.service.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
+import { createReport } from "../reports/reports.service.js";
 import type { GenerateReportInput } from "./openclaw.schemas.js";
 import {
   buildReportMarkdown,
@@ -15,6 +16,16 @@ import {
   resolveRepository,
   type ReportContext
 } from "./openclaw.tools.js";
+
+function deriveTargetLabel(context: ReportContext) {
+  return (
+    context.repository?.fullName ??
+    context.project?.name ??
+    (context.employees.length === 1
+      ? context.employees[0]!.name
+      : `${context.employees.length} employees`)
+  );
+}
 
 /**
  * OpenClaw orchestration entry point. A structured report request flows
@@ -71,18 +82,48 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
 
   let markdown = buildReportMarkdown(context).markdown;
   let status: "GENERATED" | "PARTIAL" = "PARTIAL";
-  let pending = ["AI report generation (Phase 10)", "Report persistence (Phase 11)"];
+  let pending = [
+    "LLM provider configuration",
+    "Statistics dashboard (Phase 13)",
+    "Report sharing (Phase 14)"
+  ];
 
   if (llm.available) {
     try {
       markdown = await llm.complete(buildReportPrompt(context));
       status = "GENERATED";
-      pending = ["Report persistence (Phase 11)"];
+      pending = ["Statistics dashboard (Phase 13)", "Report sharing (Phase 14)"];
     } catch (error) {
       // Fall back to the template so a report is always returned.
       console.warn("LLM report generation failed; using template.", error);
     }
   }
+
+  const savedReport = await createReport({
+    organizationId: input.organizationId,
+    requestedById: requesterId,
+    reportType: input.reportType,
+    targetLabel: deriveTargetLabel(context),
+    repositoryId: repository?.id,
+    projectId: project?.id,
+    periodStart: range.from,
+    periodEnd: range.to,
+    title,
+    markdownContent: markdown,
+    statistics: {
+      commits: activity.commits,
+      additions: activity.additions,
+      deletions: activity.deletions,
+      filesChanged: activity.filesChanged
+    },
+    status,
+    generatedBy: status === "GENERATED" ? "llm" : "template",
+    contributors: employees.map((employee) => ({
+      userId: employee.id,
+      name: employee.name,
+      commitCount: 0
+    }))
+  });
 
   await prisma.auditLog.create({
     data: {
@@ -96,12 +137,14 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
         repositoryId: input.repositoryId ?? null,
         projectId: input.projectId ?? null,
         employeeCount: employees.length,
-        generatedBy: status === "GENERATED" ? "llm" : "template"
+        generatedBy: status === "GENERATED" ? "llm" : "template",
+        reportId: savedReport.id
       }
     }
   });
 
   return {
+    reportId: savedReport.id,
     reportType: input.reportType,
     title,
     markdown,

@@ -60,6 +60,7 @@ model User {
   projectMemberships ProjectMember[]
   gitCredentials     GitCredential[]      @relation("CredentialCreator")
   gitMappings        EmployeeGitMapping[]
+  reportsRequested   Report[]             @relation("ReportsRequested")
   requestLogs        RequestLog[]
   auditLogs          AuditLog[]           @relation("AuditActor")
 
@@ -79,6 +80,7 @@ model Organization {
   repositories          Repository[]
   contributorIdentities ContributorIdentity[]
   gitMappings           EmployeeGitMapping[]
+  reports               Report[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
 }
@@ -259,6 +261,44 @@ model ChangedFile {
   commit Commit @relation(fields: [commitId], references: [id], onDelete: Cascade)
 
   @@index([commitId])
+}
+
+model Report {
+  id              String   @id @default(cuid())
+  organizationId  String
+  requestedById   String?
+  reportType      String
+  targetLabel     String
+  repositoryId    String?
+  projectId       String?
+  periodStart     DateTime
+  periodEnd       DateTime
+  title           String
+  markdownContent String
+  statisticsJson  Json?
+  status          String
+  generatedBy     String?
+  createdAt       DateTime @default(now())
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requestedBy  User?               @relation("ReportsRequested", fields: [requestedById], references: [id], onDelete: SetNull)
+  contributors ReportContributor[]
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, reportType])
+}
+
+model ReportContributor {
+  id                    String @id @default(cuid())
+  reportId              String
+  userId                String?
+  contributorIdentityId String?
+  name                  String?
+  commitCount           Int    @default(0)
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
 }
 
 model RequestLog {
