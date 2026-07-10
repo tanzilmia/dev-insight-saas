@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Sparkles,
   UserCheck,
+  UserPlus,
   X
 } from "lucide-react";
 
@@ -18,6 +19,7 @@ import {
   type ContributorSuggestionMatch,
   type Employee,
   type TrackedRepository,
+  createEmployee,
   discoverContributors,
   getApiErrorMessage,
   ignoreContributor,
@@ -64,6 +66,13 @@ export function ContributorsManager() {
   const [suggestions, setSuggestions] = useState<
     Record<string, ContributorSuggestionMatch[]>
   >({});
+
+  // Inline "create employee from this author" form state.
+  const [creatingForId, setCreatingForId] = useState<string | null>(null);
+  const [newEmpName, setNewEmpName] = useState("");
+  const [newEmpEmail, setNewEmpEmail] = useState("");
+  const [creatingEmp, setCreatingEmp] = useState(false);
+  const [createEmpError, setCreateEmpError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!organizationId) {
@@ -133,6 +142,46 @@ export function ContributorsManager() {
       delete next[contributorId];
       return next;
     });
+  }
+
+  function openCreateForm(contributor: Contributor) {
+    setCreatingForId(contributor.id);
+    setNewEmpName(contributor.username ?? "");
+    setNewEmpEmail("");
+    setCreateEmpError(null);
+  }
+
+  // Creates an employee seeded with this author's git username as an alias, which
+  // the backend auto-links to this (and every) matching contributor identity.
+  async function handleCreateEmployeeFromContributor(contributor: Contributor) {
+    if (!organizationId || !contributor.username) {
+      return;
+    }
+
+    setCreatingEmp(true);
+    setCreateEmpError(null);
+
+    try {
+      await createEmployee({
+        organizationId,
+        name: newEmpName.trim(),
+        email: newEmpEmail.trim(),
+        role: "EMPLOYEE",
+        gitUsernames: [contributor.username]
+      });
+      setCreatingForId(null);
+      await Promise.all([
+        loadContributors(),
+        listEmployees(organizationId)
+          .then(setEmployees)
+          .catch(() => undefined),
+        loadSuggestions()
+      ]);
+    } catch (error) {
+      setCreateEmpError(getApiErrorMessage(error));
+    } finally {
+      setCreatingEmp(false);
+    }
   }
 
   async function handleDiscover() {
@@ -337,6 +386,22 @@ export function ContributorsManager() {
                                 </>
                               )}
                             </button>
+                            {!contributor.mapping &&
+                            !contributor.ignored &&
+                            contributor.username ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  creatingForId === contributor.id
+                                    ? setCreatingForId(null)
+                                    : openCreateForm(contributor)
+                                }
+                                disabled={busy}
+                                className="inline-flex items-center gap-1.5 rounded-full border border-(--border) px-3 py-1.5 text-xs font-bold text-(--text) transition hover:bg-(--surface-soft)"
+                              >
+                                <UserPlus size={13} /> New employee
+                              </button>
+                            ) : null}
                           </>
                         ) : contributor.mapping ? (
                           <span className="glass-soft inline-flex items-center rounded-full px-3 py-1.5 text-xs font-black text-(--text)">
@@ -387,6 +452,66 @@ export function ContributorsManager() {
                           Dismiss
                         </button>
                       </div>
+                    ) : null}
+
+                    {creatingForId === contributor.id ? (
+                      <form
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void handleCreateEmployeeFromContributor(contributor);
+                        }}
+                        className="mt-3 grid gap-2 rounded-lg border border-(--border) bg-(--surface-soft) p-3 sm:grid-cols-[1fr_1fr_auto]"
+                      >
+                        <input
+                          value={newEmpName}
+                          onChange={(event) => setNewEmpName(event.target.value)}
+                          required
+                          minLength={2}
+                          placeholder="Full name"
+                          className="field rounded-lg px-3 py-2 text-sm font-medium text-(--text)"
+                        />
+                        <input
+                          value={newEmpEmail}
+                          onChange={(event) => setNewEmpEmail(event.target.value)}
+                          type="email"
+                          required
+                          placeholder="email@company.com"
+                          className="field rounded-lg px-3 py-2 text-sm font-medium text-(--text)"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="submit"
+                            disabled={creatingEmp}
+                            className="btn-gradient inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-black"
+                          >
+                            {creatingEmp ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <UserPlus size={14} />
+                            )}
+                            Create &amp; map
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCreatingForId(null)}
+                            className="rounded-lg border border-(--border) px-3 py-2 text-sm font-bold text-(--muted) transition hover:text-(--text)"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        {createEmpError ? (
+                          <p className="text-xs font-bold text-red-600 sm:col-span-3 dark:text-red-400">
+                            {createEmpError}
+                          </p>
+                        ) : null}
+                        <p className="text-[11px] font-medium text-(--muted) sm:col-span-3">
+                          Adds{" "}
+                          <span className="font-bold text-(--text)">
+                            @{contributor.username}
+                          </span>{" "}
+                          as their Git identity — maps here and in every other repo.
+                        </p>
+                      </form>
                     ) : null}
                   </li>
                 );

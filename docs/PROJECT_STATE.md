@@ -746,8 +746,18 @@ auto-links, so it never shows here) and the manager confirms with one click.
   which also records the alias so it propagates) and a local **Dismiss**. The
   chip auto-hides once mapped/ignored; suggestions reload after Discover.
 
-**Still deferred:** "create employee from this unmapped author"; unmapped-
-contributors dashboard nudge; bulk CSV employee import.
+**Create-employee-from-author — DONE (2026-07-10):** frontend-only (no backend
+change — it rides the existing `createEmployee({ gitUsernames })` + reverse
+auto-link). Each unmapped, non-ignored contributor with a username gets a "New
+employee" button that opens an inline form (name prefilled from the username,
+email required, role EMPLOYEE); submit calls `createEmployee` with the author's
+username as an alias, which the backend immediately auto-links to that identity
+(and any other repo). On success it refetches contributors + employees +
+suggestions, so the row flips to mapped. Closes the loop: discover → author isn't
+an employee → create them right there → auto-mapped.
+
+**Still deferred:** unmapped-contributors dashboard nudge; bulk CSV employee
+import.
 
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
