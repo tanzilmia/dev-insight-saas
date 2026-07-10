@@ -14,6 +14,7 @@ import { openclawServiceRouter } from "./modules/openclaw/openclaw.service-tools
 import { organizationsRouter } from "./modules/organizations/organizations.controller.js";
 import { projectsRouter } from "./modules/projects/projects.controller.js";
 import { reportsRouter } from "./modules/reports/reports.controller.js";
+import { publicReportsRouter } from "./modules/reports/reports.public.controller.js";
 import { repositoriesRouter } from "./modules/repositories/repositories.controller.js";
 import { schedulesRouter } from "./modules/schedules/schedules.controller.js";
 import { statisticsRouter } from "./modules/statistics/statistics.controller.js";
@@ -45,6 +46,8 @@ export function createApp() {
   // OpenClaw's (non-JWT) tool calls reach them; unmatched paths fall through.
   app.use("/api/openclaw", openclawServiceRouter);
   app.use("/api/openclaw", openclawRouter);
+  // Public (no-auth) shared-report view — mounted before the JWT reports router.
+  app.use("/api/public/reports", publicReportsRouter);
   app.use("/api/reports", reportsRouter);
   app.use("/api/statistics", statisticsRouter);
   app.use("/api/schedules", schedulesRouter);

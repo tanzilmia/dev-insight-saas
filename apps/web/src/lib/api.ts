@@ -548,6 +548,7 @@ export type ReportDetail = ReportSummary & {
   repositoryId: string | null;
   projectId: string | null;
   requestedById: string | null;
+  shareToken: string | null;
   contributors: ReportContributor[];
 };
 
@@ -575,6 +576,31 @@ export async function getReport(reportId: string) {
 
 export async function deleteReport(reportId: string) {
   await api.delete(`/api/reports/${reportId}`);
+}
+
+export async function shareReport(reportId: string) {
+  const response = await api.post<{ token: string }>(`/api/reports/${reportId}/share`);
+  return response.data.token;
+}
+
+export async function unshareReport(reportId: string) {
+  await api.delete(`/api/reports/${reportId}/share`);
+}
+
+export type PublicReport = {
+  title: string;
+  markdown: string;
+  reportType: ReportType;
+  targetLabel: string;
+  status: ReportStatus;
+  period: { from: string; to: string };
+  statistics: ReportStatistics | null;
+  createdAt: string;
+};
+
+export async function getPublicReport(token: string) {
+  const response = await api.get<{ report: PublicReport }>(`/api/public/reports/${token}`);
+  return response.data.report;
 }
 
 /* ------------------------------------------------------------------ */

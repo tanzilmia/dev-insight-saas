@@ -519,7 +519,7 @@ export function SchedulesManager() {
                                   </span>
                                 ) : schedule.lastReportId ? (
                                   <Link
-                                    href="/dashboard/reports"
+                                    href={`/dashboard/reports?report=${schedule.lastReportId}`}
                                     className="text-xs font-semibold text-(--accent) hover:underline"
                                   >
                                     view

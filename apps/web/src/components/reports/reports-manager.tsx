@@ -10,7 +10,9 @@ import {
   Download,
   FileText,
   History,
+  Link2,
   Loader2,
+  Share2,
   Sparkles,
   Trash2
 } from "lucide-react";
@@ -34,7 +36,9 @@ import {
   listEmployees,
   listProjects,
   listReports,
-  listRepositories
+  listRepositories,
+  shareReport,
+  unshareReport
 } from "@/lib/api";
 import { useSession } from "@/lib/use-session";
 import {
@@ -133,6 +137,10 @@ export function ReportsManager() {
   const [copied, setCopied] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [origin, setOrigin] = useState("");
 
   useEffect(() => {
     if (!organizationId) {
@@ -178,6 +186,21 @@ export function ReportsManager() {
     void refreshHistory();
   }, [refreshHistory]);
 
+  // Deep-link support: /dashboard/reports?report=<id> (e.g. a schedule's "view"
+  // link) opens that report on load. Read from the URL on the client only.
+  useEffect(() => {
+    const reportId = new URLSearchParams(window.location.search).get("report");
+    if (reportId) {
+      void handleOpenSavedReport(reportId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Read the site origin after mount (client only) to build the share link.
+  useEffect(() => {
+    Promise.resolve(window.location.origin).then(setOrigin);
+  }, []);
+
   const needsEmployees = reportType === "employee" || reportType === "team";
   const canSubmit =
     !!organizationId &&
@@ -222,6 +245,8 @@ export function ReportsManager() {
       setResult(report);
       setSelectedReport(null);
       setSelectedReportId(report.reportId);
+      setShareToken(null);
+      setShareCopied(false);
       setDetailError(null);
       setHistoryLoading(true);
       await refreshHistory();
@@ -255,12 +280,15 @@ export function ReportsManager() {
     setSelectedReportId(reportId);
     setSelectedReport(null);
     setResult(null);
+    setShareToken(null);
+    setShareCopied(false);
     setDetailLoading(true);
     setDetailError(null);
 
     try {
       const detail = await getReport(reportId);
       setSelectedReport(detail);
+      setShareToken(detail.shareToken);
       syncFormToReport(detail);
     } catch (caught) {
       setDetailError(getApiErrorMessage(caught));
@@ -309,6 +337,44 @@ export function ReportsManager() {
       setDetailError(getApiErrorMessage(caught));
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function copyShareLink(token: string) {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/share/${token}`);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable — the link stays visible for manual copy.
+    }
+  }
+
+  async function handleShare(reportId: string) {
+    setShareBusy(true);
+    setDetailError(null);
+    try {
+      const token = await shareReport(reportId);
+      setShareToken(token);
+      await copyShareLink(token);
+    } catch (caught) {
+      setDetailError(getApiErrorMessage(caught));
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function handleUnshare(reportId: string) {
+    setShareBusy(true);
+    setDetailError(null);
+    try {
+      await unshareReport(reportId);
+      setShareToken(null);
+      setShareCopied(false);
+    } catch (caught) {
+      setDetailError(getApiErrorMessage(caught));
+    } finally {
+      setShareBusy(false);
     }
   }
 
@@ -675,6 +741,15 @@ export function ReportsManager() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => void handleShare(renderedReport.reportId)}
+                  disabled={shareBusy}
+                  className="glass-soft glass-hover inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-(--text) disabled:opacity-50"
+                >
+                  {shareBusy ? <Loader2 size={13} className="animate-spin" /> : <Share2 size={13} />}
+                  {shareToken ? "Shared" : "Share"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => void handleDelete(renderedReport.reportId)}
                   disabled={deleting}
                   className="glass-soft glass-hover ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-red-600 disabled:opacity-50 dark:text-red-400"
@@ -683,6 +758,33 @@ export function ReportsManager() {
                   Delete
                 </button>
               </div>
+
+              {shareToken ? (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-(--border) bg-(--surface-soft) px-3 py-2">
+                  <Link2 size={13} className="shrink-0 text-(--muted)" />
+                  <input
+                    readOnly
+                    value={`${origin}/share/${shareToken}`}
+                    onFocus={(event) => event.currentTarget.select()}
+                    className="min-w-0 flex-1 bg-transparent text-xs font-medium text-(--text) outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void copyShareLink(shareToken)}
+                    className="shrink-0 text-xs font-bold text-(--accent) hover:underline"
+                  >
+                    {shareCopied ? "Copied" : "Copy link"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleUnshare(renderedReport.reportId)}
+                    disabled={shareBusy}
+                    className="shrink-0 text-xs font-bold text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+                  >
+                    Unshare
+                  </button>
+                </div>
+              ) : null}
 
               <ReportMarkdown markdown={renderedReport.markdown} expanded={expanded} />
 

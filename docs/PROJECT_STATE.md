@@ -616,11 +616,38 @@ Schedules UX gap, done (typecheck + lint clean; timezone/DST next-run logic unit
   (read after mount to avoid a hydration mismatch); the table shows "at HH:MM" under the
   cadence. (`schedules.schemas.ts`, web `api.ts`, `schedules-manager.tsx`.)
 
-Remaining is deferred/feature work, not rough edges: deep-link a schedule's "view" to its
-`lastReportId` (Low, needs `useSearchParams` on the reports page); persist the structured
-leaderboard/analysis in report history (Low, markdown already carries it). **Feature phases**
-(not audit items): share/export (14b), channel delivery (14c), employee login/invite, Phase
-E multi-instance queue.
+**Batch 8 — Low cleanup (2026-07-10)** — deep-link a schedule's "view" to its report: the
+Schedules table now links to `/dashboard/reports?report=<lastReportId>` and `reports-manager`
+reads that query param on mount (client-only via `window.location.search`, no
+`useSearchParams`/Suspense needed) and opens the report. (Skipped the other Low item —
+persisting the *structured* leaderboard/analysis in history — as dead data: the report
+markdown already carries the "Who did what" table, and no UI renders structured leaderboard.)
+
+### 14b — Report sharing + export (2026-07-10) ✅
+
+Markdown export was already shipped (Batch 3: Copy + Download `.md`). This adds a **public
+share link** + print/PDF:
+- Migration `20260710121349_report_share_token` adds `Report.shareToken String? @unique`
+  (nullable unique; hand-written SQL + `prisma migrate deploy` because the unique-constraint
+  warning makes `migrate dev` refuse in a non-interactive shell — then `npx prisma generate`).
+- Backend `reports.service.ts`: `shareReport` (manager-gated; mints a `randomBytes(24)`
+  base64url token, idempotent), `unshareReport` (sets it null), `getPublicReport(token)`
+  (returns only presentational fields — title/markdown/stats/period, never org ids or
+  contributor rows). Routes `POST`/`DELETE /api/reports/:id/share` (JWT); a **new
+  unauthenticated** `GET /api/public/reports/:token` via `reports.public.controller.ts`,
+  mounted in `app.ts` at `/api/public/reports` **outside** `requireAuth`.
+- Frontend: `shareReport`/`unshareReport`/`getPublicReport` + `PublicReport` type in
+  `api.ts`; a **Share** button in the report toolbar that mints + copies the link, plus a
+  link box (copy / unshare); a public **`/share/[token]`** page (`app/share/[token]/page.tsx`
+  server component awaits Next 16 async `params` → client `shared-report.tsx`) that renders
+  the markdown + stat tiles with a **Print / PDF** button (`window.print()`), no auth/chrome.
+- Verified: API boots with the new router; `GET /api/public/reports/<bogus>` → 404
+  `SHARED_REPORT_NOT_FOUND` **with no auth** (open); `POST /api/reports/:id/share` without a
+  token → 401 (JWT-gated). typecheck + lint clean.
+
+Remaining: **Feature phases** — channel delivery (14c: Telegram/Discord auto-send, scheduler
+is ready), employee login/invite, Phase E multi-instance background history. No audit rough
+edges left.
 - **Sharing**: `ReportShare` model + share action + channel placeholders.
 - **Tests**: set up Vitest + Supertest first (none installed). Unit-test
   `token-cipher`, permission helpers, commit classification; integration-test the

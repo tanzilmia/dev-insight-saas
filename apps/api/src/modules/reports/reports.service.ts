@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import type { Prisma, Report, ReportContributor } from "@prisma/client";
 
 import {
@@ -78,6 +80,7 @@ function toDetail(report: ReportWithContributors) {
     repositoryId: report.repositoryId,
     projectId: report.projectId,
     requestedById: report.requestedById,
+    shareToken: report.shareToken,
     contributors: report.contributors.map(toContributor)
   };
 }
@@ -240,4 +243,60 @@ export async function deleteReport(actorId: string, reportId: string) {
   await prisma.report.delete({ where: { id: reportId } });
 
   return { id: reportId };
+}
+
+const SHARE_TOKEN_BYTES = 24;
+
+/** Create (or return the existing) public share token for a report. */
+export async function shareReport(actorId: string, reportId: string) {
+  const report = await prisma.report.findUnique({
+    where: { id: reportId },
+    select: { id: true, organizationId: true, shareToken: true }
+  });
+  if (!report) {
+    throw new AppError(404, "Report was not found", "REPORT_NOT_FOUND");
+  }
+  await requireOrganizationRole(actorId, report.organizationId, MANAGER_ROLES);
+
+  if (report.shareToken) {
+    return { token: report.shareToken };
+  }
+  const token = randomBytes(SHARE_TOKEN_BYTES).toString("base64url");
+  await prisma.report.update({ where: { id: reportId }, data: { shareToken: token } });
+  return { token };
+}
+
+/** Revoke a report's public share link. */
+export async function unshareReport(actorId: string, reportId: string) {
+  const report = await prisma.report.findUnique({
+    where: { id: reportId },
+    select: { id: true, organizationId: true }
+  });
+  if (!report) {
+    throw new AppError(404, "Report was not found", "REPORT_NOT_FOUND");
+  }
+  await requireOrganizationRole(actorId, report.organizationId, MANAGER_ROLES);
+  await prisma.report.update({ where: { id: reportId }, data: { shareToken: null } });
+  return { id: reportId };
+}
+
+/**
+ * Public, unauthenticated read of a shared report by its token. Returns only the
+ * presentational fields — never org ids, contributor rows, or internal data.
+ */
+export async function getPublicReport(token: string) {
+  const report = await prisma.report.findUnique({ where: { shareToken: token } });
+  if (!report) {
+    throw new AppError(404, "This shared report is no longer available", "SHARED_REPORT_NOT_FOUND");
+  }
+  return {
+    title: report.title,
+    markdown: report.markdownContent,
+    reportType: report.reportType,
+    targetLabel: report.targetLabel,
+    status: report.status,
+    period: { from: report.periodStart, to: report.periodEnd },
+    statistics: report.statisticsJson,
+    createdAt: report.createdAt
+  };
 }

@@ -351,6 +351,7 @@ model Report {
   status          String
   generatedBy     String?
   dataFingerprint String?
+  shareToken      String?  @unique
   createdAt       DateTime @default(now())
 
   organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
