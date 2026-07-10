@@ -8,11 +8,20 @@ import {
   requireOrganizationRole
 } from "../../common/access/organization-access.js";
 import { orchestrateReport } from "../openclaw/openclaw.service.js";
+import {
+  resolveEmployees,
+  resolveProject,
+  resolveRepository
+} from "../openclaw/openclaw.tools.js";
 import type { GenerateReportInput, Period, ReportType } from "../openclaw/openclaw.schemas.js";
 import type { CreateScheduleInput, UpdateScheduleInput } from "./schedules.schemas.js";
 
 // Bound how many due schedules a single scheduler tick runs.
 const MAX_PER_TICK = 20;
+
+// One quick retry after a transient failure (instead of skipping a whole
+// cadence); a second consecutive failure falls back to the normal cadence.
+const RETRY_DELAY_MS = 5 * 60 * 1000;
 
 /** Next fire time for a cadence, measured from `from`. */
 export function computeNextRun(from: Date, cadence: ScheduleCadence): Date {
@@ -22,7 +31,12 @@ export function computeNextRun(from: Date, cadence: ScheduleCadence): Date {
   if (cadence === "WEEKLY") {
     return new Date(from.getFullYear(), from.getMonth(), from.getDate() + 7, from.getHours(), from.getMinutes());
   }
-  return new Date(from.getFullYear(), from.getMonth() + 1, from.getDate(), from.getHours(), from.getMinutes());
+  // MONTHLY: advance one month, clamping the day to the target month's length so
+  // Jan 31 → Feb 28/29 instead of overflowing into March (which skips February).
+  const targetMonth = from.getMonth() + 1;
+  const daysInTargetMonth = new Date(from.getFullYear(), targetMonth + 1, 0).getDate();
+  const day = Math.min(from.getDate(), daysInTargetMonth);
+  return new Date(from.getFullYear(), targetMonth, day, from.getHours(), from.getMinutes());
 }
 
 function serialize(schedule: ReportSchedule) {
@@ -48,6 +62,19 @@ function serialize(schedule: ReportSchedule) {
 
 export async function createSchedule(actorId: string, input: CreateScheduleInput) {
   await requireOrganizationRole(actorId, input.organizationId, MANAGER_ROLES);
+
+  // The schema only checks a target is present; make sure it actually belongs to
+  // this org (these helpers throw a 404 otherwise) so a foreign or deleted id
+  // can't sit in the DB and fail silently when the schedule later runs.
+  if (input.repositoryId) {
+    await resolveRepository(input.organizationId, input.repositoryId);
+  }
+  if (input.projectId) {
+    await resolveProject(input.organizationId, input.projectId);
+  }
+  if (input.employeeIds?.length) {
+    await resolveEmployees(input.organizationId, input.employeeIds);
+  }
 
   const now = new Date();
   const schedule = await prisma.reportSchedule.create({
@@ -90,7 +117,18 @@ async function loadOwnedSchedule(actorId: string, id: string) {
 }
 
 export async function updateSchedule(actorId: string, id: string, input: UpdateScheduleInput) {
-  await loadOwnedSchedule(actorId, id);
+  const existing = await loadOwnedSchedule(actorId, id);
+  const now = new Date();
+
+  // Re-anchor the next run when the cadence changes, or when re-enabling a
+  // schedule whose nextRunAt is already in the past — otherwise a long-paused
+  // schedule fires on the very next tick.
+  let nextRunAt: Date | undefined;
+  if (input.cadence) {
+    nextRunAt = computeNextRun(now, input.cadence);
+  } else if (input.enabled === true && existing.nextRunAt < now) {
+    nextRunAt = computeNextRun(now, existing.cadence);
+  }
 
   const updated = await prisma.reportSchedule.update({
     where: { id },
@@ -100,8 +138,7 @@ export async function updateSchedule(actorId: string, id: string, input: UpdateS
       cadence: input.cadence ?? undefined,
       customPrompt: input.customPrompt === undefined ? undefined : input.customPrompt,
       enabled: input.enabled ?? undefined,
-      // Re-anchor the next run when the cadence changes.
-      nextRunAt: input.cadence ? computeNextRun(new Date(), input.cadence) : undefined
+      nextRunAt
     }
   });
 
@@ -156,8 +193,9 @@ export async function runScheduleNow(actorId: string, id: string) {
 
 /**
  * Runs every schedule whose nextRunAt is due. Called by the background
- * scheduler. Advances nextRunAt even on failure so a broken schedule doesn't
- * retry every tick; the error is recorded on the row.
+ * scheduler. Each schedule is claimed atomically before it runs (so two API
+ * instances can't double-generate the same report), then nextRunAt is advanced
+ * on success and on a repeated failure; a first transient failure retries soon.
  */
 export async function runDueSchedules(now: Date = new Date()) {
   const due = await prisma.reportSchedule.findMany({
@@ -166,20 +204,40 @@ export async function runDueSchedules(now: Date = new Date()) {
     take: MAX_PER_TICK
   });
 
+  let ran = 0;
+
   for (const schedule of due) {
-    const nextRunAt = computeNextRun(now, schedule.cadence);
+    const normalNext = computeNextRun(now, schedule.cadence);
+
+    // Claim it: advance nextRunAt conditioned on the value we just read. Only
+    // the instance whose update matches (count === 1) proceeds; a second
+    // instance (or a concurrent pause/edit) sees count 0 and skips.
+    const claim = await prisma.reportSchedule.updateMany({
+      where: { id: schedule.id, nextRunAt: schedule.nextRunAt, enabled: true },
+      data: { nextRunAt: normalNext }
+    });
+    if (claim.count === 0) {
+      continue;
+    }
+
+    ran += 1;
+
     try {
       const report = await executeSchedule(schedule);
       await prisma.reportSchedule.update({
         where: { id: schedule.id },
-        data: { lastRunAt: now, nextRunAt, lastReportId: report.reportId, lastStatus: "ok", lastError: null }
+        data: { lastRunAt: now, lastReportId: report.reportId, lastStatus: "ok", lastError: null }
       });
     } catch (error) {
+      // First failure in a streak → retry soon (if that's before the next run);
+      // a repeat failure keeps the already-claimed normal cadence.
+      const firstFailure = schedule.lastStatus !== "error";
+      const retryAt = new Date(now.getTime() + RETRY_DELAY_MS);
       await prisma.reportSchedule.update({
         where: { id: schedule.id },
         data: {
           lastRunAt: now,
-          nextRunAt,
+          nextRunAt: firstFailure && retryAt < normalNext ? retryAt : normalNext,
           lastStatus: "error",
           lastError: (error as Error).message.slice(0, 500)
         }
@@ -187,5 +245,5 @@ export async function runDueSchedules(now: Date = new Date()) {
     }
   }
 
-  return due.length;
+  return ran;
 }

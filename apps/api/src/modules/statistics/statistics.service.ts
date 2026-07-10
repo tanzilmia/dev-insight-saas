@@ -16,6 +16,19 @@ function startOfDay(date: Date) {
 }
 
 /**
+ * Local `YYYY-MM-DD` for a day bucket. `toISOString().slice(0,10)` would emit
+ * the UTC date, mislabelling every bucket by a day (and pairing it with the
+ * wrong commits) in any server timezone ahead of UTC, since the buckets are
+ * keyed by *local* midnight.
+ */
+function toLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Aggregates stored Git activity for the whole organization over a period into
  * the numbers the dashboard needs: headline totals, a daily commit series, top
  * contributors (Phase F leaderboard), per-repository / per-project breakdowns,
@@ -85,7 +98,7 @@ export async function getStatisticsOverview(actorId: string, query: StatisticsQu
   const endDay = startOfDay(to);
   while (cursor <= endDay && commitsOverTime.length < MAX_SERIES_POINTS) {
     const bucket = buckets.get(cursor.getTime()) ?? { commits: 0, additions: 0, deletions: 0 };
-    commitsOverTime.push({ date: cursor.toISOString().slice(0, 10), ...bucket });
+    commitsOverTime.push({ date: toLocalDateKey(cursor), ...bucket });
     cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
   }
 
@@ -132,7 +145,7 @@ export async function getStatisticsOverview(actorId: string, query: StatisticsQu
     commitsOverTime,
     topContributors: leaderboard.slice(0, 8),
     byRepository: byRepository.slice(0, 8),
-    byProject,
+    byProject: byProject.slice(0, 8),
     categories: analysis.categories,
     topModules: analysis.topModules,
     risks: analysis.risks

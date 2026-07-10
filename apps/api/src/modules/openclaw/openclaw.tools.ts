@@ -54,11 +54,33 @@ export type GitActivity = {
   additions: number;
   deletions: number;
   filesChanged: number;
-  /** True while commit collection (Phase 8) is not yet wired. */
-  pending: boolean;
+  /** Latest commit instant + sha in scope — used only to fingerprint the data
+   *  for the report cache (so an amend or reordering busts a stale report). */
+  lastCommitAt: Date | null;
+  lastSha: string | null;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parses a custom-range boundary. A bare `YYYY-MM-DD` (what the date picker
+ * sends) is read as a whole *local* calendar day — `from` at local midnight,
+ * `to` at the last millisecond — so the end date is inclusive. Otherwise every
+ * commit authored on the final day is dropped, because `new Date("YYYY-MM-DD")`
+ * parses as UTC midnight, i.e. the *start* of that day. Full datetime strings
+ * (which already carry a time) pass through unchanged.
+ */
+function parseRangeBoundary(value: string, edge: "start" | "end"): Date {
+  if (DATE_ONLY.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+    return edge === "start"
+      ? new Date(year, month - 1, day, 0, 0, 0, 0)
+      : new Date(year, month - 1, day, 23, 59, 59, 999);
+  }
+  return new Date(value);
+}
 
 /** resolve_period — turns a period keyword (or custom range) into dates. */
 export function resolvePeriod(
@@ -71,7 +93,12 @@ export function resolvePeriod(
     if (!customRange) {
       throw new AppError(400, "Custom range is required", "PERIOD_RANGE_MISSING");
     }
-    return { from: new Date(customRange.from), to: new Date(customRange.to) };
+    const from = parseRangeBoundary(customRange.from, "start");
+    const to = parseRangeBoundary(customRange.to, "end");
+    if (from > to) {
+      throw new AppError(400, "Custom range 'from' must be on or before 'to'", "PERIOD_RANGE_INVALID");
+    }
+    return { from, to };
   }
 
   if (period === "today") {
@@ -201,8 +228,7 @@ export async function fetchGitActivity(input: {
   since: Date;
   until: Date;
 }): Promise<GitActivity> {
-  const stats = await aggregateActivity(input);
-  return { ...stats, pending: false };
+  return aggregateActivity(input);
 }
 
 export type ReportCommit = {
@@ -359,7 +385,7 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
     "",
     "## Summary",
     context.activity.commits > 0
-      ? `Based on ${context.activity.commits} commit(s) in this period. The AI narrative (Phase 10) will summarize this activity.`
+      ? `Based on ${context.activity.commits} commit(s) in this period.`
       : "No commit activity found for this target and period. Collect commits on the Repositories page, then regenerate."
   ].filter((line): line is string => line !== null);
 

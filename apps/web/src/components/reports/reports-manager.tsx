@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { FileText, History, Loader2, Sparkles } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Download,
+  FileText,
+  History,
+  Loader2,
+  Sparkles,
+  Trash2
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -16,6 +27,7 @@ import {
   type ReportSummary,
   type ReportType,
   type TrackedRepository,
+  deleteReport,
   generateReport,
   getApiErrorMessage,
   getReport,
@@ -59,9 +71,13 @@ const emptyStats: ReportStatistics = {
   filesChanged: 0
 };
 
-function ReportMarkdown({ markdown }: { markdown: string }) {
+function ReportMarkdown({ markdown, expanded }: { markdown: string; expanded: boolean }) {
   return (
-    <div className="report-md glass-soft max-h-96 overflow-auto rounded-2xl p-5">
+    <div
+      className={`report-md glass-soft overflow-auto rounded-2xl p-5 ${
+        expanded ? "max-h-[70vh]" : "max-h-96"
+      }`}
+    >
       <ReactMarkdown remarkPlugins={reportMarkdownPlugins}>{markdown}</ReactMarkdown>
     </div>
   );
@@ -114,6 +130,9 @@ export function ReportsManager() {
   const [selectedReport, setSelectedReport] = useState<ReportDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!organizationId) {
@@ -165,7 +184,7 @@ export function ReportsManager() {
     (reportType === "repository" ? !!repositoryId : true) &&
     (reportType === "project" ? !!projectId : true) &&
     (needsEmployees ? selectedEmployeeIds.size > 0 : true) &&
-    (period === "custom" ? !!customFrom && !!customTo : true);
+    (period === "custom" ? !!customFrom && !!customTo && customFrom <= customTo : true);
 
   function toggleEmployee(id: string) {
     setSelectedEmployeeIds((current) => {
@@ -250,6 +269,49 @@ export function ReportsManager() {
     }
   }
 
+  async function handleCopy(markdown: string) {
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable (e.g. an insecure context) — no-op.
+    }
+  }
+
+  function handleDownload(title: string, markdown: string) {
+    const slug =
+      title.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "report";
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${slug}.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleDelete(reportId: string) {
+    if (!window.confirm("Delete this report? This cannot be undone.")) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await deleteReport(reportId);
+      setResult(null);
+      setSelectedReport(null);
+      setSelectedReportId(null);
+      await refreshHistory();
+    } catch (caught) {
+      setDetailError(getApiErrorMessage(caught));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (status === "loading") {
     return <DashboardLoading />;
   }
@@ -261,20 +323,26 @@ export function ReportsManager() {
   const activeEmployees = employees.filter((employee) => employee.status === "ACTIVE");
   const renderedReport = selectedReport
     ? {
+        reportId: selectedReport.id,
         title: selectedReport.title,
         markdown: selectedReport.markdown,
         status: selectedReport.status,
         statistics: selectedReport.statistics ?? emptyStats,
-        pending: [],
+        pending: [] as string[],
+        warnings: [] as string[],
+        cached: false,
         savedAt: selectedReport.createdAt
       }
     : result
       ? {
+          reportId: result.reportId,
           title: result.title,
           markdown: result.markdown,
           status: result.status,
           statistics: result.statistics,
           pending: result.pending,
+          warnings: result.warnings ?? [],
+          cached: result.cached ?? false,
           savedAt: null
         }
       : null;
@@ -435,6 +503,12 @@ export function ReportsManager() {
               </div>
             ) : null}
 
+            {period === "custom" && customFrom && customTo && customFrom > customTo ? (
+              <p className="-mt-1 text-xs font-bold text-red-600 dark:text-red-400">
+                “From” must be on or before “To”.
+              </p>
+            ) : null}
+
             <label className="grid gap-2 text-sm font-bold text-(--text)">
               Custom prompt (optional)
               <textarea
@@ -540,7 +614,14 @@ export function ReportsManager() {
                 <h2 className="text-xl font-black tracking-tight text-(--text)">
                   {renderedReport.title}
                 </h2>
-                <StatusBadge status={renderedReport.status} />
+                <div className="flex items-center gap-2">
+                  {renderedReport.cached ? (
+                    <span className="inline-flex items-center rounded-full bg-(--surface-soft) px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-(--muted)">
+                      Cached
+                    </span>
+                  ) : null}
+                  <StatusBadge status={renderedReport.status} />
+                </div>
               </div>
               {renderedReport.savedAt ? (
                 <p className="mb-4 text-xs font-black uppercase tracking-wide text-(--muted)">
@@ -564,12 +645,60 @@ export function ReportsManager() {
                 ))}
               </div>
 
-              <ReportMarkdown markdown={renderedReport.markdown} />
+              {renderedReport.warnings.length ? (
+                <div className="mb-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-bold text-amber-700 dark:text-amber-400">
+                  <p className="mb-1 uppercase tracking-wide">Heads up</p>
+                  <ul className="grid gap-1">
+                    {renderedReport.warnings.map((warning, index) => (
+                      <li key={index}>• {warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCopy(renderedReport.markdown)}
+                  className="glass-soft glass-hover inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-(--text)"
+                >
+                  {copied ? <Check size={13} /> : <Copy size={13} />}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownload(renderedReport.title, renderedReport.markdown)}
+                  className="glass-soft glass-hover inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-(--text)"
+                >
+                  <Download size={13} />
+                  Download
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(renderedReport.reportId)}
+                  disabled={deleting}
+                  className="glass-soft glass-hover ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-red-600 disabled:opacity-50 dark:text-red-400"
+                >
+                  {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                  Delete
+                </button>
+              </div>
+
+              <ReportMarkdown markdown={renderedReport.markdown} expanded={expanded} />
+
+              <button
+                type="button"
+                onClick={() => setExpanded((value) => !value)}
+                className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-(--accent)"
+              >
+                {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                {expanded ? "Collapse" : "Expand"}
+              </button>
 
               {renderedReport.pending.length ? (
                 <div className="mt-4 rounded-2xl border border-(--border) bg-(--surface-soft) p-4">
                   <p className="text-xs font-black uppercase tracking-wide text-(--muted)">
-                    Pending in later phases
+                    Notes
                   </p>
                   <ul className="mt-2 grid gap-1 text-sm font-bold text-(--muted)">
                     {renderedReport.pending.map((item) => (

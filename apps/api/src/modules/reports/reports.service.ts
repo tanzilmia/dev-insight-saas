@@ -1,6 +1,10 @@
 import type { Prisma, Report, ReportContributor } from "@prisma/client";
 
-import { requireOrganizationMember } from "../../common/access/organization-access.js";
+import {
+  MANAGER_ROLES,
+  requireOrganizationMember,
+  requireOrganizationRole
+} from "../../common/access/organization-access.js";
 import { AppError } from "../../common/errors/app-error.js";
 import { prisma } from "../../config/database.js";
 import type { ReportType } from "../openclaw/openclaw.schemas.js";
@@ -219,4 +223,21 @@ export async function getReport(actorId: string, reportId: string) {
   await requireOrganizationMember(actorId, report.organizationId);
 
   return toDetail(report);
+}
+
+export async function deleteReport(actorId: string, reportId: string) {
+  const report = await prisma.report.findUnique({
+    where: { id: reportId },
+    select: { id: true, organizationId: true }
+  });
+
+  if (!report) {
+    throw new AppError(404, "Report was not found", "REPORT_NOT_FOUND");
+  }
+
+  // Deleting is destructive, so gate it to managers/owners (viewing is any member).
+  await requireOrganizationRole(actorId, report.organizationId, MANAGER_ROLES);
+  await prisma.report.delete({ where: { id: reportId } });
+
+  return { id: reportId };
 }

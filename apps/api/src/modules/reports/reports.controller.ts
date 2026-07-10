@@ -3,7 +3,7 @@ import { Router } from "express";
 import { asyncHandler } from "../../common/http/async-handler.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { listReportsQuerySchema, reportParamsSchema } from "./reports.schemas.js";
-import { getReport, listReports } from "./reports.service.js";
+import { deleteReport, getReport, listReports } from "./reports.service.js";
 
 export const reportsRouter = Router();
 
@@ -29,5 +29,15 @@ reportsRouter.get(
     const report = await getReport(req.authUser!.id, id);
 
     res.status(200).json({ report });
+  })
+);
+
+reportsRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const { id } = reportParamsSchema.parse(req.params);
+    const result = await deleteReport(req.authUser!.id, id);
+
+    res.status(200).json(result);
   })
 );

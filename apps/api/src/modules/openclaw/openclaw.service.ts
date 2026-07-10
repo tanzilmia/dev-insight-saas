@@ -28,8 +28,14 @@ function computeFingerprint(activity: {
   additions: number;
   deletions: number;
   filesChanged: number;
+  lastCommitAt: Date | null;
+  lastSha: string | null;
 }) {
-  return `c${activity.commits}-a${activity.additions}-d${activity.deletions}-f${activity.filesChanged}`;
+  // Include the latest commit instant + sha, not just the totals: two different
+  // commit sets can share the same counts (and an amend keeps the counts), so
+  // totals alone would keep serving a stale cached report.
+  const t = activity.lastCommitAt ? activity.lastCommitAt.getTime() : 0;
+  return `c${activity.commits}-a${activity.additions}-d${activity.deletions}-f${activity.filesChanged}-t${t}-s${activity.lastSha ?? ""}`;
 }
 
 /**
@@ -99,8 +105,6 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     filesChanged: activity.filesChanged
   };
 
-  const readyPending = ["Statistics dashboard (Phase 13)", "Report sharing (Phase 14)"];
-
   // Report cache: an identical prior request with the same data reuses the saved
   // report and skips the LLM. Custom prompts are one-off, so they always regenerate.
   if (!input.customPrompt) {
@@ -129,7 +133,8 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
         analysis,
         leaderboard,
         status: "GENERATED" as const,
-        pending: readyPending,
+        pending: [] as string[],
+        warnings: collection.warnings,
         cached: true,
         collection
       };
@@ -156,20 +161,19 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
 
   let markdown = buildReportMarkdown(context).markdown;
   let status: "GENERATED" | "PARTIAL" = "PARTIAL";
-  let pending = [
-    "LLM provider configuration",
-    "Statistics dashboard (Phase 13)",
-    "Report sharing (Phase 14)"
+  let pending: string[] = [
+    "AI narrative unavailable — no LLM provider is configured, so this report uses a deterministic template."
   ];
 
   if (llm.available) {
     try {
       markdown = await llm.complete(buildReportPrompt(context));
       status = "GENERATED";
-      pending = readyPending;
+      pending = [];
     } catch (error) {
       // Fall back to the template so a report is always returned.
       console.warn("LLM report generation failed; using template.", error);
+      pending = ["AI narrative failed to generate; showing a deterministic template instead."];
     }
   }
 
@@ -189,11 +193,10 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     generatedBy: status === "GENERATED" ? "llm" : "template",
     // Only fingerprint LLM reports — the cache reuses those, never the template.
     dataFingerprint: status === "GENERATED" ? dataFingerprint : undefined,
-    contributors: employees.map((employee) => ({
-      userId: employee.id,
-      name: employee.name,
-      commitCount: 0
-    }))
+    contributors: employees.map((employee) => {
+      const row = leaderboard.find((entry) => entry.employeeId === employee.id);
+      return { userId: employee.id, name: employee.name, commitCount: row?.commits ?? 0 };
+    })
   });
 
   await prisma.auditLog.create({
@@ -229,6 +232,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     leaderboard,
     status,
     pending,
+    warnings: collection.warnings,
     cached: false,
     collection
   };

@@ -221,6 +221,13 @@ export function RepositoriesManager() {
   }
 
   async function handleUntrack(repo: TrackedRepository) {
+    if (
+      !window.confirm(
+        `Untrack ${repo.fullName}? It will stop syncing and won't appear in new reports.`
+      )
+    ) {
+      return;
+    }
     setBusyId(repo.id);
     setRowError(null);
 

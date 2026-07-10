@@ -541,14 +541,17 @@ export async function aggregateActivity(input: ActivityQuery) {
   const totals = await prisma.commit.aggregate({
     where: buildCommitWhere(input),
     _count: { _all: true },
-    _sum: { additions: true, deletions: true, changedFilesCount: true }
+    _sum: { additions: true, deletions: true, changedFilesCount: true },
+    _max: { committedAt: true, sha: true }
   });
 
   return {
     commits: totals._count._all,
     additions: totals._sum.additions ?? 0,
     deletions: totals._sum.deletions ?? 0,
-    filesChanged: totals._sum.changedFilesCount ?? 0
+    filesChanged: totals._sum.changedFilesCount ?? 0,
+    lastCommitAt: totals._max.committedAt ?? null,
+    lastSha: totals._max.sha ?? null
   };
 }
 
@@ -606,7 +609,7 @@ export async function buildEmployeeLeaderboard(
   const where = buildCommitWhere(input);
 
   const grouped = await prisma.commit.groupBy({
-    by: ["username"],
+    by: ["username", "authorEmail", "authorName"],
     where,
     _count: { _all: true },
     _sum: { additions: true, deletions: true, changedFilesCount: true }
@@ -631,19 +634,50 @@ export async function buildEmployeeLeaderboard(
     }
   }
 
-  const keyFor = (username: string | null) => {
-    const employee = username ? employeeByUsername.get(username) : undefined;
-    return { key: employee?.id ?? username ?? "__unknown__", employee };
+  // Identity key: a mapped employee folds all their usernames together; an
+  // unmapped Git username stands alone; a commit with no username is keyed by its
+  // author email (then name) so distinct email-only authors are NOT all merged
+  // into a single "Unknown" row.
+  type Identity = {
+    key: string;
+    employee?: { id: string; name: string };
+    username: string | null;
+    display: string;
+  };
+  const identityFor = (
+    username: string | null,
+    authorEmail: string | null,
+    authorName: string | null
+  ): Identity => {
+    if (username) {
+      const employee = employeeByUsername.get(username);
+      return {
+        key: employee ? `emp:${employee.id}` : `user:${username}`,
+        employee,
+        username,
+        display: employee?.name ?? username
+      };
+    }
+    const email = authorEmail?.trim();
+    const name = authorName?.trim();
+    if (email || name) {
+      return {
+        key: `author:${(email ?? name)!.toLowerCase()}`,
+        username: null,
+        display: name || email || "Unknown"
+      };
+    }
+    return { key: "__unknown__", username: null, display: "Unknown" };
   };
 
   const rows = new Map<string, EmployeeLeaderboardRow>();
   for (const group of grouped) {
-    const { key, employee } = keyFor(group.username);
+    const identity = identityFor(group.username, group.authorEmail, group.authorName);
     const additions = group._sum.additions ?? 0;
     const deletions = group._sum.deletions ?? 0;
     const filesChanged = group._sum.changedFilesCount ?? 0;
     const commits = group._count._all;
-    const existing = rows.get(key);
+    const existing = rows.get(identity.key);
 
     if (existing) {
       existing.commits += commits;
@@ -651,16 +685,16 @@ export async function buildEmployeeLeaderboard(
       existing.deletions += deletions;
       existing.filesChanged += filesChanged;
       existing.lines += additions + deletions;
-      if (group.username && !existing.usernames.includes(group.username)) {
-        existing.usernames.push(group.username);
+      if (identity.username && !existing.usernames.includes(identity.username)) {
+        existing.usernames.push(identity.username);
       }
     } else {
-      rows.set(key, {
+      rows.set(identity.key, {
         rank: 0,
-        employeeId: employee?.id ?? null,
-        name: employee?.name ?? group.username ?? "Unknown",
-        usernames: group.username ? [group.username] : [],
-        mapped: Boolean(employee),
+        employeeId: identity.employee?.id ?? null,
+        name: identity.display,
+        usernames: identity.username ? [identity.username] : [],
+        mapped: Boolean(identity.employee),
         commits,
         additions,
         deletions,
@@ -676,10 +710,10 @@ export async function buildEmployeeLeaderboard(
     where,
     orderBy: { committedAt: "desc" },
     take: 400,
-    select: { username: true, message: true }
+    select: { username: true, authorEmail: true, authorName: true, message: true }
   });
   for (const commit of recent) {
-    const { key } = keyFor(commit.username);
+    const { key } = identityFor(commit.username, commit.authorEmail, commit.authorName);
     const row = rows.get(key);
     if (row && row.sampleMessages.length < samplePerEmployee) {
       row.sampleMessages.push(commit.message.split("\n")[0]!.slice(0, 120));

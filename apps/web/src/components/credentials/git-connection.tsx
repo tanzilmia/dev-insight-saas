@@ -157,6 +157,13 @@ export function GitConnection() {
     if (!credential) {
       return;
     }
+    if (
+      !window.confirm(
+        "Disconnect this GitHub connection? Repositories that rely on it will stop syncing until you reconnect."
+      )
+    ) {
+      return;
+    }
 
     setActionBusy(true);
     setActionError(null);

@@ -194,7 +194,7 @@ export function SchedulesManager() {
     setBusyId(schedule.id);
     setRowError(null);
     try {
-      await updateSchedule(schedule.id, { organizationId, enabled: !schedule.enabled });
+      await updateSchedule(schedule.id, { enabled: !schedule.enabled });
       await refresh();
     } catch (error) {
       setRowError(getApiErrorMessage(error));
@@ -204,6 +204,9 @@ export function SchedulesManager() {
   }
 
   async function handleDelete(schedule: ReportSchedule) {
+    if (!window.confirm(`Delete the schedule “${schedule.name}”? This cannot be undone.`)) {
+      return;
+    }
     setBusyId(schedule.id);
     setRowError(null);
     try {

@@ -5,18 +5,19 @@ import { asyncHandler } from "../../common/http/async-handler.js";
 import { AppError } from "../../common/errors/app-error.js";
 import { requireOrganizationMember } from "../../common/access/organization-access.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import {
-  chatWithAgent,
-  isGatewayConfigured,
-  streamChatWithAgent
-} from "./openclaw.gateway.js";
+import { isGatewayConfigured, streamChatWithAgent } from "./openclaw.gateway.js";
 import { generateReportSchema } from "./openclaw.schemas.js";
 import { orchestrateReport } from "./openclaw.service.js";
 import { OPENCLAW_TOOLS } from "./openclaw.tools.js";
 
-const chatSchema = z.object({
+const chatMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().trim().min(1).max(8000)
+});
+
+const chatStreamSchema = z.object({
   organizationId: z.string().min(1),
-  message: z.string().trim().min(1).max(2000)
+  messages: z.array(chatMessageSchema).min(1).max(20)
 });
 
 export const openclawRouter = Router();
@@ -51,27 +52,12 @@ openclawRouter.get(
 );
 
 // Website chat box → OpenClaw agent. The gateway token stays server-side; org
-// access is enforced before proxying, and the user's context is forwarded.
-openclawRouter.post(
-  "/chat",
-  asyncHandler(async (req, res) => {
-    const { organizationId, message } = chatSchema.parse(req.body);
-    await requireOrganizationMember(req.authUser!.id, organizationId);
-    const reply = await chatWithAgent(message, {
-      organizationId,
-      requesterId: req.authUser!.id
-    });
-
-    res.status(200).json({ reply });
-  })
-);
-
-// Streaming variant — the agent's reply is written to the response in text
-// chunks as it is produced, so the chat box can render it token-by-token.
+// access is enforced before proxying, and the user's context is forwarded. The
+// agent's reply streams back token-by-token so the chat box renders it live.
 openclawRouter.post(
   "/chat/stream",
   asyncHandler(async (req, res) => {
-    const { organizationId, message } = chatSchema.parse(req.body);
+    const { organizationId, messages } = chatStreamSchema.parse(req.body);
     await requireOrganizationMember(req.authUser!.id, organizationId);
 
     // Validate reachability before committing to a streamed (headers-sent)
@@ -81,22 +67,29 @@ openclawRouter.post(
     }
 
     res.status(200);
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    // NDJSON: each line is a JSON event ({type:"delta"|"error"}) so the client
+    // can distinguish a real reply chunk from a mid-stream failure — the headers
+    // are already sent, so an error can no longer be a status code / JSON body.
+    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
+    // Cancel the upstream LLM call if the browser disconnects mid-stream.
+    const controller = new AbortController();
+    res.on("close", () => controller.abort());
+
     try {
-      for await (const delta of streamChatWithAgent(message, {
-        organizationId,
-        requesterId: req.authUser!.id
-      })) {
-        res.write(delta);
+      for await (const delta of streamChatWithAgent(
+        messages,
+        { organizationId, requesterId: req.authUser!.id },
+        controller.signal
+      )) {
+        res.write(`${JSON.stringify({ type: "delta", text: delta })}\n`);
       }
     } catch (error) {
-      // Headers are already sent, so surface the error inline in the stream.
       const note = error instanceof AppError ? error.message : "Failed to generate a reply";
-      res.write(`\n\n_${note}_`);
+      res.write(`${JSON.stringify({ type: "error", message: note })}\n`);
     } finally {
       res.end();
     }

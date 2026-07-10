@@ -3,15 +3,36 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2, MessageCircle, Send, Sparkles, X } from "lucide-react";
+import { Loader2, MessageCircle, RefreshCw, Send, Sparkles, Square, X } from "lucide-react";
 
-import { getChatStatus, streamAssistantMessage } from "@/lib/api";
+import { type ChatTurn, getChatStatus, streamAssistantMessage } from "@/lib/api";
 import { useSession } from "@/lib/use-session";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type Status = "loading" | "configured" | "unconfigured";
 
 const markdownPlugins = [remarkGfm];
+
+// Send only the recent tail as context, and clamp each turn so a long prior
+// report doesn't blow up the request. Users' turns are short; assistant turns
+// (reports) are truncated harder.
+const MAX_HISTORY = 8;
+
+function clampTurn(message: ChatMessage): ChatTurn {
+  const limit = message.role === "assistant" ? 1200 : 2000;
+  const content =
+    message.content.length > limit ? `${message.content.slice(0, limit)}\n…[truncated]` : message.content;
+  return { role: message.role, content };
+}
+
+function toPayload(messages: ChatMessage[]): ChatTurn[] {
+  const tail = messages.slice(-MAX_HISTORY);
+  // Some chat APIs require the first non-system turn to be from the user, so
+  // drop any leading assistant turns the window may have started on.
+  const firstUser = tail.findIndex((message) => message.role === "user");
+  const windowed = firstUser > 0 ? tail.slice(firstUser) : tail;
+  return windowed.map(clampTurn);
+}
 
 export function ChatWidget() {
   const { activeOrganization } = useSession();
@@ -25,6 +46,10 @@ export function ChatWidget() {
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  // Whether the view is pinned to the bottom; only then do we auto-scroll, so a
+  // user reading earlier messages isn't yanked down on every streamed token.
+  const pinnedRef = useRef(true);
 
   // .then keeps setState deferred (react-hooks/set-state-in-effect).
   useEffect(() => {
@@ -33,9 +58,70 @@ export function ChatWidget() {
       .catch(() => setStatus("unconfigured"));
   }, []);
 
+  // Abort any in-flight stream when the widget unmounts (no setState-after-unmount).
   useEffect(() => {
-    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
+    return () => abortRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    if (pinnedRef.current) {
+      bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
+    }
   }, [messages, streamingText, open]);
+
+  function handleScroll() {
+    const body = bodyRef.current;
+    if (!body) {
+      return;
+    }
+    pinnedRef.current = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+  }
+
+  async function runAssistant(convo: ChatMessage[]) {
+    if (!organizationId) {
+      return;
+    }
+
+    setError(null);
+    setSending(true);
+    setStreamingText("");
+    pinnedRef.current = true;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let streamed = "";
+
+    try {
+      const reply = await streamAssistantMessage(
+        organizationId,
+        toPayload(convo),
+        (delta) => {
+          streamed += delta;
+          setStreamingText((prev) => (prev ?? "") + delta);
+        },
+        controller.signal
+      );
+      const finalText = (reply || streamed).trim();
+      if (finalText) {
+        setMessages((current) => [...current, { role: "assistant", content: finalText }]);
+      } else {
+        setError("The assistant returned an empty response. Try again.");
+      }
+    } catch (caught) {
+      if (controller.signal.aborted) {
+        // Stopped by the user (or unmount): keep whatever streamed so far.
+        const partial = streamed.trim();
+        if (partial) {
+          setMessages((current) => [...current, { role: "assistant", content: partial }]);
+        }
+      } else {
+        setError(caught instanceof Error ? caught.message : "Something went wrong");
+      }
+    } finally {
+      setStreamingText(null);
+      setSending(false);
+      abortRef.current = null;
+    }
+  }
 
   async function handleSend(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,22 +131,22 @@ export function ChatWidget() {
     }
 
     setInput("");
-    setError(null);
-    setMessages((current) => [...current, { role: "user", content: text }]);
-    setSending(true);
-    setStreamingText("");
+    const next: ChatMessage[] = [...messages, { role: "user", content: text }];
+    setMessages(next);
+    await runAssistant(next);
+  }
 
-    try {
-      const reply = await streamAssistantMessage(organizationId, text, (delta) => {
-        setStreamingText((prev) => (prev ?? "") + delta);
-      });
-      setMessages((current) => [...current, { role: "assistant", content: reply }]);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Something went wrong");
-    } finally {
-      setStreamingText(null);
-      setSending(false);
+  function handleRetry() {
+    // On error the assistant turn was never appended, so the conversation still
+    // ends with the user message to re-answer.
+    if (sending || !messages.length) {
+      return;
     }
+    void runAssistant(messages);
+  }
+
+  function handleStop() {
+    abortRef.current?.abort();
   }
 
   return (
@@ -84,7 +170,11 @@ export function ChatWidget() {
 
           <div className="hairline" />
 
-          <div ref={bodyRef} className="flex-1 space-y-3 overflow-y-auto py-4 pr-1">
+          <div
+            ref={bodyRef}
+            onScroll={handleScroll}
+            className="flex-1 space-y-3 overflow-y-auto py-4 pr-1"
+          >
             {status === "loading" ? (
               <div className="grid h-full place-items-center text-(--muted)">
                 <Loader2 size={18} className="animate-spin" />
@@ -148,9 +238,17 @@ export function ChatWidget() {
           </div>
 
           {error ? (
-            <p className="mb-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400">
-              {error}
-            </p>
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400">
+              <span className="min-w-0">{error}</span>
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-black text-(--accent) transition hover:underline"
+              >
+                <RefreshCw size={12} />
+                Retry
+              </button>
+            </div>
           ) : null}
 
           <form onSubmit={handleSend} className="flex items-center gap-2">
@@ -163,14 +261,25 @@ export function ChatWidget() {
               }
               className="field w-full rounded-full px-4 py-2.5 text-sm font-medium text-(--text) placeholder:font-normal"
             />
-            <button
-              type="submit"
-              disabled={status !== "configured" || sending || !input.trim()}
-              aria-label="Send"
-              className="btn-gradient grid h-10 w-10 shrink-0 place-items-center rounded-full"
-            >
-              <Send size={16} />
-            </button>
+            {sending ? (
+              <button
+                type="button"
+                onClick={handleStop}
+                aria-label="Stop"
+                className="btn-gradient grid h-10 w-10 shrink-0 place-items-center rounded-full"
+              >
+                <Square size={15} />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={status !== "configured" || !input.trim()}
+                aria-label="Send"
+                className="btn-gradient grid h-10 w-10 shrink-0 place-items-center rounded-full"
+              >
+                <Send size={16} />
+              </button>
+            )}
           </form>
         </section>
       ) : null}

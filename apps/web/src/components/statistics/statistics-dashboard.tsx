@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  FileDiff,
   FolderGit2,
   Loader2,
   Minus,
@@ -98,17 +99,26 @@ export function StatisticsDashboard() {
               Activity across {activeOrganization?.name ?? "your organization"}.
             </p>
           </div>
-          <select
-            value={period}
-            onChange={(event) => setPeriod(event.target.value as StatPeriod)}
-            className="field rounded-lg px-3 py-2 text-sm font-medium text-(--text)"
-          >
-            {PERIODS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            {loading && overview ? (
+              <Loader2 size={16} className="animate-spin text-(--muted)" aria-label="Loading" />
+            ) : null}
+            <select
+              value={period}
+              onChange={(event) => {
+                setPeriod(event.target.value as StatPeriod);
+                setLoading(true);
+              }}
+              aria-label="Statistics period"
+              className="field rounded-lg px-3 py-2 text-sm font-medium text-(--text)"
+            >
+              {PERIODS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {error ? (
@@ -123,10 +133,11 @@ export function StatisticsDashboard() {
           </div>
         ) : overview && hasActivity ? (
           <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               <StatTile label="Commits" value={overview.totals.commits} icon={Activity} />
               <StatTile label="Lines added" value={overview.totals.additions} icon={Plus} />
               <StatTile label="Lines removed" value={overview.totals.deletions} icon={Minus} />
+              <StatTile label="Files changed" value={overview.totals.filesChanged} icon={FileDiff} />
               <StatTile label="Active repos" value={overview.totals.repositories} icon={FolderGit2} />
               <StatTile label="Contributors" value={overview.totals.contributors} icon={Users} />
             </div>
@@ -179,23 +190,33 @@ export function StatisticsDashboard() {
                 />
               </Panel>
 
-              <Panel title="Risk signals">
-                {overview.risks.length ? (
-                  <ul className="grid gap-2.5">
-                    {overview.risks.map((risk, index) => (
-                      <li key={index} className="flex gap-2 text-sm text-(--text)">
-                        <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-500" />
-                        {risk}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="py-2 text-sm text-(--muted)">
-                    No risk signals in this period.
-                  </p>
-                )}
+              <Panel title="Most changed areas">
+                <BarList
+                  items={overview.topModules.map((module) => ({
+                    label: module.module,
+                    value: module.changes
+                  }))}
+                  unit=" changes"
+                />
               </Panel>
             </div>
+
+            <Panel title="Risk signals">
+              {overview.risks.length ? (
+                <ul className="grid gap-2.5 sm:grid-cols-2">
+                  {overview.risks.map((risk, index) => (
+                    <li key={index} className="flex gap-2 text-sm text-(--text)">
+                      <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-500" />
+                      {risk}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="py-2 text-sm text-(--muted)">
+                  No risk signals in this period.
+                </p>
+              )}
+            </Panel>
           </>
         ) : (
           <div className="glass rounded-xl p-10 text-center">

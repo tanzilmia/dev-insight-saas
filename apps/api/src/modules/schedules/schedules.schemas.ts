@@ -48,7 +48,6 @@ export const createScheduleSchema = z
   .superRefine(refineTarget);
 
 export const updateScheduleSchema = z.object({
-  organizationId: z.string().min(1),
   name: z.string().trim().min(1).max(120).optional(),
   period: schedulePeriodSchema.optional(),
   cadence: scheduleCadenceSchema.optional(),

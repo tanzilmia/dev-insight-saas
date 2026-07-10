@@ -475,14 +475,133 @@ operator has done that, the **next assistant task is the DevInsight tool plugin 
 token-by-token (ChatGPT-style). `openclaw.gateway.ts` `streamChatWithAgent` asks the
 gateway for `stream: true` and yields OpenAI-compatible SSE `delta.content` chunks (falls
 back to yielding the whole reply once if the gateway ignores `stream`). New endpoint
-`POST /api/openclaw/chat/stream` writes those chunks to the response as plain text (checks
-`isGatewayConfigured` before flushing headers so config errors stay JSON; mid-stream
-errors are written inline). Web `streamAssistantMessage(orgId, msg, onDelta)` uses `fetch`
+`POST /api/openclaw/chat/stream` streams **NDJSON** — one JSON event per line,
+`{type:"delta",text}` or `{type:"error",message}` (checks `isGatewayConfigured` before
+flushing headers so config errors stay JSON). Web `streamAssistantMessage(orgId, msg, onDelta)` uses `fetch`
 + `response.body.getReader()` (not axios). `chat-widget.tsx` streams into a live bubble
 (`streamingText` state) and shows "Thinking…" only until the first chunk (covers the
 agent's tool-call phase). The old non-stream `/chat` + `sendAssistantMessage` remain.
 Note: token-by-token only if the OpenClaw gateway streams; otherwise one chunk (no
 regression). Typecheck + lint clean.
+
+**Hardening / bug-fix pass (2026-07-10)** — first of a multi-batch audit of existing
+features (Chat/Reports/Statistics/Schedules). Batch 1 = 4 High-severity bugs, all fixed
+(typecheck + lint clean; date logic unit-verified):
+1. **Chat stream error surfacing** — a mid-stream gateway failure used to be written into
+   the 200 body as text, so the client rendered the error as a normal assistant reply.
+   Stream is now NDJSON (`delta`/`error` events); `streamAssistantMessage` buffers by line
+   and **throws** on an `error` event so the chat widget shows its error banner instead.
+   (`openclaw.controller.ts` `/chat/stream`, web `lib/api.ts`.)
+2. **Reports custom-range end date dropped** — `new Date("YYYY-MM-DD")` parsed as UTC
+   midnight (start of day), so every commit on the end date was excluded. `resolvePeriod`
+   now parses a bare `YYYY-MM-DD` as a whole **local** day: `from`=00:00:00.000,
+   `to`=23:59:59.999 (inclusive; commit query is `lte`). (`openclaw.tools.ts`
+   `parseRangeBoundary`.)
+3. **Schedules MONTHLY month-end overflow** — `new Date(y, m+1, 31)` turned Jan 31 into
+   "Feb 31"→Mar 3, skipping February. `computeNextRun` now clamps the day to the target
+   month's length (Jan 31 → Feb 28/29). (`schedules.service.ts`.)
+4. **Schedules missing org-ownership check** — `createSchedule` accepted foreign/deleted
+   `repositoryId`/`projectId`/`employeeIds`. It now reuses `resolveRepository`/
+   `resolveProject`/`resolveEmployees` (404 if not in org). (`schedules.service.ts`.)
+
+**Batch 2 — Statistics feature pass (2026-07-10)** — all Medium + a few Low, done
+(typecheck + lint clean; chart path logic unit-verified):
+- **Single-day chart** — a one-point series (e.g. "Yesterday") drew an empty `M x,y`
+  moveto; `AreaChart` now draws a flat band + a marker so it reads. (`charts.tsx`.)
+- **Day-label TZ bug** — daily buckets are keyed by *local* midnight but were labelled
+  via `toISOString()` (UTC), so every bucket was a day off in TZs ahead of UTC.
+  New `toLocalDateKey`. (`statistics.service.ts`.)
+- **Squashed marker** — the hover/point dot was an SVG `<circle>` distorted into an
+  ellipse by `preserveAspectRatio="none"`; markers + y-axis labels are now HTML overlays
+  positioned by %. Added y-axis value labels + `role`/`aria-label`. (`charts.tsx`.)
+- **Period-switch feedback** — `loading` never reset on period change; the selector now
+  sets it and shows a spinner (stale data no longer looks final). (`statistics-dashboard.tsx`.)
+- **Unused payload rendered** — `totals.filesChanged` (new tile) and `topModules` (new
+  "Most changed areas" panel) were computed but never shown. `byProject` capped at 8.
+  (`statistics-dashboard.tsx`, `statistics.service.ts`.)
+
+**Batch 3 — Reports feature pass (2026-07-10)** — Med + Low, done (typecheck + lint
+clean; fingerprint logic unit-verified):
+- **Cache fingerprint collision** — the fingerprint was 4 aggregate counts, so two
+  different commit sets with equal totals (or an amend) reused a stale report.
+  `aggregateActivity` now also returns `_max` `committedAt`/`sha`, folded into the
+  fingerprint. (`activity.service.ts`, `openclaw.service.ts`, `openclaw.tools.ts`.)
+- **Partial reports looked complete** — the backend's collection `warnings` (e.g. "repo:
+  no Git credential, skipped") and `cached` flag are now surfaced: an amber "Heads up"
+  banner + a "Cached" badge. (`openclaw.service.ts` returns `warnings`; web `api.ts`,
+  `reports-manager.tsx`.)
+- **No export / delete / expand** — Copy, Download (.md), and Delete (new
+  `DELETE /api/reports/:id`, manager-gated, confirm dialog) actions + an Expand/Collapse
+  toggle on the preview (was locked at `max-h-96`). (`reports.service.ts`/`.controller.ts`,
+  `reports-manager.tsx`.)
+- **Custom range not validated** — an inverted `from > to` silently produced a 0-commit
+  report; now blocked in the form (submit disabled + hint) and in `resolvePeriod`
+  (400 `PERIOD_RANGE_INVALID`). (`reports-manager.tsx`, `openclaw.tools.ts`.)
+- **Stale phase scaffolding** — dropped the user-facing "Pending in later phases" roadmap
+  list (shipped items like "Statistics (Phase 13)") and the "(Phase 10)" template line;
+  the panel is now "Notes" and only shows a genuine LLM-not-configured note. Removed the
+  dead `GitActivity.pending` field. (`openclaw.service.ts`, `openclaw.tools.ts`,
+  `reports-manager.tsx`.)
+
+**Batch 4 — Chat feature pass (2026-07-10)** — Med + Low, done (typecheck + lint clean;
+memory-windowing logic unit-verified):
+- **Conversation memory** — the chat was stateless (only the latest message sent). The
+  stream endpoint now takes a `messages[]` array; the browser sends the recent tail
+  (`toPayload`: last 8 turns, drop a leading assistant turn, clamp long report content),
+  and `streamChatWithAgent` forwards it after the system turn. (`openclaw.controller.ts`,
+  `openclaw.gateway.ts`, web `api.ts`, `chat-widget.tsx`.)
+- **Abort / Stop** — `streamAssistantMessage` takes an `AbortSignal`; the widget aborts on
+  unmount and via a **Stop** button (partial reply is kept). The stream endpoint also
+  aborts the upstream LLM fetch on `res` `close`, so cancelling stops the token spend.
+- **Empty reply** — a blank reply no longer renders an empty assistant bubble; it surfaces
+  as a soft error with Retry.
+- **Retry after error** — the failed user turn is kept and a **Retry** button re-answers it
+  (was: message lost, input already cleared).
+- **Scroll** — auto-scroll only when pinned to the bottom (`pinnedRef` via `onScroll`), so a
+  user reading earlier messages isn't yanked down on every streamed token.
+- **Cleanup** — removed the dead non-stream path: `POST /api/openclaw/chat`, gateway
+  `chatWithAgent`, web `sendAssistantMessage`.
+
+**Batch 5 — Schedules feature pass (2026-07-10)** — Med + Low, done (typecheck + lint
+clean; retry/resume decision logic unit-verified). (Batch 1 already fixed the MONTHLY
+month-end overflow + create-time org-ownership check.)
+- **Cross-instance double-run** — `runDueSchedules` now *claims* each due schedule with an
+  atomic `updateMany` conditioned on the `nextRunAt` it read (advancing it); only the
+  instance whose update matches (`count === 1`) runs it, so two API instances can't
+  double-generate the same report (double LLM spend). (`schedules.service.ts`.)
+- **Failure skipped a whole cadence** — a first transient failure now retries in ~5 min
+  (if sooner than the next scheduled run); a *repeat* failure (`lastStatus === "error"`)
+  falls back to the normal cadence, so no tight retry loop. (`schedules.service.ts`.)
+- **Resume fired instantly** — re-enabling a long-paused schedule kept its past `nextRunAt`
+  and fired on the next tick; `updateSchedule` now recomputes `nextRunAt` from now when
+  re-enabling a past-due schedule. (`schedules.service.ts`.)
+- **No confirm on destructive actions** — added `window.confirm` to delete-schedule,
+  untrack-repo, and disconnect-GitHub. (`schedules-manager.tsx`, `repositories-manager.tsx`,
+  `credentials/git-connection.tsx`.)
+- **Cleanup** — dropped the dead required `organizationId` from `updateScheduleSchema` (and
+  the web patch type / toggle call); authz is derived from the loaded row.
+
+**Batch 6 — Reports deferred (shared-logic) pass (2026-07-10)** — Med + Low, done
+(typecheck + lint clean; identity-folding logic unit-verified):
+- **`Unknown` contributor folding** — `buildEmployeeLeaderboard` grouped by `username`
+  only, so every commit with a null username collapsed into one "Unknown" row (distinct
+  email-only authors merged + misattributed). It now groups by
+  `["username", "authorEmail", "authorName"]` and keys identity as: mapped employee (folds
+  their usernames) → unmapped username → **author email/name** (null-username authors stay
+  distinct) → "Unknown" only when there's no identity at all. Shared logic, so Statistics
+  `topContributors` benefits too. (`activity.service.ts`.)
+- **Contributor `commitCount` stored as 0** — `orchestrateReport` now fills each stored
+  contributor's `commitCount` from the leaderboard. (`openclaw.service.ts`.)
+- Still deferred (low value): persisting the *structured* leaderboard/analysis in report
+  history — the saved report's **markdown already carries** the "Who did what" table, so
+  history is not blank; a structured re-render is a larger UI change for little gain.
+
+**Audit hardening complete for all four features + setup (Batches 1–6).** Remaining is
+deferred/feature work, not rough edges: **Schedules (needs a schema migration)** — a
+time-of-day / timezone field so a DAILY report fires at a chosen hour rather than its
+creation minute; deep-link a schedule's "view" to its `lastReportId` (Low, needs
+`useSearchParams` on the reports page). **Feature phases** (not audit items): channel
+delivery (14c), share/export (14b), employee login/invite, Phase E multi-instance queue.
 - **Sharing**: `ReportShare` model + share action + channel placeholders.
 - **Tests**: set up Vitest + Supertest first (none installed). Unit-test
   `token-cipher`, permission helpers, commit classification; integration-test the

@@ -516,6 +516,10 @@ export type GeneratedReport = {
   leaderboard?: EmployeeLeaderboardRow[];
   status: ReportStatus;
   pending: string[];
+  /** Non-fatal collection notes, e.g. a repo skipped for a missing credential. */
+  warnings?: string[];
+  /** True when this report was served from the cache (no LLM re-run). */
+  cached?: boolean;
 };
 
 export type ReportSummary = {
@@ -569,6 +573,10 @@ export async function getReport(reportId: string) {
   return response.data.report;
 }
 
+export async function deleteReport(reportId: string) {
+  await api.delete(`/api/reports/${reportId}`);
+}
+
 /* ------------------------------------------------------------------ */
 /* OpenClaw assistant (website chat)                                  */
 /* ------------------------------------------------------------------ */
@@ -578,24 +586,20 @@ export async function getChatStatus() {
   return response.data.configured;
 }
 
-export async function sendAssistantMessage(organizationId: string, message: string) {
-  const response = await api.post<{ reply: string }>("/api/openclaw/chat", {
-    organizationId,
-    message
-  });
-
-  return response.data.reply;
-}
+export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 /**
  * Streams the assistant reply. Uses fetch (not axios) so the response body can
- * be read incrementally; `onDelta` fires for each text chunk. Returns the full
- * reply once the stream ends.
+ * be read incrementally; `onDelta` fires for each text chunk. `messages` is the
+ * recent conversation so the agent keeps context. Pass an `AbortSignal` to
+ * cancel the request (Stop button / unmount). Returns the full reply once the
+ * stream ends.
  */
 export async function streamAssistantMessage(
   organizationId: string,
-  message: string,
-  onDelta: (delta: string) => void
+  messages: ChatTurn[],
+  onDelta: (delta: string) => void,
+  signal?: AbortSignal
 ): Promise<string> {
   const token = getStoredToken();
   const response = await fetch(`${API_URL}/api/openclaw/chat/stream`, {
@@ -604,7 +608,8 @@ export async function streamAssistantMessage(
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {})
     },
-    body: JSON.stringify({ organizationId, message })
+    body: JSON.stringify({ organizationId, messages }),
+    signal
   });
 
   if (!response.ok || !response.body) {
@@ -621,17 +626,47 @@ export async function streamAssistantMessage(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let full = "";
+  let buffer = "";
+  let streamError: string | null = null;
+
+  // Each line is a JSON event: {type:"delta",text} or {type:"error",message}.
+  // A "delta" appends to the reply; an "error" (mid-stream gateway failure) is
+  // surfaced as a thrown error instead of being rendered as a normal reply.
+  const handleLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    let event: { type?: string; text?: string; message?: string };
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      return; // ignore a malformed / partial line
+    }
+    if (event.type === "delta" && event.text) {
+      full += event.text;
+      onDelta(event.text);
+    } else if (event.type === "error") {
+      streamError = event.message ?? "Failed to generate a reply";
+    }
+  };
 
   for (;;) {
     const { done, value } = await reader.read();
     if (done) {
       break;
     }
-    const chunk = decoder.decode(value, { stream: true });
-    if (chunk) {
-      full += chunk;
-      onDelta(chunk);
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      handleLine(buffer.slice(0, newlineIndex));
+      buffer = buffer.slice(newlineIndex + 1);
     }
+  }
+  handleLine(buffer); // flush a trailing line that had no newline
+
+  if (streamError) {
+    throw new Error(streamError);
   }
 
   return full;
@@ -732,7 +767,6 @@ export async function createSchedule(input: CreateScheduleInput) {
 export async function updateSchedule(
   id: string,
   patch: {
-    organizationId: string;
     name?: string;
     period?: StatPeriod;
     cadence?: ScheduleCadence;
