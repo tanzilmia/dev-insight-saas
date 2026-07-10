@@ -5,7 +5,7 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-09.
+> Last updated: 2026-07-10.
 
 ---
 
@@ -654,6 +654,79 @@ edges left.
   report flow with a mocked GitProvider/LLMProvider.
 - **Deployment**: Dockerfiles (web, api) + `docker-compose.yml` (add postgres) +
   production env guide.
+
+### Auto contributor-mapping via declared git aliases (2026-07-10) ✅
+
+Removes the biggest manual chore: previously a manager had to hand-map every
+discovered `ContributorIdentity` → employee, **per repo** (identities are
+per-repo: `@@unique([repositoryId, externalId])`), so each new repo meant
+re-mapping the same people. Now the employee **declares** their git handle once
+and every repo links automatically.
+
+- **New model `EmployeeGitAlias`** (org-scoped, employee-owned; migration
+  `20260710063618_employee_git_alias`): `{ organizationId, userId, provider,
+  username?, email?, name?, isPrimary }`, `@@unique([organizationId, provider,
+  username])`. This is the source of truth for auto-mapping — it survives across
+  repos, unlike the per-repo `ContributorIdentity`. An employee can own several
+  aliases → multiple GitHub accounts per person (also reflected as multiple
+  `EmployeeGitMapping` rows). Values normalized (trim + lowercase, leading `@`
+  stripped) on write.
+- **Match key is the GitHub `username` (login), not the git author *name*.**
+  Name is unreliable (collisions/renames); email isn't available from the
+  contributors API (only from collected commits). Only an **exact username match
+  is auto-applied** (the "silent auto, else confirm" decision); email/name are
+  reserved for future *suggested* matches. `GitContributor` gives us
+  `username`+`externalId`, so username matching works today.
+- **Auto-link helper** `modules/contributors/auto-link.ts` — two directions,
+  both transaction-scoped, both create `EmployeeGitMapping` with
+  `isPrimary` from the alias:
+  - `autoLinkRepositoryContributors(tx, orgId, repoId)` — runs at the end of
+    `discoverContributors`; links unmapped, non-ignored identities whose
+    `username` matches an alias (case-insensitive). Count recorded in the
+    `contributor.discover` audit as `autoLinked`.
+  - `autoLinkAlias(tx, {...})` — reverse pass; when an alias is declared it
+    retro-links already-discovered identities across **all** the org's repos, so
+    repos connected *before* the employee existed link up too.
+- **Employees**: `createEmployee` accepts `gitUsernames: string[]` (first =
+  primary); new `POST/DELETE /api/employees/:userId/git-aliases[/:aliasId]`
+  (manager-gated) to add/remove handles later; employee DTOs now include
+  `gitAliases`. Alias creation is idempotent per (org, username) and rejects a
+  username already owned by another employee (`GIT_ALIAS_TAKEN`). Removing an
+  alias stops *future* auto-linking but leaves existing mappings intact.
+- **Manual map now propagates**: `mapContributor` also upserts an
+  `EmployeeGitAlias` for the username, so a one-off manual map auto-applies to
+  every other repo going forward.
+- **Projects**: `createProject` accepts optional `members: {userId, role}[]`
+  (validated as active org members) so a team is assigned in the same step as
+  creating the project.
+- **Frontend**: employees page has a "GitHub username(s)" field (comma-separated)
+  on create + per-row git-identity chips with inline add/remove; projects create
+  form has an "Assign team" toggle list (added as Developers). New `api.ts`
+  helpers: `addEmployeeGitAlias`, `removeEmployeeGitAlias`, `EmployeeGitAlias`
+  type, `createEmployee.gitUsernames`, `createProject.members`.
+- typecheck + lint clean across workspaces.
+
+**Follow-up done same day (2026-07-10):**
+- **Auto-discover-on-connect** — `discoverContributors` refactored: its core is now
+  exported as `discoverContributorsForRepository(repository, actorId)` (auth-free
+  core; the public fn loads + authorizes + delegates). `selectRepositories` calls
+  it **best-effort, sequentially** for each just-tracked repo after the select
+  transaction commits, so contributors are discovered **and auto-linked the moment
+  a repo is connected** — no manual "Discover" press. A repo whose contributors
+  can't be fetched (permissions/rate-limit) is skipped with a `console.warn`,
+  never failing the selection. Trade-off: select now blocks on those GitHub calls
+  (fine for a handful; a background job is the future improvement for bulk
+  selects). The manual Discover button still works as a refresh.
+- **Bot auto-ignore** — `isBotUsername` (`[bot]` login suffix + a `KNOWN_BOT_LOGINS`
+  set: web-flow, dependabot, github-actions, renovate, snyk-bot, …) sets
+  `ignored: true` on **first insert** only (refresh preserves manual choices).
+  Ignored identities are skipped by auto-link and the unmapped list, so bots never
+  clutter mapping or reports.
+
+**Still deferred:** *suggested* matches UI for fuzzy email/name signals
+(confirm-before-map — the other half of the chosen match strategy); "create
+employee from this unmapped author"; unmapped-contributors dashboard nudge; bulk
+CSV employee import.
 
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 

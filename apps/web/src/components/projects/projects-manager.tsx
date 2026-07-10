@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
+  Check,
   FolderKanban,
   Loader2,
   Plus,
@@ -57,6 +58,7 @@ export function ProjectsManager() {
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [newMemberIds, setNewMemberIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -126,6 +128,19 @@ export function ProjectsManager() {
     );
   }, [employees, detail]);
 
+  const activeEmployees = useMemo(
+    () => employees.filter((employee) => employee.status === "ACTIVE"),
+    [employees]
+  );
+
+  function toggleNewMember(userId: string) {
+    setNewMemberIds((current) =>
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : [...current, userId]
+    );
+  }
+
   function handleSelect(projectId: string) {
     setSelectedId(projectId);
     setMemberError(null);
@@ -148,10 +163,12 @@ export function ProjectsManager() {
       const project = await createProject({
         organizationId,
         name,
-        description: description.trim() ? description.trim() : undefined
+        description: description.trim() ? description.trim() : undefined,
+        members: newMemberIds.map((userId) => ({ userId, role: "DEVELOPER" }))
       });
       setName("");
       setDescription("");
+      setNewMemberIds([]);
       await refreshProjects();
       handleSelect(project.id);
     } catch (error) {
@@ -284,6 +301,35 @@ export function ProjectsManager() {
                     placeholder="Optional summary of the project"
                   />
                 </label>
+
+                {activeEmployees.length > 0 ? (
+                  <div className="grid gap-2 text-sm font-bold text-(--text)">
+                    Assign team (optional)
+                    <div className="flex flex-wrap gap-1.5">
+                      {activeEmployees.map((employee) => {
+                        const selected = newMemberIds.includes(employee.id);
+                        return (
+                          <button
+                            key={employee.id}
+                            type="button"
+                            onClick={() => toggleNewMember(employee.id)}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                              selected
+                                ? "btn-gradient text-white"
+                                : "field text-(--text)"
+                            }`}
+                          >
+                            {selected ? <Check size={12} /> : <Plus size={12} />}
+                            {employee.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="text-xs font-normal text-(--muted)">
+                      Added as Developers — change roles after creating.
+                    </span>
+                  </div>
+                ) : null}
 
                 {createError ? (
                   <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-600 dark:text-red-400">

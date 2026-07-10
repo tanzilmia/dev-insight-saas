@@ -22,7 +22,16 @@ export const projectMemberParamsSchema = z.object({
 export const createProjectSchema = z.object({
   organizationId,
   name: z.string().trim().min(2).max(100),
-  description: z.string().trim().max(500).optional()
+  description: z.string().trim().max(500).optional(),
+  members: z
+    .array(
+      z.object({
+        userId: z.string().min(1),
+        role: projectRoleSchema.default("DEVELOPER")
+      })
+    )
+    .max(50)
+    .optional()
 });
 
 export const updateProjectSchema = z

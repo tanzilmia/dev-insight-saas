@@ -12,6 +12,7 @@ type CreateProjectInput = {
   organizationId: string;
   name: string;
   description?: string;
+  members?: { userId: string; role: ProjectRole }[];
 };
 
 type UpdateProjectInput = {
@@ -99,6 +100,35 @@ export async function getProject(actorId: string, projectId: string) {
 export async function createProject(actorId: string, input: CreateProjectInput) {
   await requireOrganizationRole(actorId, input.organizationId, MANAGER_ROLES);
 
+  // De-duplicate the requested members (last role wins) and confirm each is an
+  // active member of the organization before assigning them to the project.
+  const memberByUserId = new Map<string, ProjectRole>();
+  for (const member of input.members ?? []) {
+    memberByUserId.set(member.userId, member.role);
+  }
+  const memberEntries = [...memberByUserId.entries()];
+
+  if (memberEntries.length > 0) {
+    const activeMembers = await prisma.organizationMember.findMany({
+      where: {
+        organizationId: input.organizationId,
+        userId: { in: memberEntries.map(([userId]) => userId) },
+        status: "ACTIVE"
+      },
+      select: { userId: true }
+    });
+    const activeUserIds = new Set(activeMembers.map((member) => member.userId));
+    const invalid = memberEntries.filter(([userId]) => !activeUserIds.has(userId));
+
+    if (invalid.length > 0) {
+      throw new AppError(
+        400,
+        "One or more selected people are not active members of this organization",
+        "USER_NOT_IN_ORGANIZATION"
+      );
+    }
+  }
+
   const project = await prisma.$transaction(async (tx) => {
     const created = await tx.project.create({
       data: {
@@ -108,6 +138,12 @@ export async function createProject(actorId: string, input: CreateProjectInput) 
       }
     });
 
+    for (const [userId, role] of memberEntries) {
+      await tx.projectMember.create({
+        data: { projectId: created.id, userId, role }
+      });
+    }
+
     await tx.auditLog.create({
       data: {
         organizationId: input.organizationId,
@@ -115,14 +151,14 @@ export async function createProject(actorId: string, input: CreateProjectInput) 
         action: "project.create",
         entityType: "Project",
         entityId: created.id,
-        metadataJson: { name: created.name }
+        metadataJson: { name: created.name, members: memberEntries.length }
       }
     });
 
     return created;
   });
 
-  return toProjectSummary(project, 0);
+  return toProjectSummary(project, memberEntries.length);
 }
 
 export async function updateProject(

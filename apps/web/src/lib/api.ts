@@ -80,6 +80,14 @@ export type OrgRole = "OWNER" | "MANAGER" | "EMPLOYEE" | "ADMIN";
 export type AssignableRole = "EMPLOYEE" | "MANAGER" | "ADMIN";
 export type MemberStatus = "ACTIVE" | "DISABLED";
 
+export type EmployeeGitAlias = {
+  id: string;
+  username: string | null;
+  email: string | null;
+  name: string | null;
+  isPrimary: boolean;
+};
+
 export type Employee = {
   id: string;
   name: string;
@@ -87,6 +95,7 @@ export type Employee = {
   role: OrgRole;
   status: "ACTIVE" | "INVITED" | "DISABLED";
   joinedAt: string;
+  gitAliases: EmployeeGitAlias[];
 };
 
 export async function listEmployees(organizationId: string) {
@@ -102,8 +111,34 @@ export async function createEmployee(input: {
   name: string;
   email: string;
   role: AssignableRole;
+  gitUsernames?: string[];
 }) {
   const response = await api.post<{ employee: Employee }>("/api/employees", input);
+  return response.data.employee;
+}
+
+export async function addEmployeeGitAlias(
+  userId: string,
+  input: { organizationId: string; username: string; isPrimary?: boolean }
+) {
+  const response = await api.post<{ employee: Employee }>(
+    `/api/employees/${userId}/git-aliases`,
+    input
+  );
+
+  return response.data.employee;
+}
+
+export async function removeEmployeeGitAlias(
+  userId: string,
+  aliasId: string,
+  organizationId: string
+) {
+  const response = await api.delete<{ employee: Employee }>(
+    `/api/employees/${userId}/git-aliases/${aliasId}`,
+    { params: { organizationId } }
+  );
+
   return response.data.employee;
 }
 
@@ -164,6 +199,7 @@ export async function createProject(input: {
   organizationId: string;
   name: string;
   description?: string;
+  members?: { userId: string; role: ProjectRole }[];
 }) {
   const response = await api.post<{ project: Project }>("/api/projects", input);
   return response.data.project;

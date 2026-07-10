@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Ban, CheckCircle2, Loader2, UserPlus, Users } from "lucide-react";
+import { Ban, CheckCircle2, GitBranch, Loader2, Plus, UserPlus, Users, X } from "lucide-react";
 
 import {
   type AssignableRole,
   type Employee,
+  addEmployeeGitAlias,
   createEmployee,
   getApiErrorMessage,
   listEmployees,
+  removeEmployeeGitAlias,
   updateEmployee
 } from "@/lib/api";
 import { canManage, useSession } from "@/lib/use-session";
@@ -18,6 +20,18 @@ import {
 } from "@/components/dashboard/dashboard-chrome";
 
 const ROLE_OPTIONS: AssignableRole[] = ["EMPLOYEE", "MANAGER", "ADMIN"];
+
+/** Splits a free-text field into unique, "@"-stripped git usernames. */
+function parseUsernames(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .split(/[\s,]+/)
+        .map((value) => value.trim().replace(/^@+/, ""))
+        .filter(Boolean)
+    )
+  ];
+}
 
 const fieldClass =
   "field w-full rounded-lg px-3.5 py-2.5 text-sm font-medium text-(--text) placeholder:font-normal";
@@ -47,11 +61,16 @@ export function EmployeesManager() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AssignableRole>("EMPLOYEE");
+  const [gitUsernames, setGitUsernames] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+
+  // Per-row draft text for the inline "add git identity" input.
+  const [aliasDraft, setAliasDraft] = useState<Record<string, string>>({});
+  const [aliasBusyId, setAliasBusyId] = useState<string | null>(null);
 
   // Uses .then callbacks (not async/await) so setState stays deferred and this
   // is safe to call directly from an effect (react-hooks/set-state-in-effect).
@@ -88,15 +107,64 @@ export function EmployeesManager() {
     setFormError(null);
 
     try {
-      await createEmployee({ organizationId, name, email, role });
+      await createEmployee({
+        organizationId,
+        name,
+        email,
+        role,
+        gitUsernames: parseUsernames(gitUsernames)
+      });
       setName("");
       setEmail("");
       setRole("EMPLOYEE");
+      setGitUsernames("");
       await refresh();
     } catch (error) {
       setFormError(getApiErrorMessage(error));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleAddAlias(employee: Employee) {
+    if (!organizationId) {
+      return;
+    }
+
+    const username = (aliasDraft[employee.id] ?? "").trim().replace(/^@+/, "");
+    if (!username) {
+      return;
+    }
+
+    setAliasBusyId(employee.id);
+    setRowError(null);
+
+    try {
+      await addEmployeeGitAlias(employee.id, { organizationId, username });
+      setAliasDraft((current) => ({ ...current, [employee.id]: "" }));
+      await refresh();
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setAliasBusyId(null);
+    }
+  }
+
+  async function handleRemoveAlias(employee: Employee, aliasId: string) {
+    if (!organizationId) {
+      return;
+    }
+
+    setAliasBusyId(employee.id);
+    setRowError(null);
+
+    try {
+      await removeEmployeeGitAlias(employee.id, aliasId, organizationId);
+      await refresh();
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setAliasBusyId(null);
     }
   }
 
@@ -199,6 +267,21 @@ export function EmployeesManager() {
                   ))}
                 </select>
               </label>
+              <label className="grid gap-1.5 text-sm font-semibold text-(--text)">
+                <span className="inline-flex items-center gap-1.5">
+                  <GitBranch size={14} />
+                  GitHub username(s)
+                </span>
+                <input
+                  value={gitUsernames}
+                  onChange={(event) => setGitUsernames(event.target.value)}
+                  className={fieldClass}
+                  placeholder="rahim-dev, rahim-work"
+                />
+                <span className="text-xs font-normal text-(--muted)">
+                  Comma-separated. Their commits map to this person automatically in every repo.
+                </span>
+              </label>
 
               {formError ? (
                 <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm font-medium text-red-600 dark:text-red-400">
@@ -269,6 +352,7 @@ export function EmployeesManager() {
                     {employees.map((employee) => {
                       const isOwner = employee.role === "OWNER";
                       const busy = busyId === employee.id;
+                      const aliasBusy = aliasBusyId === employee.id;
 
                       return (
                         <tr
@@ -278,6 +362,74 @@ export function EmployeesManager() {
                           <td className="px-4 py-3">
                             <p className="font-semibold text-(--text)">{employee.name}</p>
                             <p className="text-xs text-(--muted)">{employee.email}</p>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              {employee.gitAliases.map((alias) => (
+                                <span
+                                  key={alias.id}
+                                  className="inline-flex items-center gap-1 rounded-md bg-(--surface-soft) px-2 py-0.5 text-[11px] font-semibold text-(--text)"
+                                  title={alias.isPrimary ? "Primary Git identity" : "Git identity"}
+                                >
+                                  <GitBranch size={11} className="text-(--muted)" />
+                                  {alias.username}
+                                  {alias.isPrimary ? (
+                                    <span className="text-[9px] font-bold uppercase tracking-wide text-(--accent)">
+                                      primary
+                                    </span>
+                                  ) : null}
+                                  {manageable ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveAlias(employee, alias.id)}
+                                      disabled={aliasBusy}
+                                      className="text-(--muted) transition hover:text-red-500"
+                                      aria-label={`Remove ${alias.username}`}
+                                    >
+                                      <X size={11} />
+                                    </button>
+                                  ) : null}
+                                </span>
+                              ))}
+                              {employee.gitAliases.length === 0 && !manageable ? (
+                                <span className="text-[11px] text-(--muted)">
+                                  No Git identity
+                                </span>
+                              ) : null}
+                              {manageable ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <input
+                                    value={aliasDraft[employee.id] ?? ""}
+                                    onChange={(event) =>
+                                      setAliasDraft((current) => ({
+                                        ...current,
+                                        [employee.id]: event.target.value
+                                      }))
+                                    }
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        void handleAddAlias(employee);
+                                      }
+                                    }}
+                                    disabled={aliasBusy}
+                                    placeholder="add username"
+                                    className="field w-28 rounded-md px-2 py-0.5 text-[11px] font-medium text-(--text)"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddAlias(employee)}
+                                    disabled={aliasBusy}
+                                    className="inline-flex items-center rounded-md border border-(--border) p-1 text-(--text) transition hover:bg-(--surface)"
+                                    aria-label="Add Git identity"
+                                  >
+                                    {aliasBusy ? (
+                                      <Loader2 size={11} className="animate-spin" />
+                                    ) : (
+                                      <Plus size={11} />
+                                    )}
+                                  </button>
+                                </span>
+                              ) : null}
+                            </div>
                           </td>
                           <td className="px-4 py-3">
                             <span className={`${roleBadgeClass} ${statusTone(employee.status)}`}>

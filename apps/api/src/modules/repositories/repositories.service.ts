@@ -9,6 +9,7 @@ import {
 } from "../../common/access/organization-access.js";
 import { decryptToken } from "../../common/crypto/token-cipher.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
+import { discoverContributorsForRepository } from "../contributors/contributors.service.js";
 
 type RepositoryInput = {
   externalId: string;
@@ -166,6 +167,29 @@ export async function selectRepositories(
       }
     });
   });
+
+  // Auto-discover contributors for the just-connected repos so their commits map
+  // to employees immediately — no separate "Discover" step. Best-effort and
+  // sequential: a repo whose contributors can't be fetched (permissions, rate
+  // limit) is skipped with a warning, never failing the whole selection.
+  const trackedRepos = await prisma.repository.findMany({
+    where: {
+      organizationId,
+      provider: credential.provider,
+      externalId: { in: repositories.map((repo) => repo.externalId) }
+    }
+  });
+
+  for (const repo of trackedRepos) {
+    try {
+      await discoverContributorsForRepository(repo, actorId);
+    } catch (error) {
+      console.warn(
+        `Auto-discovery failed for ${repo.fullName}; contributors can still be discovered manually.`,
+        error
+      );
+    }
+  }
 
   return listRepositories(actorId, organizationId);
 }

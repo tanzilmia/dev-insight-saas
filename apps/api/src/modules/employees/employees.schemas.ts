@@ -13,6 +13,9 @@ export const employeeParamsSchema = z.object({
   userId: z.string().min(1)
 });
 
+/** A single git username/handle (a leading "@" is allowed and stripped later). */
+const gitUsername = z.string().trim().min(1).max(80);
+
 export const createEmployeeSchema = z.object({
   organizationId,
   name: z.string().trim().min(2).max(80),
@@ -22,7 +25,23 @@ export const createEmployeeSchema = z.object({
     .email()
     .max(120)
     .transform((email) => email.toLowerCase()),
-  role: assignableRoleSchema.default("EMPLOYEE")
+  role: assignableRoleSchema.default("EMPLOYEE"),
+  gitUsernames: z.array(gitUsername).max(20).optional()
+});
+
+export const gitAliasParamsSchema = z.object({
+  userId: z.string().min(1),
+  aliasId: z.string().min(1)
+});
+
+export const addGitAliasSchema = z.object({
+  organizationId,
+  username: gitUsername,
+  isPrimary: z.boolean().optional()
+});
+
+export const removeGitAliasQuerySchema = z.object({
+  organizationId
 });
 
 export const updateEmployeeSchema = z

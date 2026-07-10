@@ -1,6 +1,7 @@
 import type {
   ContributorIdentity,
   EmployeeGitMapping,
+  Repository,
   User
 } from "@prisma/client";
 
@@ -14,10 +15,37 @@ import {
 import { decryptToken } from "../../common/crypto/token-cipher.js";
 import type { GitContributor } from "../git-providers/git-provider.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
+import { autoLinkRepositoryContributors, normalizeHandle } from "./auto-link.js";
 
 type IdentityWithMapping = ContributorIdentity & {
   mapping: (EmployeeGitMapping & { user: User }) | null;
 };
+
+// Automated accounts that are noise in a "who did what" report. GitHub App bots
+// use a "[bot]" login suffix; a few common service accounts don't, so they are
+// listed explicitly. Matched identities are ignored on first discovery so they
+// never clutter the mapping list or get auto-linked.
+const KNOWN_BOT_LOGINS = new Set([
+  "web-flow",
+  "dependabot",
+  "dependabot-preview",
+  "github-actions",
+  "renovate",
+  "renovate-bot",
+  "greenkeeper",
+  "snyk-bot",
+  "imgbot",
+  "mergify",
+  "codecov"
+]);
+
+function isBotUsername(username?: string | null): boolean {
+  if (!username) {
+    return false;
+  }
+  const login = username.toLowerCase();
+  return login.endsWith("[bot]") || KNOWN_BOT_LOGINS.has(login);
+}
 
 const mappingInclude = {
   mapping: { include: { user: true } }
@@ -102,11 +130,18 @@ export async function listUnmappedContributors(actorId: string, repositoryId: st
   return identities.map(toContributor);
 }
 
-/** Fetches contributors from the provider and upserts them for the repo. */
-export async function discoverContributors(actorId: string, repositoryId: string) {
-  const repository = await loadRepository(repositoryId);
-  await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
-
+/**
+ * Core discovery for a single repository: fetches contributors + collaborators,
+ * upserts them as identities (auto-ignoring bot accounts on first insert), and
+ * auto-links any that match a declared employee alias. Assumes the caller has
+ * already authorized the actor. Returns the number of identities discovered.
+ *
+ * Exported so repository connection can auto-discover without a separate step.
+ */
+export async function discoverContributorsForRepository(
+  repository: Repository,
+  actorId: string | null
+): Promise<number> {
   const credential = await prisma.gitCredential.findUnique({
     where: { id: repository.credentialId }
   });
@@ -158,18 +193,20 @@ export async function discoverContributors(actorId: string, repositoryId: string
       await tx.contributorIdentity.upsert({
         where: {
           repositoryId_externalId: {
-            repositoryId,
+            repositoryId: repository.id,
             externalId: contributor.externalId
           }
         },
         create: {
           organizationId: repository.organizationId,
-          repositoryId,
+          repositoryId: repository.id,
           provider: credential.provider,
           externalId: contributor.externalId,
           username: contributor.username,
           avatarUrl: contributor.avatarUrl,
-          contributions: contributor.contributions
+          contributions: contributor.contributions,
+          // Keep bots out of the mapping list from the start.
+          ignored: isBotUsername(contributor.username)
         },
         // Preserve the ignored flag and any existing mapping on refresh.
         update: {
@@ -180,17 +217,35 @@ export async function discoverContributors(actorId: string, repositoryId: string
       });
     }
 
+    // Automatically map any discovered identity to the employee who declared
+    // its username as a git alias (high-confidence, exact match only).
+    const autoLinked = await autoLinkRepositoryContributors(
+      tx,
+      repository.organizationId,
+      repository.id
+    );
+
     await tx.auditLog.create({
       data: {
         organizationId: repository.organizationId,
         actorId,
         action: "contributor.discover",
         entityType: "Repository",
-        entityId: repositoryId,
-        metadataJson: { count: discovered.length }
+        entityId: repository.id,
+        metadataJson: { count: discovered.length, autoLinked }
       }
     });
   });
+
+  return discovered.length;
+}
+
+/** Fetches contributors from the provider and upserts them for the repo. */
+export async function discoverContributors(actorId: string, repositoryId: string) {
+  const repository = await loadRepository(repositoryId);
+  await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
+
+  await discoverContributorsForRepository(repository, actorId);
 
   return listContributors(actorId, repositoryId);
 }
@@ -227,6 +282,29 @@ export async function mapContributor(
       },
       update: { userId, isPrimary }
     });
+
+    // Remember this username as a declared alias so the same person is mapped
+    // automatically in every other repo (present and future), not just here.
+    if (identity.username) {
+      const username = normalizeHandle(identity.username);
+      await tx.employeeGitAlias.upsert({
+        where: {
+          organizationId_provider_username: {
+            organizationId: identity.organizationId,
+            provider: identity.provider,
+            username
+          }
+        },
+        create: {
+          organizationId: identity.organizationId,
+          userId,
+          provider: identity.provider,
+          username,
+          isPrimary
+        },
+        update: { userId, isPrimary }
+      });
+    }
 
     await tx.auditLog.create({
       data: {

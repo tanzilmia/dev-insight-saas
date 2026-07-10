@@ -66,6 +66,7 @@ model User {
   projectMemberships ProjectMember[]
   gitCredentials     GitCredential[]      @relation("CredentialCreator")
   gitMappings        EmployeeGitMapping[]
+  gitAliases         EmployeeGitAlias[]
   reportsRequested   Report[]             @relation("ReportsRequested")
   reportSchedules    ReportSchedule[]     @relation("ScheduleCreator")
   requestLogs        RequestLog[]
@@ -87,6 +88,7 @@ model Organization {
   repositories          Repository[]
   contributorIdentities ContributorIdentity[]
   gitMappings           EmployeeGitMapping[]
+  gitAliases            EmployeeGitAlias[]
   reports               Report[]
   reportSchedules       ReportSchedule[]
   requestLogs           RequestLog[]
@@ -234,6 +236,37 @@ model EmployeeGitMapping {
   contributorIdentity ContributorIdentity @relation(fields: [contributorIdentityId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
+  @@index([userId])
+}
+
+/**
+ * A git identity an employee is *declared* to own, at org scope (not per-repo).
+ * This is the source of truth for auto-mapping: when a repository's
+ * contributors are discovered, any identity whose `username` matches an alias
+ * here is linked to the employee automatically — for every repo, present and
+ * future. An employee may own several aliases (multiple GitHub accounts /
+ * emails). `username` is the high-confidence key that is auto-applied; `email`
+ * and `name` are kept for secondary/suggested matching. Values are normalized
+ * (lowercased/trimmed) on write.
+ */
+model EmployeeGitAlias {
+  id             String      @id @default(cuid())
+  organizationId String
+  userId         String
+  provider       GitProvider @default(GITHUB)
+  username       String?
+  email          String?
+  name           String?
+  isPrimary      Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider, username])
+  @@index([organizationId, provider, username])
+  @@index([organizationId, provider, email])
   @@index([userId])
 }
 
