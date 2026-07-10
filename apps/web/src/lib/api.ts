@@ -289,6 +289,28 @@ export async function connectCredential(input: {
   return response.data.credential;
 }
 
+/** A GitHub account resolved from a handle, for previewing before mapping. */
+export type GitUserProfile = {
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  htmlUrl: string;
+  company: string | null;
+  location: string | null;
+  bio: string | null;
+  type: string;
+};
+
+/** Resolves a GitHub username via the org credential; null if it doesn't exist. */
+export async function resolveGitUser(organizationId: string, username: string) {
+  const response = await api.get<{ user: GitUserProfile | null }>(
+    "/api/git-credentials/resolve-user",
+    { params: { organizationId, username } }
+  );
+
+  return response.data.user;
+}
+
 export async function validateCredential(credentialId: string) {
   const response = await api.post<{ credential: GitCredential }>(
     `/api/git-credentials/${credentialId}/validate`

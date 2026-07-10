@@ -1,16 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Ban, CheckCircle2, GitBranch, Loader2, Plus, UserPlus, Users, X } from "lucide-react";
+import {
+  Ban,
+  CheckCircle2,
+  GitBranch,
+  Loader2,
+  Plus,
+  Search,
+  UserPlus,
+  Users,
+  X
+} from "lucide-react";
 
 import {
   type AssignableRole,
   type Employee,
+  type GitUserProfile,
   addEmployeeGitAlias,
   createEmployee,
   getApiErrorMessage,
   listEmployees,
   removeEmployeeGitAlias,
+  resolveGitUser,
   updateEmployee
 } from "@/lib/api";
 import { canManage, useSession } from "@/lib/use-session";
@@ -20,18 +32,6 @@ import {
 } from "@/components/dashboard/dashboard-chrome";
 
 const ROLE_OPTIONS: AssignableRole[] = ["EMPLOYEE", "MANAGER", "ADMIN"];
-
-/** Splits a free-text field into unique, "@"-stripped git usernames. */
-function parseUsernames(text: string): string[] {
-  return [
-    ...new Set(
-      text
-        .split(/[\s,]+/)
-        .map((value) => value.trim().replace(/^@+/, ""))
-        .filter(Boolean)
-    )
-  ];
-}
 
 const fieldClass =
   "field w-full rounded-lg px-3.5 py-2.5 text-sm font-medium text-(--text) placeholder:font-normal";
@@ -61,9 +61,15 @@ export function EmployeesManager() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AssignableRole>("EMPLOYEE");
-  const [gitUsernames, setGitUsernames] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // GitHub identity lookup for the create form.
+  const [lookupInput, setLookupInput] = useState("");
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupResult, setLookupResult] = useState<GitUserProfile | null>(null);
+  const [lookupMiss, setLookupMiss] = useState(false);
+  const [pickedIdentities, setPickedIdentities] = useState<GitUserProfile[]>([]);
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -112,18 +118,64 @@ export function EmployeesManager() {
         name,
         email,
         role,
-        gitUsernames: parseUsernames(gitUsernames)
+        gitUsernames: pickedIdentities.map((identity) => identity.login)
       });
       setName("");
       setEmail("");
       setRole("EMPLOYEE");
-      setGitUsernames("");
+      resetLookup();
+      setPickedIdentities([]);
       await refresh();
     } catch (error) {
       setFormError(getApiErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function resetLookup() {
+    setLookupInput("");
+    setLookupResult(null);
+    setLookupMiss(false);
+  }
+
+  async function handleLookup() {
+    const username = lookupInput.trim().replace(/^@+/, "");
+    if (!organizationId || !username) {
+      return;
+    }
+
+    setLookupBusy(true);
+    setLookupResult(null);
+    setLookupMiss(false);
+
+    try {
+      const user = await resolveGitUser(organizationId, username);
+      if (user) {
+        setLookupResult(user);
+      } else {
+        setLookupMiss(true);
+      }
+    } catch (error) {
+      setFormError(getApiErrorMessage(error));
+    } finally {
+      setLookupBusy(false);
+    }
+  }
+
+  function addPickedIdentity(user: GitUserProfile) {
+    setPickedIdentities((current) =>
+      current.some((identity) => identity.login.toLowerCase() === user.login.toLowerCase())
+        ? current
+        : [...current, user]
+    );
+    resetLookup();
+  }
+
+  function removePickedIdentity(login: string) {
+    setPickedIdentities((current) =>
+      current.filter((identity) => identity.login !== login)
+    );
   }
 
   async function handleAddAlias(employee: Employee) {
@@ -140,7 +192,13 @@ export function EmployeesManager() {
     setRowError(null);
 
     try {
-      await addEmployeeGitAlias(employee.id, { organizationId, username });
+      // Validate the handle against GitHub first so a typo can't be saved.
+      const user = await resolveGitUser(organizationId, username);
+      if (!user) {
+        setRowError(`No GitHub user "${username}" — check the spelling.`);
+        return;
+      }
+      await addEmployeeGitAlias(employee.id, { organizationId, username: user.login });
       setAliasDraft((current) => ({ ...current, [employee.id]: "" }));
       await refresh();
     } catch (error) {
@@ -267,21 +325,118 @@ export function EmployeesManager() {
                   ))}
                 </select>
               </label>
-              <label className="grid gap-1.5 text-sm font-semibold text-(--text)">
+              <div className="grid gap-2 text-sm font-semibold text-(--text)">
                 <span className="inline-flex items-center gap-1.5">
                   <GitBranch size={14} />
-                  GitHub username(s)
+                  GitHub identities
                 </span>
-                <input
-                  value={gitUsernames}
-                  onChange={(event) => setGitUsernames(event.target.value)}
-                  className={fieldClass}
-                  placeholder="rahim-dev, rahim-work"
-                />
-                <span className="text-xs font-normal text-(--muted)">
-                  Comma-separated. Their commits map to this person automatically in every repo.
-                </span>
-              </label>
+
+                {pickedIdentities.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {pickedIdentities.map((identity) => (
+                      <span
+                        key={identity.login}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-(--surface-soft) py-1 pr-2 pl-1 text-xs font-semibold text-(--text)"
+                      >
+                        {identity.avatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={identity.avatarUrl}
+                            alt=""
+                            className="h-5 w-5 rounded-full"
+                          />
+                        ) : null}
+                        {identity.name ?? identity.login}
+                        <span className="text-(--muted)">@{identity.login}</span>
+                        <button
+                          type="button"
+                          onClick={() => removePickedIdentity(identity.login)}
+                          className="text-(--muted) transition hover:text-red-500"
+                          aria-label={`Remove ${identity.login}`}
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="flex gap-2">
+                  <input
+                    value={lookupInput}
+                    onChange={(event) => {
+                      setLookupInput(event.target.value);
+                      setLookupMiss(false);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void handleLookup();
+                      }
+                    }}
+                    className={fieldClass}
+                    placeholder="GitHub username"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleLookup}
+                    disabled={lookupBusy || !lookupInput.trim()}
+                    className="inline-flex shrink-0 items-center rounded-lg border border-(--border) px-3 text-sm font-bold text-(--text) transition hover:bg-(--surface-soft) disabled:opacity-50"
+                    aria-label="Look up GitHub user"
+                  >
+                    {lookupBusy ? (
+                      <Loader2 size={15} className="animate-spin" />
+                    ) : (
+                      <Search size={15} />
+                    )}
+                  </button>
+                </div>
+
+                {lookupResult ? (
+                  <div className="flex items-center gap-3 rounded-lg border border-(--border) bg-(--surface-soft) p-3">
+                    {lookupResult.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={lookupResult.avatarUrl}
+                        alt=""
+                        className="h-10 w-10 shrink-0 rounded-full"
+                      />
+                    ) : null}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-(--text)">
+                        {lookupResult.name ?? lookupResult.login}
+                      </p>
+                      <p className="truncate text-xs font-normal text-(--muted)">
+                        @{lookupResult.login}
+                        {lookupResult.company ? ` · ${lookupResult.company}` : ""}
+                        {lookupResult.location ? ` · ${lookupResult.location}` : ""}
+                      </p>
+                      {lookupResult.type === "Organization" ? (
+                        <p className="mt-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                          This is an organization, not a person.
+                        </p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => addPickedIdentity(lookupResult)}
+                      className="btn-gradient inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-black"
+                    >
+                      <Plus size={13} /> Add
+                    </button>
+                  </div>
+                ) : lookupMiss ? (
+                  <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-600 dark:text-red-400">
+                    No GitHub user “{lookupInput.trim().replace(/^@+/, "")}” — check the
+                    spelling.
+                  </p>
+                ) : (
+                  <span className="text-xs font-normal text-(--muted)">
+                    Look up each GitHub handle and confirm. Their commits map to this person
+                    automatically in every repo.
+                  </span>
+                )}
+              </div>
 
               {formError ? (
                 <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm font-medium text-red-600 dark:text-red-400">

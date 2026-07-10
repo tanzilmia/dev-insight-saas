@@ -62,6 +62,32 @@ export async function listCredentials(actorId: string, organizationId: string) {
 }
 
 /**
+ * Resolves a Git account by username using the org's stored credential, so the
+ * UI can preview (and the manager confirm) who a handle belongs to before it is
+ * saved as an employee's identity. Returns null when the account doesn't exist.
+ */
+export async function resolveGitUser(
+  actorId: string,
+  organizationId: string,
+  username: string
+) {
+  await requireOrganizationRole(actorId, organizationId, MANAGER_ROLES);
+
+  const credential = await prisma.gitCredential.findFirst({
+    where: { organizationId, provider: "GITHUB" }
+  });
+
+  if (!credential) {
+    throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
+  }
+
+  return getGitProvider(credential.provider).getUser(
+    decryptToken(credential.encryptedToken),
+    username
+  );
+}
+
+/**
  * Validates the PAT against the provider, then stores it encrypted. Because an
  * organization holds a single credential per provider, this upserts: a second
  * connect replaces the previous token (same effect as reconnect).

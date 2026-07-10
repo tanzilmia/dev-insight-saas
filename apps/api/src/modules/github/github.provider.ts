@@ -8,6 +8,7 @@ import type {
   GitContributor,
   GitProvider,
   GitRepository,
+  GitUser,
   ListCommitsOptions
 } from "../git-providers/git-provider.js";
 
@@ -105,6 +106,49 @@ export class GitHubProvider implements GitProvider {
             .map((scope) => scope.trim())
             .filter(Boolean)
         : []
+    };
+  }
+
+  async getUser(token: string, username: string): Promise<GitUser | null> {
+    const response = await this.request(`/users/${encodeURIComponent(username)}`, token);
+
+    // A non-existent account is an expected outcome (typo), not an error.
+    if (response.status === 404) {
+      return null;
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      throw new AppError(
+        400,
+        "GitHub rejected the stored token. Reconnect the credential.",
+        "INVALID_CREDENTIAL"
+      );
+    }
+
+    if (!response.ok) {
+      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+    }
+
+    const data = (await response.json()) as {
+      login: string;
+      name?: string | null;
+      avatar_url?: string | null;
+      html_url: string;
+      company?: string | null;
+      location?: string | null;
+      bio?: string | null;
+      type?: string;
+    };
+
+    return {
+      login: data.login,
+      name: data.name ?? null,
+      avatarUrl: data.avatar_url ?? null,
+      htmlUrl: data.html_url,
+      company: data.company ?? null,
+      location: data.location ?? null,
+      bio: data.bio ?? null,
+      type: data.type ?? "User"
     };
   }
 

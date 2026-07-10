@@ -6,13 +6,15 @@ import {
   createCredentialSchema,
   credentialParamsSchema,
   listCredentialsQuerySchema,
-  reconnectCredentialSchema
+  reconnectCredentialSchema,
+  resolveUserQuerySchema
 } from "./credentials.schemas.js";
 import {
   connectCredential,
   deleteCredential,
   listCredentials,
   reconnectCredential,
+  resolveGitUser,
   validateStoredCredential
 } from "./credentials.service.js";
 
@@ -37,6 +39,16 @@ credentialsRouter.post(
     const credential = await connectCredential(req.authUser!.id, payload);
 
     res.status(201).json({ credential });
+  })
+);
+
+credentialsRouter.get(
+  "/resolve-user",
+  asyncHandler(async (req, res) => {
+    const { organizationId, username } = resolveUserQuerySchema.parse(req.query);
+    const user = await resolveGitUser(req.authUser!.id, organizationId, username);
+
+    res.status(200).json({ user });
   })
 );
 

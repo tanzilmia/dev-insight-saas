@@ -23,6 +23,19 @@ export type GitContributor = {
   contributions: number;
 };
 
+/** A resolved provider account, for confirming a username before mapping. */
+export type GitUser = {
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  htmlUrl: string;
+  company: string | null;
+  location: string | null;
+  bio: string | null;
+  /** "User" or "Organization" — lets the UI warn if an org handle was entered. */
+  type: string;
+};
+
 /** A branch as returned by any provider. */
 export type GitBranch = {
   name: string;
@@ -70,6 +83,8 @@ export type ListCommitsOptions = {
  */
 export interface GitProvider {
   validateCredential(token: string): Promise<CredentialValidationResult>;
+  /** Resolves a single account by login/handle. Returns null if it doesn't exist. */
+  getUser(token: string, username: string): Promise<GitUser | null>;
   listRepositories(token: string): Promise<GitRepository[]>;
   listContributors(token: string, owner: string, repo: string): Promise<GitContributor[]>;
   /**

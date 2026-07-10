@@ -756,8 +756,31 @@ username as an alias, which the backend immediately auto-links to that identity
 suggestions, so the row flips to mapped. Closes the loop: discover → author isn't
 an employee → create them right there → auto-mapped.
 
-**Still deferred:** unmapped-contributors dashboard nudge; bulk CSV employee
-import.
+**GitHub identity resolver + preview card — DONE (2026-07-10):** stops typo'd /
+non-existent usernames from being saved, GitHub-picker style. Distinguishes
+"account exists" (global `GET /users/{login}`, independent of repo access) from
+"is a contributor" — so a real hire who hasn't committed anywhere yet still
+validates.
+- GitProvider gains `getUser(token, username): Promise<GitUser | null>` (null on
+  404); GitHub impl hits `/users/{login}` and returns `{ login, name, avatarUrl,
+  htmlUrl, company, location, bio, type }` (`type` flags User vs Organization).
+- `resolveGitUser(actorId, orgId, username)` in `credentials.service.ts`
+  (manager-gated, uses the org's stored credential) + `GET
+  /api/git-credentials/resolve-user?organizationId=&username=` (returns `{ user }`
+  or `{ user: null }`).
+- Frontend `resolveGitUser` + `GitUserProfile`. **Employees create form** replaced
+  the comma text field with a lookup: type a handle → **preview card** (avatar +
+  real name + @login + company/location, org-warning if `type==="Organization"`)
+  → **Add** pushes a confirmed-identity chip; several chips = several accounts;
+  submit sends their canonical logins. A miss shows "No GitHub user …". The
+  **per-row inline alias add** now also resolves first and blocks a bad handle.
+- Verified end-to-end against the real stored token: `tanzilmia`→User "Md tanzil",
+  `github`→Organization, bogus login→null. Email lookup was intentionally NOT
+  built (GitHub only resolves *public* emails; the commit-email suggestion engine
+  already covers the private-email case) — deferred as best-effort.
+
+**Still deferred:** email-based resolve (best-effort, public emails only);
+unmapped-contributors dashboard nudge; bulk CSV employee import.
 
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 

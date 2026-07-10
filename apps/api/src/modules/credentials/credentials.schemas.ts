@@ -7,6 +7,16 @@ export const listCredentialsQuerySchema = z.object({
   organizationId
 });
 
+export const resolveUserQuerySchema = z.object({
+  organizationId,
+  username: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .transform((value) => value.replace(/^@+/, ""))
+});
+
 export const credentialParamsSchema = z.object({
   id: z.string().min(1)
 });
