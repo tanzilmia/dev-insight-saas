@@ -3,21 +3,25 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
+  Check,
   DownloadCloud,
   EyeOff,
   Loader2,
   RotateCcw,
+  Sparkles,
   UserCheck,
   X
 } from "lucide-react";
 
 import {
   type Contributor,
+  type ContributorSuggestionMatch,
   type Employee,
   type TrackedRepository,
   discoverContributors,
   getApiErrorMessage,
   ignoreContributor,
+  listContributorSuggestions,
   listEmployees,
   listRepositories,
   listRepositoryContributors,
@@ -55,6 +59,11 @@ export function ContributorsManager() {
   const [discovering, setDiscovering] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+
+  // Suggested employee matches per contributor id (managers only).
+  const [suggestions, setSuggestions] = useState<
+    Record<string, ContributorSuggestionMatch[]>
+  >({});
 
   useEffect(() => {
     if (!organizationId) {
@@ -96,6 +105,36 @@ export function ContributorsManager() {
     void loadContributors();
   }, [loadContributors]);
 
+  // Suggestions are a manager tool; skip the call for read-only viewers.
+  const loadSuggestions = useCallback(() => {
+    if (!selectedRepoId || !manageable) {
+      // Defer setState so this is safe to call directly from an effect.
+      return Promise.resolve().then(() => setSuggestions({}));
+    }
+
+    return listContributorSuggestions(selectedRepoId)
+      .then((list) => {
+        const map: Record<string, ContributorSuggestionMatch[]> = {};
+        for (const item of list) {
+          map[item.contributorId] = item.suggestions;
+        }
+        setSuggestions(map);
+      })
+      .catch(() => setSuggestions({}));
+  }, [selectedRepoId, manageable]);
+
+  useEffect(() => {
+    void loadSuggestions();
+  }, [loadSuggestions]);
+
+  function dismissSuggestions(contributorId: string) {
+    setSuggestions((current) => {
+      const next = { ...current };
+      delete next[contributorId];
+      return next;
+    });
+  }
+
   async function handleDiscover() {
     if (!selectedRepoId) {
       return;
@@ -106,6 +145,7 @@ export function ContributorsManager() {
 
     try {
       setContributors(await discoverContributors(selectedRepoId));
+      await loadSuggestions();
     } catch (error) {
       setRowError(getApiErrorMessage(error));
     } finally {
@@ -229,6 +269,10 @@ export function ContributorsManager() {
             <ul className="grid gap-3">
               {contributors.map((contributor) => {
                 const busy = busyId === contributor.id;
+                const rowSuggestions =
+                  manageable && !contributor.mapping && !contributor.ignored
+                    ? suggestions[contributor.id] ?? []
+                    : [];
                 return (
                   <li
                     key={contributor.id}
@@ -305,6 +349,45 @@ export function ContributorsManager() {
                         )}
                       </div>
                     </div>
+
+                    {rowSuggestions.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-(--surface-soft) px-3 py-2">
+                        <Sparkles size={14} className="shrink-0 text-(--accent)" />
+                        <span className="text-xs font-black uppercase tracking-wide text-(--muted)">
+                          Suggested
+                        </span>
+                        {rowSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion.userId}
+                            type="button"
+                            title={suggestion.reason}
+                            disabled={busy}
+                            onClick={() =>
+                              runRowAction(contributor.id, () =>
+                                mapContributor(contributor.id, suggestion.userId)
+                              )
+                            }
+                            className="inline-flex items-center gap-1.5 rounded-full border border-(--border) bg-(--surface) px-3 py-1.5 text-xs font-bold text-(--text) transition hover:border-transparent hover:bg-(--accent) hover:text-white"
+                          >
+                            <Check size={13} />
+                            {suggestion.name}
+                            <span className="text-[10px] font-bold uppercase tracking-wide opacity-70">
+                              {suggestion.confidence}
+                            </span>
+                          </button>
+                        ))}
+                        <span className="hidden text-[11px] text-(--muted) sm:inline">
+                          {rowSuggestions[0].reason}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => dismissSuggestions(contributor.id)}
+                          className="ml-auto text-[11px] font-bold text-(--muted) underline underline-offset-2 transition hover:text-(--text)"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    ) : null}
                   </li>
                 );
               })}

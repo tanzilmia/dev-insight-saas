@@ -15,6 +15,7 @@ import {
   listUnmappedContributors,
   mapContributor,
   setContributorIgnored,
+  suggestContributorMatches,
   unmapContributor
 } from "./contributors.service.js";
 
@@ -39,6 +40,16 @@ contributorsRouter.get(
     const contributors = await listUnmappedContributors(req.authUser!.id, repositoryId);
 
     res.status(200).json({ contributors });
+  })
+);
+
+contributorsRouter.get(
+  "/suggestions",
+  asyncHandler(async (req, res) => {
+    const { repositoryId } = repoQuerySchema.parse(req.query);
+    const suggestions = await suggestContributorMatches(req.authUser!.id, repositoryId);
+
+    res.status(200).json({ suggestions });
   })
 );
 

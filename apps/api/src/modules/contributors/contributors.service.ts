@@ -250,6 +250,189 @@ export async function discoverContributors(actorId: string, repositoryId: string
   return listContributors(actorId, repositoryId);
 }
 
+type MatchConfidence = "high" | "medium";
+
+/** GitHub's privacy relay email (`id+login@users.noreply.github.com`) — encodes
+ * a login, never a real address, so it must not count as an email match. */
+const GITHUB_NOREPLY = /@users\.noreply\.github\.com$/i;
+
+function normalizeName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Fraction of the employee-name tokens (≥2 chars) that appear in a candidate
+ * string (a git username or commit author name), compared compactly. E.g.
+ * "Rahim Uddin" vs "rahim-uddin" → 1.0; vs "rahim-dev" → 0.5.
+ */
+function nameSimilarity(employeeName: string, candidate: string): number {
+  const tokens = normalizeName(employeeName)
+    .split(" ")
+    .filter((token) => token.length >= 2);
+  const compact = normalizeName(candidate).replace(/\s+/g, "");
+
+  if (tokens.length === 0 || compact.length === 0) {
+    return 0;
+  }
+
+  const hits = tokens.filter((token) => compact.includes(token)).length;
+  return hits / tokens.length;
+}
+
+/**
+ * Suggests likely employee matches for the repo's still-unmapped contributor
+ * identities, using the *lower-confidence* signals that are NOT auto-applied:
+ * a git commit email that matches an employee's account/alias email (strong),
+ * or a name/username that looks similar (medium). Exact-username matches are
+ * already auto-linked, so they never appear here. Manager confirms each.
+ */
+export async function suggestContributorMatches(actorId: string, repositoryId: string) {
+  const repository = await loadRepository(repositoryId);
+  await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
+
+  const identities = await prisma.contributorIdentity.findMany({
+    where: { repositoryId, ignored: false, mapping: null, username: { not: null } }
+  });
+
+  if (identities.length === 0) {
+    return [];
+  }
+
+  // Active employees plus any declared alias emails, for matching.
+  const members = await prisma.organizationMember.findMany({
+    where: { organizationId: repository.organizationId, status: "ACTIVE" },
+    include: {
+      user: {
+        include: {
+          gitAliases: { where: { organizationId: repository.organizationId } }
+        }
+      }
+    }
+  });
+
+  const employees = members.map((member) => ({
+    id: member.user.id,
+    name: member.user.name,
+    emails: new Set(
+      [member.user.email, ...member.user.gitAliases.map((alias) => alias.email)]
+        .filter((email): email is string => Boolean(email))
+        .map((email) => email.toLowerCase())
+    )
+  }));
+
+  const employeeByEmail = new Map<string, (typeof employees)[number]>();
+  for (const employee of employees) {
+    for (const email of employee.emails) {
+      if (!employeeByEmail.has(email)) {
+        employeeByEmail.set(email, employee);
+      }
+    }
+  }
+
+  // Distinct git author email/name per username from this repo's commits.
+  const commitRows = await prisma.commit.findMany({
+    where: { repositoryId, username: { not: null } },
+    select: { username: true, authorEmail: true, authorName: true },
+    distinct: ["username", "authorEmail", "authorName"]
+  });
+
+  const emailsByUsername = new Map<string, Set<string>>();
+  const namesByUsername = new Map<string, Set<string>>();
+  for (const row of commitRows) {
+    if (!row.username) {
+      continue;
+    }
+    const key = row.username.toLowerCase();
+    if (row.authorEmail) {
+      const set = emailsByUsername.get(key) ?? new Set<string>();
+      set.add(row.authorEmail.toLowerCase());
+      emailsByUsername.set(key, set);
+    }
+    if (row.authorName) {
+      const set = namesByUsername.get(key) ?? new Set<string>();
+      set.add(row.authorName);
+      namesByUsername.set(key, set);
+    }
+  }
+
+  const results: {
+    contributorId: string;
+    suggestions: {
+      userId: string;
+      name: string;
+      confidence: MatchConfidence;
+      reason: string;
+      score: number;
+    }[];
+  }[] = [];
+
+  for (const identity of identities) {
+    if (!identity.username) {
+      continue;
+    }
+    const key = identity.username.toLowerCase();
+    const byUser = new Map<
+      string,
+      { userId: string; name: string; score: number; reason: string }
+    >();
+
+    const consider = (
+      employee: { id: string; name: string },
+      score: number,
+      reason: string
+    ) => {
+      const existing = byUser.get(employee.id);
+      if (!existing || score > existing.score) {
+        byUser.set(employee.id, { userId: employee.id, name: employee.name, score, reason });
+      }
+    };
+
+    // Email signal (strong): a real commit email matching an employee account.
+    for (const email of emailsByUsername.get(key) ?? []) {
+      if (GITHUB_NOREPLY.test(email)) {
+        continue;
+      }
+      const employee = employeeByEmail.get(email);
+      if (employee) {
+        consider(employee, 0.95, "Git commit email matches their account");
+      }
+    }
+
+    // Name / username similarity (medium).
+    const candidateStrings = [identity.username, ...(namesByUsername.get(key) ?? [])];
+    for (const employee of employees) {
+      let best = 0;
+      for (const candidate of candidateStrings) {
+        best = Math.max(best, nameSimilarity(employee.name, candidate));
+      }
+      if (best >= 0.5) {
+        consider(
+          employee,
+          Math.min(0.55 + 0.3 * best, 0.85),
+          best >= 0.99 ? "Name matches" : "Name looks similar"
+        );
+      }
+    }
+
+    const suggestions = [...byUser.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map((suggestion) => ({
+        userId: suggestion.userId,
+        name: suggestion.name,
+        confidence: (suggestion.score >= 0.9 ? "high" : "medium") as MatchConfidence,
+        reason: suggestion.reason,
+        score: Number(suggestion.score.toFixed(2))
+      }));
+
+    if (suggestions.length > 0) {
+      results.push({ contributorId: identity.id, suggestions });
+    }
+  }
+
+  return results;
+}
+
 export async function mapContributor(
   actorId: string,
   identityId: string,

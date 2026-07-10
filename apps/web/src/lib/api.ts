@@ -447,6 +447,29 @@ export async function listRepositoryContributors(repositoryId: string) {
   return response.data.contributors;
 }
 
+export type ContributorSuggestionMatch = {
+  userId: string;
+  name: string;
+  confidence: "high" | "medium";
+  reason: string;
+  score: number;
+};
+
+export type ContributorSuggestion = {
+  contributorId: string;
+  suggestions: ContributorSuggestionMatch[];
+};
+
+/** Likely employee matches for still-unmapped contributors (manager-only). */
+export async function listContributorSuggestions(repositoryId: string) {
+  const response = await api.get<{ suggestions: ContributorSuggestion[] }>(
+    "/api/contributors/suggestions",
+    { params: { repositoryId } }
+  );
+
+  return response.data.suggestions;
+}
+
 export async function discoverContributors(repositoryId: string) {
   const response = await api.post<{ contributors: Contributor[] }>(
     "/api/contributors/discover",

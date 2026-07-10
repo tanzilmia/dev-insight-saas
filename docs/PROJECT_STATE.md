@@ -723,10 +723,31 @@ and every repo links automatically.
   Ignored identities are skipped by auto-link and the unmapped list, so bots never
   clutter mapping or reports.
 
-**Still deferred:** *suggested* matches UI for fuzzy email/name signals
-(confirm-before-map — the other half of the chosen match strategy); "create
-employee from this unmapped author"; unmapped-contributors dashboard nudge; bulk
-CSV employee import.
+**Suggested matches (confirm-before-map) — DONE (2026-07-10):** the other half of
+the chosen strategy. For still-unmapped, non-ignored identities, the backend
+computes *lower-confidence* candidate employees (exact-username already
+auto-links, so it never shows here) and the manager confirms with one click.
+- `suggestContributorMatches(actorId, repositoryId)` in `contributors.service.ts`
+  (manager-gated). Signals: **email (strong, 0.95→"high")** — a repo commit's
+  `authorEmail` equals an employee's account email or a declared alias email
+  (GitHub `…@users.noreply.github.com` relay addresses are excluded so they never
+  false-match); **name/username similarity (medium)** — `nameSimilarity()` =
+  fraction of the employee's name tokens (≥2 chars) found in the git
+  username/commit author name ("Rahim Uddin" vs "rahim-uddin" → 1.0, vs
+  "rahim-dev" → 0.5; threshold 0.5, capped 0.85). Distinct `{username,
+  authorEmail, authorName}` pulled once from `Commit` (index `[repositoryId,
+  username]`). Returns per-identity top-3 `{userId, name, confidence, reason,
+  score}`. Works right after discovery via the username signal even before any
+  commits are collected; email signal kicks in once activity exists.
+- `GET /api/contributors/suggestions?repositoryId=` (registered before the
+  `/:id` routes). Frontend `listContributorSuggestions` + `ContributorSuggestion`
+  type; contributors page shows a "Suggested: {name} {confidence}" chip row under
+  each unmapped contributor with one-click **Confirm** (calls `mapContributor`,
+  which also records the alias so it propagates) and a local **Dismiss**. The
+  chip auto-hides once mapped/ignored; suggestions reload after Discover.
+
+**Still deferred:** "create employee from this unmapped author"; unmapped-
+contributors dashboard nudge; bulk CSV employee import.
 
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
