@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "ReportSchedule" ADD COLUMN     "runHour" INTEGER NOT NULL DEFAULT 9,
+ADD COLUMN     "runMinute" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "timeZone" TEXT;

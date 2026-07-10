@@ -23,20 +23,108 @@ const MAX_PER_TICK = 20;
 // cadence); a second consecutive failure falls back to the normal cadence.
 const RETRY_DELAY_MS = 5 * 60 * 1000;
 
-/** Next fire time for a cadence, measured from `from`. */
-export function computeNextRun(from: Date, cadence: ScheduleCadence): Date {
-  if (cadence === "DAILY") {
-    return new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1, from.getHours(), from.getMinutes());
+// The server's own zone, used when a schedule has no explicit timeZone.
+const SERVER_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+export type NextRunSpec = {
+  cadence: ScheduleCadence;
+  runHour: number;
+  runMinute: number;
+  timeZone: string | null;
+};
+
+/** UTC offset (minutes, east-positive) of `timeZone` at instant `at`. */
+function tzOffsetMinutes(timeZone: string, at: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).formatToParts(at);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)!.value);
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return (asUtc - at.getTime()) / 60000;
+}
+
+/** The UTC instant of wall-clock Y-M-D H:M in `timeZone` (two passes for DST). */
+function zonedWallClockToUtc(
+  timeZone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number
+): Date {
+  const naive = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const offset1 = tzOffsetMinutes(timeZone, new Date(naive));
+  let utc = naive - offset1 * 60000;
+  const offset2 = tzOffsetMinutes(timeZone, new Date(utc));
+  if (offset2 !== offset1) {
+    utc = naive - offset2 * 60000;
   }
-  if (cadence === "WEEKLY") {
-    return new Date(from.getFullYear(), from.getMonth(), from.getDate() + 7, from.getHours(), from.getMinutes());
+  return new Date(utc);
+}
+
+/** Zone-local calendar date of an instant. */
+function zonedDate(timeZone: string, at: Date): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(at);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)!.value);
+  return { year: get("year"), month: get("month"), day: get("day") };
+}
+
+/** Days in a 1-based month (handles month 13 → next January). */
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/**
+ * Next fire instant at `runHour:runMinute` (interpreted in the schedule's
+ * timeZone, DST-correct) for the cadence, strictly after `from`. Uses today's
+ * target time; if that's already passed it advances one cadence step (MONTHLY
+ * clamps the day so Jan 31 → Feb 28/29 instead of skipping February).
+ */
+export function computeNextRun(from: Date, spec: NextRunSpec): Date {
+  const timeZone = spec.timeZone || SERVER_TIME_ZONE;
+  const { year, month, day } = zonedDate(timeZone, from);
+
+  const candidate = zonedWallClockToUtc(timeZone, year, month, day, spec.runHour, spec.runMinute);
+  if (candidate.getTime() > from.getTime()) {
+    return candidate;
   }
-  // MONTHLY: advance one month, clamping the day to the target month's length so
-  // Jan 31 → Feb 28/29 instead of overflowing into March (which skips February).
-  const targetMonth = from.getMonth() + 1;
-  const daysInTargetMonth = new Date(from.getFullYear(), targetMonth + 1, 0).getDate();
-  const day = Math.min(from.getDate(), daysInTargetMonth);
-  return new Date(from.getFullYear(), targetMonth, day, from.getHours(), from.getMinutes());
+
+  if (spec.cadence === "DAILY") {
+    return zonedWallClockToUtc(timeZone, year, month, day + 1, spec.runHour, spec.runMinute);
+  }
+  if (spec.cadence === "WEEKLY") {
+    return zonedWallClockToUtc(timeZone, year, month, day + 7, spec.runHour, spec.runMinute);
+  }
+  const nextMonth = month + 1; // 1-based; 13 normalises to next January
+  const clampedDay = Math.min(day, daysInMonth(year, nextMonth));
+  return zonedWallClockToUtc(timeZone, year, nextMonth, clampedDay, spec.runHour, spec.runMinute);
+}
+
+/** Build the next-run spec from a stored schedule row. */
+function specOf(schedule: {
+  cadence: ScheduleCadence;
+  runHour: number;
+  runMinute: number;
+  timeZone: string | null;
+}): NextRunSpec {
+  return {
+    cadence: schedule.cadence,
+    runHour: schedule.runHour,
+    runMinute: schedule.runMinute,
+    timeZone: schedule.timeZone
+  };
 }
 
 function serialize(schedule: ReportSchedule) {
@@ -49,6 +137,9 @@ function serialize(schedule: ReportSchedule) {
     employeeIds: schedule.employeeIds,
     period: schedule.period,
     cadence: schedule.cadence,
+    runHour: schedule.runHour,
+    runMinute: schedule.runMinute,
+    timeZone: schedule.timeZone,
     customPrompt: schedule.customPrompt,
     enabled: schedule.enabled,
     nextRunAt: schedule.nextRunAt,
@@ -88,8 +179,16 @@ export async function createSchedule(actorId: string, input: CreateScheduleInput
       employeeIds: input.employeeIds ?? [],
       period: input.period,
       cadence: input.cadence,
+      runHour: input.runHour,
+      runMinute: input.runMinute,
+      timeZone: input.timeZone ?? null,
       customPrompt: input.customPrompt ?? null,
-      nextRunAt: computeNextRun(now, input.cadence)
+      nextRunAt: computeNextRun(now, {
+        cadence: input.cadence,
+        runHour: input.runHour,
+        runMinute: input.runMinute,
+        timeZone: input.timeZone ?? null
+      })
     }
   });
 
@@ -120,14 +219,25 @@ export async function updateSchedule(actorId: string, id: string, input: UpdateS
   const existing = await loadOwnedSchedule(actorId, id);
   const now = new Date();
 
-  // Re-anchor the next run when the cadence changes, or when re-enabling a
-  // schedule whose nextRunAt is already in the past — otherwise a long-paused
-  // schedule fires on the very next tick.
+  // Re-anchor the next run when the cadence/time/zone changes, or when
+  // re-enabling a schedule whose nextRunAt is already in the past — otherwise a
+  // long-paused schedule fires on the very next tick.
+  const timingChanged =
+    input.cadence !== undefined ||
+    input.runHour !== undefined ||
+    input.runMinute !== undefined ||
+    input.timeZone !== undefined;
+
   let nextRunAt: Date | undefined;
-  if (input.cadence) {
-    nextRunAt = computeNextRun(now, input.cadence);
+  if (timingChanged) {
+    nextRunAt = computeNextRun(now, {
+      cadence: input.cadence ?? existing.cadence,
+      runHour: input.runHour ?? existing.runHour,
+      runMinute: input.runMinute ?? existing.runMinute,
+      timeZone: input.timeZone ?? existing.timeZone
+    });
   } else if (input.enabled === true && existing.nextRunAt < now) {
-    nextRunAt = computeNextRun(now, existing.cadence);
+    nextRunAt = computeNextRun(now, specOf(existing));
   }
 
   const updated = await prisma.reportSchedule.update({
@@ -136,6 +246,9 @@ export async function updateSchedule(actorId: string, id: string, input: UpdateS
       name: input.name ?? undefined,
       period: input.period ?? undefined,
       cadence: input.cadence ?? undefined,
+      runHour: input.runHour ?? undefined,
+      runMinute: input.runMinute ?? undefined,
+      timeZone: input.timeZone === undefined ? undefined : input.timeZone,
       customPrompt: input.customPrompt === undefined ? undefined : input.customPrompt,
       enabled: input.enabled ?? undefined,
       nextRunAt
@@ -207,7 +320,7 @@ export async function runDueSchedules(now: Date = new Date()) {
   let ran = 0;
 
   for (const schedule of due) {
-    const normalNext = computeNextRun(now, schedule.cadence);
+    const normalNext = computeNextRun(now, specOf(schedule));
 
     // Claim it: advance nextRunAt conditioned on the value we just read. Only
     // the instance whose update matches (count === 1) proceeds; a second

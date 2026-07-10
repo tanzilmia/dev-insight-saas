@@ -43,6 +43,9 @@ export const createScheduleSchema = z
     employeeIds: z.array(z.string().min(1)).max(50).optional(),
     period: schedulePeriodSchema.default("last_7_days"),
     cadence: scheduleCadenceSchema,
+    runHour: z.number().int().min(0).max(23).default(9),
+    runMinute: z.number().int().min(0).max(59).default(0),
+    timeZone: z.string().trim().min(1).max(64).optional(),
     customPrompt: z.string().trim().max(2000).optional()
   })
   .superRefine(refineTarget);
@@ -51,6 +54,9 @@ export const updateScheduleSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   period: schedulePeriodSchema.optional(),
   cadence: scheduleCadenceSchema.optional(),
+  runHour: z.number().int().min(0).max(23).optional(),
+  runMinute: z.number().int().min(0).max(59).optional(),
+  timeZone: z.string().trim().min(1).max(64).optional(),
   customPrompt: z.string().trim().max(2000).nullable().optional(),
   enabled: z.boolean().optional()
 });

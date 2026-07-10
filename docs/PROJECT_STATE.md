@@ -596,12 +596,31 @@ month-end overflow + create-time org-ownership check.)
   history — the saved report's **markdown already carries** the "Who did what" table, so
   history is not blank; a structured re-render is a larger UI change for little gain.
 
-**Audit hardening complete for all four features + setup (Batches 1–6).** Remaining is
-deferred/feature work, not rough edges: **Schedules (needs a schema migration)** — a
-time-of-day / timezone field so a DAILY report fires at a chosen hour rather than its
-creation minute; deep-link a schedule's "view" to its `lastReportId` (Low, needs
-`useSearchParams` on the reports page). **Feature phases** (not audit items): channel
-delivery (14c), share/export (14b), employee login/invite, Phase E multi-instance queue.
+**Audit hardening complete for all four features + setup (Batches 1–6).**
+
+**Batch 7 — Schedules time-of-day + timezone (2026-07-10, migration)** — the deferred
+Schedules UX gap, done (typecheck + lint clean; timezone/DST next-run logic unit-verified):
+- Migration `20260710055154_schedule_time_of_day` adds `runHour` (default 9), `runMinute`
+  (default 0), `timeZone` (nullable) to `ReportSchedule`. Additive/safe; existing rows get
+  09:00. **Note:** `prisma migrate dev` did NOT regenerate the client here — had to run
+  `npx prisma generate` after, then typecheck passed.
+- `computeNextRun(from, spec)` is now **timezone-aware**: it fires at `runHour:runMinute`
+  interpreted in the schedule's `timeZone` (falls back to the server zone when null),
+  DST-correct via a two-pass `Intl.DateTimeFormat` offset (verified: Dhaka no-DST +
+  America/New_York EST/EDT boundaries). Candidate = today's target time; if past, advance
+  one cadence step (MONTHLY still clamps Jan 31 → Feb 28/29). Signature changed from
+  `(from, cadence)` → `(from, spec)`; `specOf(row)` builds the spec, and create/update/
+  `runDueSchedules` were updated. (`schedules.service.ts`.)
+- Create/update schemas take `runHour`/`runMinute`/`timeZone`; the Schedules form has a
+  **Time of day** `<input type="time">` (default 09:00) and sends the browser timezone
+  (read after mount to avoid a hydration mismatch); the table shows "at HH:MM" under the
+  cadence. (`schedules.schemas.ts`, web `api.ts`, `schedules-manager.tsx`.)
+
+Remaining is deferred/feature work, not rough edges: deep-link a schedule's "view" to its
+`lastReportId` (Low, needs `useSearchParams` on the reports page); persist the structured
+leaderboard/analysis in report history (Low, markdown already carries it). **Feature phases**
+(not audit items): share/export (14b), channel delivery (14c), employee login/invite, Phase
+E multi-instance queue.
 - **Sharing**: `ReportShare` model + share action + channel placeholders.
 - **Tests**: set up Vitest + Supertest first (none installed). Unit-test
   `token-cipher`, permission helpers, commit classification; integration-test the

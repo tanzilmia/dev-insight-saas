@@ -730,6 +730,9 @@ export type ReportSchedule = {
   employeeIds: string[];
   period: StatPeriod;
   cadence: ScheduleCadence;
+  runHour: number;
+  runMinute: number;
+  timeZone: string | null;
   customPrompt: string | null;
   enabled: boolean;
   nextRunAt: string;
@@ -749,6 +752,9 @@ export type CreateScheduleInput = {
   employeeIds?: string[];
   period: StatPeriod;
   cadence: ScheduleCadence;
+  runHour?: number;
+  runMinute?: number;
+  timeZone?: string;
   customPrompt?: string;
 };
 

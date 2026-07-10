@@ -62,6 +62,10 @@ function formatWhen(value: string | null) {
   });
 }
 
+function formatTimeOfDay(hour: number, minute: number) {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 export function SchedulesManager() {
   const { session, status, activeOrganization, logout } = useSession();
   const organizationId = activeOrganization?.id;
@@ -81,6 +85,8 @@ export function SchedulesManager() {
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<Set<string>>(new Set());
   const [period, setPeriod] = useState<StatPeriod>("last_7_days");
   const [cadence, setCadence] = useState<ScheduleCadence>("WEEKLY");
+  const [timeOfDay, setTimeOfDay] = useState("09:00");
+  const [timeZone, setTimeZone] = useState("");
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -104,6 +110,12 @@ export function SchedulesManager() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Read the browser's timezone after mount (not during render) so the SSR and
+  // client markup match — the schedule fires at the chosen time in this zone.
+  useEffect(() => {
+    Promise.resolve(Intl.DateTimeFormat().resolvedOptions().timeZone).then(setTimeZone);
+  }, []);
 
   useEffect(() => {
     if (!organizationId) {
@@ -151,12 +163,19 @@ export function SchedulesManager() {
     setCreating(true);
     setFormError(null);
 
+    const [hourStr, minuteStr] = timeOfDay.split(":");
+    const runHour = Number(hourStr);
+    const runMinute = Number(minuteStr);
+
     const input: CreateScheduleInput = {
       organizationId,
       name: name.trim(),
       reportType,
       period,
       cadence,
+      runHour: Number.isFinite(runHour) ? runHour : 9,
+      runMinute: Number.isFinite(runMinute) ? runMinute : 0,
+      ...(timeZone ? { timeZone } : {}),
       ...(reportType === "repository" ? { repositoryId } : {}),
       ...(reportType === "project" ? { projectId } : {}),
       ...(needsEmployees ? { employeeIds: [...selectedEmployeeIds] } : {})
@@ -376,6 +395,19 @@ export function SchedulesManager() {
                 </label>
               </div>
 
+              <label className="grid gap-1.5 text-sm font-semibold text-(--text)">
+                Time of day
+                <input
+                  type="time"
+                  value={timeOfDay}
+                  onChange={(event) => setTimeOfDay(event.target.value)}
+                  className={fieldClass}
+                />
+                <span className="text-xs font-normal text-(--muted)">
+                  Fires around this time{timeZone ? ` · ${timeZone}` : ""}
+                </span>
+              </label>
+
               {formError ? (
                 <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm font-medium text-red-600 dark:text-red-400">
                   {formError}
@@ -467,6 +499,9 @@ export function SchedulesManager() {
                             >
                               {schedule.enabled ? schedule.cadence : "PAUSED"}
                             </span>
+                            <div className="mt-1 text-[11px] text-(--muted)">
+                              at {formatTimeOfDay(schedule.runHour, schedule.runMinute)}
+                            </div>
                           </td>
                           <td className="px-4 py-3 text-(--muted)">
                             {schedule.enabled ? formatWhen(schedule.nextRunAt) : "—"}

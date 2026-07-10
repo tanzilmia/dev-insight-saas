@@ -390,6 +390,9 @@ model ReportSchedule {
   employeeIds    String[]
   period         String
   cadence        ScheduleCadence
+  runHour        Int             @default(9)
+  runMinute      Int             @default(0)
+  timeZone       String?
   customPrompt   String?
   enabled        Boolean         @default(true)
   nextRunAt      DateTime
