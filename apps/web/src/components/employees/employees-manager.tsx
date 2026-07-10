@@ -77,6 +77,8 @@ export function EmployeesManager() {
   // Per-row draft text for the inline "add git identity" input.
   const [aliasDraft, setAliasDraft] = useState<Record<string, string>>({});
   const [aliasBusyId, setAliasBusyId] = useState<string | null>(null);
+  // Which row currently has its "add identity" input open.
+  const [openAliasFor, setOpenAliasFor] = useState<string | null>(null);
 
   // Uses .then callbacks (not async/await) so setState stays deferred and this
   // is safe to call directly from an effect (react-hooks/set-state-in-effect).
@@ -200,6 +202,7 @@ export function EmployeesManager() {
       }
       await addEmployeeGitAlias(employee.id, { organizationId, username: user.login });
       setAliasDraft((current) => ({ ...current, [employee.id]: "" }));
+      setOpenAliasFor(null);
       await refresh();
     } catch (error) {
       setRowError(getApiErrorMessage(error));
@@ -276,7 +279,7 @@ export function EmployeesManager() {
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
       <div className="grid gap-6 lg:grid-cols-[340px_1fr] lg:items-start">
-        <section className="glass animate-rise rounded-xl p-5">
+        <section className="glass animate-rise min-w-0 rounded-xl p-5">
           <p className="mb-1.5 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-(--accent)">
             <Users size={14} />
             Employees
@@ -374,7 +377,7 @@ export function EmployeesManager() {
                         void handleLookup();
                       }
                     }}
-                    className={fieldClass}
+                    className={`${fieldClass} min-w-0`}
                     placeholder="GitHub username"
                   />
                   <button
@@ -464,7 +467,7 @@ export function EmployeesManager() {
           )}
         </section>
 
-        <section className="animate-rise [animation-delay:80ms]">
+        <section className="animate-rise min-w-0 [animation-delay:80ms]">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-bold text-(--text)">
               {employees.length} member{employees.length === 1 ? "" : "s"}
@@ -549,7 +552,7 @@ export function EmployeesManager() {
                                   No Git identity
                                 </span>
                               ) : null}
-                              {manageable ? (
+                              {manageable && openAliasFor === employee.id ? (
                                 <span className="inline-flex items-center gap-1">
                                   <input
                                     value={aliasDraft[employee.id] ?? ""}
@@ -566,23 +569,42 @@ export function EmployeesManager() {
                                       }
                                     }}
                                     disabled={aliasBusy}
-                                    placeholder="add username"
-                                    className="field w-28 rounded-md px-2 py-0.5 text-[11px] font-medium text-(--text)"
+                                    autoFocus
+                                    placeholder="GitHub username"
+                                    className="field w-32 rounded-md px-2 py-0.5 text-[11px] font-medium text-(--text)"
                                   />
                                   <button
                                     type="button"
                                     onClick={() => handleAddAlias(employee)}
                                     disabled={aliasBusy}
                                     className="inline-flex items-center rounded-md border border-(--border) p-1 text-(--text) transition hover:bg-(--surface)"
-                                    aria-label="Add Git identity"
+                                    aria-label="Confirm Git identity"
                                   >
                                     {aliasBusy ? (
                                       <Loader2 size={11} className="animate-spin" />
                                     ) : (
-                                      <Plus size={11} />
+                                      <CheckCircle2 size={11} />
                                     )}
                                   </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOpenAliasFor(null)}
+                                    disabled={aliasBusy}
+                                    className="inline-flex items-center rounded-md p-1 text-(--muted) transition hover:text-(--text)"
+                                    aria-label="Cancel"
+                                  >
+                                    <X size={11} />
+                                  </button>
                                 </span>
+                              ) : manageable ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setOpenAliasFor(employee.id)}
+                                  className="inline-flex items-center gap-1 rounded-md border border-dashed border-(--border) px-2 py-0.5 text-[11px] font-semibold text-(--muted) transition hover:text-(--text)"
+                                >
+                                  <Plus size={11} />
+                                  {employee.gitAliases.length === 0 ? "Git identity" : "Add"}
+                                </button>
                               ) : null}
                             </div>
                           </td>
