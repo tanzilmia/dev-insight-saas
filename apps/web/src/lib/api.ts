@@ -374,9 +374,27 @@ export type TrackedRepository = RepositoryInput & {
   project: { id: string; name: string } | null;
   commitCount: number;
   lastSyncedAt: string | null;
+  /** Live sync (GitHub webhook) state. null status = off. */
+  liveSync: { status: "ACTIVE" | "ERROR" | null; lastWebhookAt: string | null };
   createdAt: string;
   updatedAt: string;
 };
+
+export async function enableLiveSync(repositoryId: string) {
+  const response = await api.post<{ repository: TrackedRepository }>(
+    `/api/repositories/${repositoryId}/live-sync`
+  );
+
+  return response.data.repository;
+}
+
+export async function disableLiveSync(repositoryId: string) {
+  const response = await api.delete<{ repository: TrackedRepository }>(
+    `/api/repositories/${repositoryId}/live-sync`
+  );
+
+  return response.data.repository;
+}
 
 export type CollectActivityResult = {
   range: { since: string; until: string };

@@ -909,6 +909,49 @@ signal, so the same-project/same-period fairness guard holds by construction.
   snapshot history), Phase 4 (employee-of-the-month LLM shortlist +
   branch-aware report generation).
 
+### Live sync — GitHub webhooks, zero-friction (2026-07-13) ✅
+
+Real-time commit ingestion: an employee pushes → GitHub delivers a signed
+webhook → DevInsight ingests the fresh tail immediately. **Zero user setup**:
+tracking a repo auto-registers the webhook via the org's stored PAT (user never
+opens GitHub settings). Verified end-to-end vs mock (14 assertions incl. the
+real-time flow: `__addcommit` → signed delivery → commitCount incremented).
+
+- **Env `PUBLIC_API_URL`** (optional): the externally reachable API base GitHub
+  calls. Unset (localhost) → live sync unavailable with a clean 400
+  `LIVE_SYNC_UNAVAILABLE` hint; everything else unaffected. Documented in
+  `.env.example`.
+- **Schema** (migration `repository_webhooks`, additive): `Repository.
+  webhookExternalId / webhookSecret (encrypted, token-cipher) / webhookStatus
+  (ACTIVE|ERROR|null) / lastWebhookAt`.
+- **Provider**: `createWebhook`/`deleteWebhook` on `GitProvider` + GitHub impl
+  (`request()` gained method/body support). 403/404 → `WEBHOOK_PERMISSION_DENIED`
+  with the exact scope hint (classic `admin:repo_hook` / fine-grained Webhooks
+  write); delete is 404-tolerant.
+- **Receive endpoint** `POST /api/webhooks/github/:repositoryId` — no JWT; the
+  row id in the URL picks the exact Repository (two orgs tracking the same
+  GitHub repo each have their own hook+secret). Mounted **before**
+  `express.json()` with `express.raw` (HMAC needs raw bytes). Verifies
+  `X-Hub-Signature-256` (timingSafeEqual); `ping`→200; `push`→**202
+  immediately** then fire-and-forget ingest: window = earliest pushed-commit
+  ts − 5 min → now via `ingestRepository` (now exported; ledger keeps it cheap,
+  sha-dedup makes redeliveries idempotent — verified). Per-repo in-memory
+  debounce with one trailing re-run; ingest failure → `webhookStatus: ERROR`.
+- **Lifecycle** (`repositories.service.ts`): `enableLiveSync`/`disableLiveSync`
+  (manager; `POST`/`DELETE /api/repositories/:id/live-sync`; re-enable rotates
+  the secret; AuditLog both ways). **Auto-enable on track** inside
+  `selectRepositories`' best-effort loop (skips silently when PUBLIC_API_URL
+  unset; permission failure warns, never fails selection). `untrackRepository`
+  deletes the hook best-effort. DTO gains `liveSync {status,lastWebhookAt}` —
+  the secret never leaves the backend.
+- **Web**: Live badge (emerald pulse "Live" / red "Sync error", last-push
+  tooltip) next to the visibility badge + a Zap toggle in row actions;
+  permission/unavailable errors surface with actionable text.
+- **Ops note**: production needs `PUBLIC_API_URL` + PAT webhook scope; local
+  dev needs a tunnel or relies on manual/report collection. Missed deliveries
+  are backfilled by any later collect (ledger). Future belt-and-braces: a
+  scheduled poller (deliberately out of scope).
+
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
 Goal (from product owner): reports over **any date window** (not just last 90 days) —

@@ -141,4 +141,18 @@ export interface GitProvider {
     repo: string,
     sha: string
   ): Promise<GitCommitDetail>;
+  /**
+   * Registers a push webhook on the repository (live sync). The secret signs
+   * deliveries (HMAC). Throws WEBHOOK_PERMISSION_DENIED when the token lacks
+   * hook permission.
+   */
+  createWebhook(
+    token: string,
+    owner: string,
+    repo: string,
+    url: string,
+    secret: string
+  ): Promise<{ externalId: string }>;
+  /** Removes a previously registered webhook. Tolerates already-deleted hooks. */
+  deleteWebhook(token: string, owner: string, repo: string, externalId: string): Promise<void>;
 }

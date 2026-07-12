@@ -15,7 +15,8 @@ import {
   RefreshCw,
   Search,
   Trash2,
-  X
+  X,
+  Zap
 } from "lucide-react";
 
 import {
@@ -26,6 +27,8 @@ import {
   assignRepositoryProject,
   cancelDeepCollection,
   collectActivity,
+  disableLiveSync,
+  enableLiveSync,
   getApiErrorMessage,
   listCollectionJobs,
   listProjects,
@@ -72,6 +75,33 @@ function toJobMap(rows: CollectionJob[]): Record<string, CollectionJob> {
             now - new Date(job.finishedAt).getTime() < FINISHED_BADGE_MAX_AGE_MS)
       )
       .map((job) => [job.repositoryId, job])
+  );
+}
+
+function LiveSyncBadge({ liveSync }: { liveSync: TrackedRepository["liveSync"] }) {
+  if (!liveSync.status) {
+    return null;
+  }
+  if (liveSync.status === "ERROR") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-black text-red-600 dark:text-red-400">
+        <Zap size={11} />
+        Sync error
+      </span>
+    );
+  }
+  return (
+    <span
+      title={
+        liveSync.lastWebhookAt
+          ? `Last push received ${new Date(liveSync.lastWebhookAt).toLocaleString()}`
+          : "Waiting for the first push"
+      }
+      className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-black text-emerald-600 dark:text-emerald-400"
+    >
+      <span className="pulse-dot" />
+      Live
+    </span>
   );
 }
 
@@ -353,6 +383,30 @@ export function RepositoriesManager() {
         setRowNotice({
           tone: "success",
           text: `Collected ${result.newCollected} new commit(s) across ${result.branchesChecked} branch(es) from ${repo.fullName} (last 90 days).`
+        });
+      }
+      await refresh();
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleLiveSyncToggle(repo: TrackedRepository) {
+    setBusyId(repo.id);
+    setRowError(null);
+    setRowNotice(null);
+
+    try {
+      if (repo.liveSync.status) {
+        await disableLiveSync(repo.id);
+        setRowNotice({ tone: "success", text: `Live sync turned off for ${repo.fullName}.` });
+      } else {
+        await enableLiveSync(repo.id);
+        setRowNotice({
+          tone: "success",
+          text: `Live sync is on — new pushes to ${repo.fullName} will appear automatically.`
         });
       }
       await refresh();
@@ -735,7 +789,10 @@ export function RepositoriesManager() {
                                 ) : null}
                               </td>
                               <td className="px-4 py-3">
-                                <PrivacyBadge isPrivate={repo.isPrivate} />
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <PrivacyBadge isPrivate={repo.isPrivate} />
+                                  <LiveSyncBadge liveSync={repo.liveSync} />
+                                </div>
                               </td>
                               <td className="px-4 py-3">
                                 {manageable ? (
@@ -793,6 +850,30 @@ export function RepositoriesManager() {
                                       >
                                         <HardDriveDownload size={13} />
                                         Deep collect
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleLiveSyncToggle(repo)}
+                                        disabled={busy}
+                                        aria-label={
+                                          repo.liveSync.status
+                                            ? "Turn live sync off"
+                                            : "Turn live sync on"
+                                        }
+                                        title={
+                                          repo.liveSync.status
+                                            ? "Live sync is on — pushes land automatically. Click to turn off."
+                                            : "Turn on live sync: DevInsight registers a GitHub webhook so new pushes appear automatically."
+                                        }
+                                        className={`grid h-8 w-8 place-items-center rounded-md border border-(--border) transition hover:bg-(--surface) ${
+                                          repo.liveSync.status === "ACTIVE"
+                                            ? "text-emerald-600 dark:text-emerald-400"
+                                            : repo.liveSync.status === "ERROR"
+                                              ? "text-red-600 dark:text-red-400"
+                                              : "text-(--muted)"
+                                        }`}
+                                      >
+                                        <Zap size={14} />
                                       </button>
                                       <button
                                         type="button"

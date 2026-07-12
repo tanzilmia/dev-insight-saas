@@ -19,12 +19,16 @@ import { publicReportsRouter } from "./modules/reports/reports.public.controller
 import { repositoriesRouter } from "./modules/repositories/repositories.controller.js";
 import { schedulesRouter } from "./modules/schedules/schedules.controller.js";
 import { statisticsRouter } from "./modules/statistics/statistics.controller.js";
+import { webhooksRouter } from "./modules/webhooks/webhooks.controller.js";
 
 export function createApp() {
   const app = express();
 
   app.use(helmet());
   app.use(cors());
+  // Webhook deliveries need the RAW body for HMAC verification, so this router
+  // (with its own raw parser) mounts before the global JSON parser.
+  app.use("/api/webhooks", webhooksRouter);
   app.use(express.json());
   app.use(pinoHttp());
 

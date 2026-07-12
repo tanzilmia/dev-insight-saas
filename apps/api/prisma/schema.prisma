@@ -195,6 +195,13 @@ model Repository {
   isPrivate      Boolean     @default(false)
   defaultBranch  String?
   lastSyncedAt   DateTime?
+  // Live sync (GitHub webhook): hook id on the provider, the HMAC secret
+  // (encrypted at rest, never returned by any API), status (ACTIVE/ERROR,
+  // null = off) and the last delivery time.
+  webhookExternalId String?
+  webhookSecret     String?
+  webhookStatus     String?
+  lastWebhookAt     DateTime?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 

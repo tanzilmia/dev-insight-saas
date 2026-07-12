@@ -1,13 +1,16 @@
+import { randomBytes } from "node:crypto";
+
 import type { Prisma, Repository } from "@prisma/client";
 
 import { prisma } from "../../config/database.js";
+import { env } from "../../config/env.js";
 import { AppError } from "../../common/errors/app-error.js";
 import {
   MANAGER_ROLES,
   requireOrganizationMember,
   requireOrganizationRole
 } from "../../common/access/organization-access.js";
-import { decryptToken } from "../../common/crypto/token-cipher.js";
+import { decryptToken, encryptToken } from "../../common/crypto/token-cipher.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
 import { REPO_AFFILIATIONS, type RepoAffiliation } from "../git-providers/git-provider.js";
 import { discoverContributorsForRepository } from "../contributors/contributors.service.js";
@@ -41,6 +44,11 @@ function toRepository(repository: RepositoryWithProject) {
     project: repository.project,
     commitCount: repository._count.commits,
     lastSyncedAt: repository.lastSyncedAt,
+    // Live-sync state only — the webhook secret never leaves the backend.
+    liveSync: {
+      status: (repository.webhookStatus as "ACTIVE" | "ERROR" | null) ?? null,
+      lastWebhookAt: repository.lastWebhookAt
+    },
     createdAt: repository.createdAt,
     updatedAt: repository.updatedAt
   };
@@ -207,6 +215,20 @@ export async function selectRepositories(
         error
       );
     }
+
+    // Zero-friction live sync: auto-register the push webhook the moment a
+    // repo is tracked (when the server has a public URL and the hook isn't
+    // already set). Best-effort — a PAT without hook permission just logs.
+    if (env.PUBLIC_API_URL && !repo.webhookExternalId) {
+      try {
+        await registerWebhook(repo);
+      } catch (error) {
+        console.warn(
+          `Live-sync auto-enable failed for ${repo.fullName}; it can be enabled from the Repositories page.`,
+          error
+        );
+      }
+    }
   }
 
   return listRepositories(actorId, organizationId);
@@ -291,9 +313,138 @@ export async function resyncRepository(actorId: string, repositoryId: string) {
   return toRepository(updated);
 }
 
+/**
+ * Registers the push webhook for a repository using the org's stored PAT —
+ * the user never touches GitHub settings. Core is auth-free so tracking can
+ * auto-enable best-effort; the exported wrappers gate access.
+ */
+async function registerWebhook(repository: Repository) {
+  if (!env.PUBLIC_API_URL) {
+    throw new AppError(
+      400,
+      "Live sync needs a public API URL. Set PUBLIC_API_URL on the server first.",
+      "LIVE_SYNC_UNAVAILABLE"
+    );
+  }
+
+  const credential = await prisma.gitCredential.findUnique({
+    where: { id: repository.credentialId }
+  });
+  if (!credential) {
+    throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
+  }
+
+  const token = decryptToken(credential.encryptedToken);
+  const provider = getGitProvider(credential.provider);
+
+  // Rotate: drop a previous hook so re-enabling mints a fresh secret.
+  if (repository.webhookExternalId) {
+    await provider
+      .deleteWebhook(token, repository.owner, repository.name, repository.webhookExternalId)
+      .catch(() => {});
+  }
+
+  const secret = randomBytes(32).toString("hex");
+  const hookUrl = `${env.PUBLIC_API_URL.replace(/\/$/, "")}/api/webhooks/github/${repository.id}`;
+  const hook = await provider.createWebhook(
+    token,
+    repository.owner,
+    repository.name,
+    hookUrl,
+    secret
+  );
+
+  return prisma.repository.update({
+    where: { id: repository.id },
+    data: {
+      webhookExternalId: hook.externalId,
+      webhookSecret: encryptToken(secret),
+      webhookStatus: "ACTIVE"
+    },
+    include: projectSelect
+  });
+}
+
+/** Best-effort webhook removal on the provider; local columns cleared by callers. */
+async function removeWebhook(repository: Repository) {
+  if (!repository.webhookExternalId) {
+    return;
+  }
+  try {
+    const credential = await prisma.gitCredential.findUnique({
+      where: { id: repository.credentialId }
+    });
+    if (!credential) {
+      return;
+    }
+    const token = decryptToken(credential.encryptedToken);
+    await getGitProvider(credential.provider).deleteWebhook(
+      token,
+      repository.owner,
+      repository.name,
+      repository.webhookExternalId
+    );
+  } catch (error) {
+    console.warn(`Webhook cleanup failed for ${repository.fullName} (continuing).`, error);
+  }
+}
+
+export async function enableLiveSync(actorId: string, repositoryId: string) {
+  const repository = await loadRepository(repositoryId);
+  await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
+
+  const updated = await registerWebhook(repository);
+
+  await prisma.auditLog.create({
+    data: {
+      organizationId: repository.organizationId,
+      actorId,
+      action: "repository.live_sync.enable",
+      entityType: "Repository",
+      entityId: repository.id,
+      metadataJson: { fullName: repository.fullName }
+    }
+  });
+
+  return toRepository(updated);
+}
+
+export async function disableLiveSync(actorId: string, repositoryId: string) {
+  const repository = await loadRepository(repositoryId);
+  await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
+
+  await removeWebhook(repository);
+  const updated = await prisma.repository.update({
+    where: { id: repository.id },
+    data: {
+      webhookExternalId: null,
+      webhookSecret: null,
+      webhookStatus: null,
+      lastWebhookAt: null
+    },
+    include: projectSelect
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      organizationId: repository.organizationId,
+      actorId,
+      action: "repository.live_sync.disable",
+      entityType: "Repository",
+      entityId: repository.id,
+      metadataJson: { fullName: repository.fullName }
+    }
+  });
+
+  return toRepository(updated);
+}
+
 export async function untrackRepository(actorId: string, repositoryId: string) {
   const repository = await loadRepository(repositoryId);
   await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
+
+  // Leave no orphan hook behind on GitHub (best-effort).
+  await removeWebhook(repository);
 
   await prisma.$transaction(async (tx) => {
     await tx.repository.delete({ where: { id: repositoryId } });

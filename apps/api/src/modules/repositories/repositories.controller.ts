@@ -11,6 +11,8 @@ import {
 } from "./repositories.schemas.js";
 import {
   assignRepositoryProject,
+  disableLiveSync,
+  enableLiveSync,
   listRepositories,
   resyncRepository,
   selectRepositories,
@@ -68,6 +70,26 @@ repositoriesRouter.post(
   asyncHandler(async (req, res) => {
     const { id } = repositoryParamsSchema.parse(req.params);
     const repository = await resyncRepository(req.authUser!.id, id);
+
+    res.status(200).json({ repository });
+  })
+);
+
+repositoriesRouter.post(
+  "/:id/live-sync",
+  asyncHandler(async (req, res) => {
+    const { id } = repositoryParamsSchema.parse(req.params);
+    const repository = await enableLiveSync(req.authUser!.id, id);
+
+    res.status(200).json({ repository });
+  })
+);
+
+repositoriesRouter.delete(
+  "/:id/live-sync",
+  asyncHandler(async (req, res) => {
+    const { id } = repositoryParamsSchema.parse(req.params);
+    const repository = await disableLiveSync(req.authUser!.id, id);
 
     res.status(200).json({ repository });
   })

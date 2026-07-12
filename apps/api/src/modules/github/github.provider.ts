@@ -76,11 +76,20 @@ export class GitHubProvider implements GitProvider {
     };
   }
 
-  private async request(path: string, token: string): Promise<Response> {
+  private async request(
+    path: string,
+    token: string,
+    options: { method?: string; body?: unknown } = {}
+  ): Promise<Response> {
     let response: Response;
     try {
       response = await fetch(`${env.GITHUB_API_BASE_URL}${path}`, {
-        headers: this.authHeaders(token)
+        method: options.method ?? "GET",
+        headers: {
+          ...this.authHeaders(token),
+          ...(options.body !== undefined ? { "Content-Type": "application/json" } : {})
+        },
+        ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {})
       });
     } catch {
       throw new AppError(502, "Could not reach GitHub", "GIT_PROVIDER_UNREACHABLE");
@@ -508,5 +517,57 @@ export class GitHubProvider implements GitProvider {
         changes: file.changes ?? 0
       }))
     };
+  }
+
+  async createWebhook(
+    token: string,
+    owner: string,
+    repo: string,
+    url: string,
+    secret: string
+  ): Promise<{ externalId: string }> {
+    const response = await this.request(`/repos/${owner}/${repo}/hooks`, token, {
+      method: "POST",
+      body: {
+        config: { url, content_type: "json", secret },
+        events: ["push"],
+        active: true
+      }
+    });
+
+    // A token without hook permission gets 404 (repo hooks hidden) or 403.
+    if (response.status === 403 || response.status === 404) {
+      throw new AppError(
+        400,
+        "GitHub refused to create the webhook — the stored token needs webhook permission (classic PAT: admin:repo_hook; fine-grained: Webhooks read & write).",
+        "WEBHOOK_PERMISSION_DENIED"
+      );
+    }
+
+    if (!response.ok) {
+      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+    }
+
+    const hook = (await response.json()) as { id: number };
+    return { externalId: String(hook.id) };
+  }
+
+  async deleteWebhook(
+    token: string,
+    owner: string,
+    repo: string,
+    externalId: string
+  ): Promise<void> {
+    const response = await this.request(
+      `/repos/${owner}/${repo}/hooks/${encodeURIComponent(externalId)}`,
+      token,
+      { method: "DELETE" }
+    );
+
+    // Already gone (or never visible to this token) is fine — the goal is
+    // "no active hook", not strict bookkeeping.
+    if (!response.ok && response.status !== 404 && response.status !== 403) {
+      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+    }
   }
 }

@@ -406,7 +406,7 @@ export async function ingestBranchRange(
  * branch list (catching new branches) and fetches only each branch's missing
  * sub-ranges.
  */
-async function ingestRepository(
+export async function ingestRepository(
   repository: Repository,
   token: string,
   provider: ReturnType<typeof getGitProvider>,
