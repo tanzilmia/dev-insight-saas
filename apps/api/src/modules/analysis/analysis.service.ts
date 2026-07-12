@@ -14,7 +14,16 @@ import {
 } from "../report-engine/commit-classifier.js";
 import { resolvePeriod } from "../openclaw/openclaw.tools.js";
 import { toLocalDateKey } from "../statistics/statistics.service.js";
-import type { EmployeeCommitsQuery, ProjectAnalysisQuery } from "./analysis.schemas.js";
+import type {
+  EmployeeCommitsQuery,
+  ProjectAnalysisQuery,
+  ProjectBranchesQuery
+} from "./analysis.schemas.js";
+
+/** Commit-where fragment for an optional branch-name filter (CommitBranch). */
+function branchFilter(branch: string | undefined) {
+  return branch ? { branches: { some: { branch: { name: branch } } } } : {};
+}
 
 // Single-pass caps: one bounded read for the whole project window instead of
 // re-querying per employee. When hit, the response says so (`truncated`).
@@ -145,7 +154,8 @@ export async function getProjectAnalysis(actorId: string, query: ProjectAnalysis
   const commits = await prisma.commit.findMany({
     where: {
       repository: { organizationId: query.organizationId, projectId: project.id },
-      committedAt: { gte: from, lte: to }
+      committedAt: { gte: from, lte: to },
+      ...branchFilter(query.branch)
     },
     orderBy: { committedAt: "desc" },
     take: ANALYSIS_PAGE_COMMIT_CAP,
@@ -348,7 +358,8 @@ export async function getEmployeeCommits(actorId: string, query: EmployeeCommits
     where: {
       repository: { organizationId: query.organizationId, projectId: project.id },
       committedAt: { gte: from, lte: to },
-      username: { in: usernames, mode: "insensitive" }
+      username: { in: usernames, mode: "insensitive" },
+      ...branchFilter(query.branch)
     },
     orderBy: { committedAt: "desc" },
     take: EMPLOYEE_COMMITS_CAP,
@@ -463,4 +474,38 @@ export async function buildProjectEmployeeSignals(
     });
   }
   return signals;
+}
+
+/**
+ * Distinct branch names across the project's repositories — the Analysis
+ * page's branch selector. Default branches sort first, then by name.
+ */
+export async function getProjectBranches(actorId: string, query: ProjectBranchesQuery) {
+  await requireOrganizationRole(actorId, query.organizationId, MANAGER_ROLES);
+
+  const project = await prisma.project.findFirst({
+    where: { id: query.projectId, organizationId: query.organizationId },
+    select: { id: true }
+  });
+  if (!project) {
+    throw new AppError(404, "Project was not found", "PROJECT_NOT_FOUND");
+  }
+
+  const rows = await prisma.branch.findMany({
+    where: { repository: { organizationId: query.organizationId, projectId: project.id } },
+    select: { name: true, isDefault: true },
+    orderBy: [{ isDefault: "desc" }, { name: "asc" }]
+  });
+
+  const seen = new Map<string, { name: string; isDefault: boolean }>();
+  for (const row of rows) {
+    const existing = seen.get(row.name);
+    if (!existing) {
+      seen.set(row.name, { name: row.name, isDefault: row.isDefault });
+    } else if (row.isDefault && !existing.isDefault) {
+      existing.isDefault = true;
+    }
+  }
+
+  return [...seen.values()];
 }

@@ -888,9 +888,26 @@ signal, so the same-project/same-period fairness guard holds by construction.
   breakdowns; area chips with **shared** highlight (module overlap); sample
   messages + last commit per side; the standing activity-signals disclaimer.
 - Selection resets on project/period reload. typecheck + lint + build clean.
+
+**Branch-filtered analysis (2026-07-12) ✅ (pulled forward from Phase 4):**
+- Backend: `projectAnalysisQuerySchema`/`employeeCommitsQuerySchema` gain
+  optional `branch` (name); `branchFilter()` adds a `CommitBranch` relation
+  filter (`branches.some.branch.name`) to both single-pass queries — data model
+  was Phase-D-ready, no migration. New `GET /api/analysis/project/branches`
+  (manager-gated): distinct branch names across the project's repos,
+  default-first.
+- Web: **branch selector** on the Analysis page between project and period
+  (default "All branches"; options reload + reset on project change). Cards,
+  totals, unmapped panel, and the Details table all follow the filter. The
+  **AI report button disables** while a branch is selected (report engine is
+  not branch-aware yet — tooltip explains; that part stays in Phase 4 scope
+  if wanted).
+- Verified vs mock (main=27 / develop=90 incl. 27 shared / all=90 deduped in
+  the 30-day window; details table filtered; unknown branch → 0 commits, not
+  an error; default-first ordering). typecheck + lint + build clean.
 - Analysis roadmap remaining: Phase 3 (daily digest enrichment + leaderboard
   snapshot history), Phase 4 (employee-of-the-month LLM shortlist +
-  branch-filtered analysis).
+  branch-aware report generation).
 
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 

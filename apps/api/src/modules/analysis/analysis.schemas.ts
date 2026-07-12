@@ -10,7 +10,10 @@ export const projectAnalysisQuerySchema = z.object({
   projectId: z.string().min(1),
   period: periodSchema.default("last_30_days"),
   from: isoDate.optional(),
-  to: isoDate.optional()
+  to: isoDate.optional(),
+  // Optional branch-name filter: only commits reachable from this branch
+  // (via CommitBranch) count. Omitted → all branches, deduped.
+  branch: z.string().trim().min(1).max(200).optional()
 });
 
 export type ProjectAnalysisQuery = z.infer<typeof projectAnalysisQuerySchema>;
@@ -21,3 +24,11 @@ export const employeeCommitsQuerySchema = projectAnalysisQuerySchema.extend({
 });
 
 export type EmployeeCommitsQuery = z.infer<typeof employeeCommitsQuerySchema>;
+
+/** Query for the project's distinct branch names (the branch selector). */
+export const projectBranchesQuerySchema = z.object({
+  organizationId: z.string().min(1),
+  projectId: z.string().min(1)
+});
+
+export type ProjectBranchesQuery = z.infer<typeof projectBranchesQuerySchema>;

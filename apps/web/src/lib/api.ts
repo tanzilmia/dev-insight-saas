@@ -939,14 +939,32 @@ export type ProjectAnalysis = {
 
 export type AnalysisPeriod = StatPeriod | "custom";
 
+export type ProjectBranch = { name: string; isDefault: boolean };
+
+export async function listProjectBranches(organizationId: string, projectId: string) {
+  const response = await api.get<{ branches: ProjectBranch[] }>(
+    "/api/analysis/project/branches",
+    { params: { organizationId, projectId } }
+  );
+
+  return response.data.branches;
+}
+
 export async function getProjectAnalysis(
   organizationId: string,
   projectId: string,
   period: AnalysisPeriod = "last_30_days",
-  customRange?: { from: string; to: string }
+  customRange?: { from: string; to: string },
+  branch?: string
 ) {
   const response = await api.get<{ analysis: ProjectAnalysis }>("/api/analysis/project", {
-    params: { organizationId, projectId, period, ...(customRange ?? {}) }
+    params: {
+      organizationId,
+      projectId,
+      period,
+      ...(customRange ?? {}),
+      ...(branch ? { branch } : {})
+    }
   });
 
   return response.data.analysis;
@@ -968,11 +986,21 @@ export async function getEmployeeCommits(
   projectId: string,
   userId: string,
   period: AnalysisPeriod = "last_30_days",
-  customRange?: { from: string; to: string }
+  customRange?: { from: string; to: string },
+  branch?: string
 ) {
   const response = await api.get<{ commits: AnalysisCommit[] }>(
     "/api/analysis/project/commits",
-    { params: { organizationId, projectId, userId, period, ...(customRange ?? {}) } }
+    {
+      params: {
+        organizationId,
+        projectId,
+        userId,
+        period,
+        ...(customRange ?? {}),
+        ...(branch ? { branch } : {})
+      }
+    }
   );
 
   return response.data.commits;

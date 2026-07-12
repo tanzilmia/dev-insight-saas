@@ -24,10 +24,12 @@ import {
   type GeneratedReport,
   type Project,
   type ProjectAnalysis,
+  type ProjectBranch,
   generateReport,
   getApiErrorMessage,
   getEmployeeCommits,
   getProjectAnalysis,
+  listProjectBranches,
   listProjects
 } from "@/lib/api";
 import { canManage, useSession } from "@/lib/use-session";
@@ -69,6 +71,8 @@ export function AnalysisManager() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
+  const [branches, setBranches] = useState<ProjectBranch[]>([]);
+  const [branch, setBranch] = useState(""); // "" = all branches
   const [period, setPeriod] = useState<AnalysisPeriod>("last_30_days");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -114,6 +118,23 @@ export function AnalysisManager() {
       });
   }, [organizationId, manageable]);
 
+  // Branch selector options for the picked project ("" = all branches).
+  useEffect(() => {
+    if (!organizationId || !projectId || !manageable) {
+      return;
+    }
+
+    listProjectBranches(organizationId, projectId)
+      .then((rows) => {
+        setBranches(rows);
+        setBranch("");
+      })
+      .catch(() => {
+        setBranches([]);
+        setBranch("");
+      });
+  }, [organizationId, projectId, manageable]);
+
   // State is set only inside .then/.catch/.finally callbacks (deferred), so
   // this is safe to call from an effect (react-hooks/set-state-in-effect).
   const load = useCallback(() => {
@@ -124,7 +145,8 @@ export function AnalysisManager() {
       organizationId,
       projectId,
       period,
-      period === "custom" ? { from: customFrom, to: customTo } : undefined
+      period === "custom" ? { from: customFrom, to: customTo } : undefined,
+      branch || undefined
     )
       .then((data) => {
         setAnalysis(data);
@@ -139,7 +161,7 @@ export function AnalysisManager() {
       .finally(() => {
         setLoading(false);
       });
-  }, [organizationId, projectId, manageable, period, customFrom, customTo, rangeReady]);
+  }, [organizationId, projectId, manageable, period, customFrom, customTo, rangeReady, branch]);
 
   useEffect(() => {
     void load();
@@ -160,7 +182,14 @@ export function AnalysisManager() {
     setDetailLoading(true);
 
     try {
-      const rows = await getEmployeeCommits(organizationId, projectId, userId, period, customRange);
+      const rows = await getEmployeeCommits(
+        organizationId,
+        projectId,
+        userId,
+        period,
+        customRange,
+        branch || undefined
+      );
       setDetailCommits(rows);
     } catch (caught) {
       setError(getApiErrorMessage(caught));
@@ -263,6 +292,23 @@ export function AnalysisManager() {
               ))}
             </select>
             <select
+              value={branch}
+              onChange={(event) => {
+                setBranch(event.target.value);
+                setLoading(true);
+              }}
+              aria-label="Branch"
+              className="field rounded-lg px-3 py-2 text-sm font-medium text-(--text)"
+            >
+              <option value="">All branches</option>
+              {branches.map((option) => (
+                <option key={option.name} value={option.name}>
+                  {option.name}
+                  {option.isDefault ? " (default)" : ""}
+                </option>
+              ))}
+            </select>
+            <select
               value={period}
               onChange={(event) => {
                 setPeriod(event.target.value as AnalysisPeriod);
@@ -283,8 +329,12 @@ export function AnalysisManager() {
             <button
               type="button"
               onClick={handleAiReport}
-              disabled={generating || !rangeReady || !projectId}
-              title="Ask the AI to write a narrative report for this exact window"
+              disabled={generating || !rangeReady || !projectId || branch !== ""}
+              title={
+                branch
+                  ? "AI report covers all branches — switch back to “All branches” first"
+                  : "Ask the AI to write a narrative report for this exact window"
+              }
               className="btn-gradient inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-bold"
             >
               {generating ? (
