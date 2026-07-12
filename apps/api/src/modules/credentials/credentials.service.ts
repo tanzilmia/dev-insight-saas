@@ -32,6 +32,7 @@ function toCredential(credential: GitCredential) {
     tokenLast4: credential.tokenLast4,
     accountLogin: credential.accountLogin,
     scopes: credential.scopes ? credential.scopes.split(",").filter(Boolean) : [],
+    repoAffiliations: credential.repoAffiliations.split(",").filter(Boolean),
     lastValidatedAt: credential.lastValidatedAt,
     createdAt: credential.createdAt,
     updatedAt: credential.updatedAt
@@ -222,6 +223,38 @@ export async function reconnectCredential(
     });
 
     return saved;
+  });
+
+  return toCredential(updated);
+}
+
+/**
+ * Updates which repo affiliations "Sync from GitHub" lists for this
+ * credential. A browse filter only — narrowing it never untracks repositories
+ * that are already tracked (and resync deliberately ignores it).
+ */
+export async function updateRepoAccess(
+  actorId: string,
+  credentialId: string,
+  repoAffiliations: string[]
+) {
+  const credential = await loadCredential(credentialId);
+  await requireOrganizationRole(actorId, credential.organizationId, MANAGER_ROLES);
+
+  const updated = await prisma.gitCredential.update({
+    where: { id: credential.id },
+    data: { repoAffiliations: repoAffiliations.join(",") }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      organizationId: credential.organizationId,
+      actorId,
+      action: "credential.repo_access.update",
+      entityType: "GitCredential",
+      entityId: credential.id,
+      metadataJson: { repoAffiliations }
+    }
   });
 
   return toCredential(updated);

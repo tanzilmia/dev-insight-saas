@@ -71,3 +71,23 @@ export function moduleFromPath(filePath: string): string {
   const parts = filePath.split("/").filter(Boolean);
   return parts.length > 1 ? parts[0]! : "(root)";
 }
+
+const NOISE_PATH = new RegExp(
+  [
+    // Lockfiles — a dependency bump can add tens of thousands of lines.
+    String.raw`(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|npm-shrinkwrap\.json|Cargo\.lock|Gemfile\.lock|composer\.lock|poetry\.lock|go\.sum)$`,
+    // Generated / vendored directories.
+    String.raw`(^|/)(node_modules|dist|build|out|\.next|vendor|coverage|__snapshots__)/`,
+    // Minified bundles and build artifacts.
+    String.raw`\.(min\.js|min\.css|map|snap)$`
+  ].join("|")
+);
+
+/**
+ * True for files whose line counts say nothing about human effort (lockfiles,
+ * generated/vendored output, minified bundles). Analysis line counts exclude
+ * these so a `npm install` commit can't inflate anyone's numbers.
+ */
+export function isNoisePath(filePath: string): boolean {
+  return NOISE_PATH.test(filePath);
+}

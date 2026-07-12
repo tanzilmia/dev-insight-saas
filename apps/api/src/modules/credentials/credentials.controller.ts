@@ -7,7 +7,8 @@ import {
   credentialParamsSchema,
   listCredentialsQuerySchema,
   reconnectCredentialSchema,
-  resolveUserQuerySchema
+  resolveUserQuerySchema,
+  updateRepoAccessSchema
 } from "./credentials.schemas.js";
 import {
   connectCredential,
@@ -15,6 +16,7 @@ import {
   listCredentials,
   reconnectCredential,
   resolveGitUser,
+  updateRepoAccess,
   validateStoredCredential
 } from "./credentials.service.js";
 
@@ -68,6 +70,17 @@ credentialsRouter.patch(
     const { id } = credentialParamsSchema.parse(req.params);
     const { token } = reconnectCredentialSchema.parse(req.body);
     const credential = await reconnectCredential(req.authUser!.id, id, token);
+
+    res.status(200).json({ credential });
+  })
+);
+
+credentialsRouter.patch(
+  "/:id/repo-access",
+  asyncHandler(async (req, res) => {
+    const { id } = credentialParamsSchema.parse(req.params);
+    const { repoAffiliations } = updateRepoAccessSchema.parse(req.body);
+    const credential = await updateRepoAccess(req.authUser!.id, id, repoAffiliations);
 
     res.status(200).json({ credential });
   })

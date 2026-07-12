@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
+  BarChart3,
   CalendarClock,
   FileText,
   FolderGit2,
@@ -16,10 +17,17 @@ import {
   X
 } from "lucide-react";
 
-import { useSession } from "@/lib/use-session";
+import { canManage, useSession } from "@/lib/use-session";
 
-export const NAV_ITEMS = [
+export const NAV_ITEMS: {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  managerOnly?: boolean;
+}[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  // Analysis compares employees — management-only, hidden from EMPLOYEE roles.
+  { href: "/dashboard/analysis", label: "Analysis", icon: BarChart3, managerOnly: true },
   { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
   { href: "/dashboard/employees", label: "Employees", icon: Users },
   { href: "/dashboard/repositories", label: "Repositories", icon: FolderGit2 },
@@ -42,6 +50,8 @@ export function DashboardSidebar({
 }) {
   const pathname = usePathname();
   const { session, activeOrganization, logout } = useSession();
+  const manageable = canManage(activeOrganization?.role);
+  const navItems = NAV_ITEMS.filter((item) => !item.managerOnly || manageable);
 
   const content = (
     <div className="flex h-full flex-col border-r border-(--border) bg-(--sidebar) px-3 py-4">
@@ -63,7 +73,7 @@ export function DashboardSidebar({
       </div>
 
       <nav className="flex flex-1 flex-col gap-1">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}

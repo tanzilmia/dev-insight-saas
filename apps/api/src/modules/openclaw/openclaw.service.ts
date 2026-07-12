@@ -6,6 +6,7 @@ import {
   ensureActivityCollected,
   sampleCommits
 } from "../activity/activity.service.js";
+import { buildProjectEmployeeSignals } from "../analysis/analysis.service.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
 import { createReport, findCachedReport } from "../reports/reports.service.js";
 import type { GenerateReportInput } from "./openclaw.schemas.js";
@@ -143,6 +144,23 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
 
   const commits = await sampleCommits(activityQuery);
 
+  // Project reports get per-employee focus signals (top categories/modules)
+  // so the narrative can say WHAT each person worked on. Optional — a failure
+  // here must never fail the report.
+  let employeeSignals: ReportContext["employeeSignals"];
+  if (input.reportType === "project" && project) {
+    try {
+      employeeSignals = await buildProjectEmployeeSignals(
+        input.organizationId,
+        project.id,
+        range.from,
+        range.to
+      );
+    } catch (error) {
+      console.warn("Per-employee signals unavailable for report prompt.", error);
+    }
+  }
+
   const context: ReportContext = {
     reportType: input.reportType,
     range,
@@ -153,6 +171,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     sampleCommits: commits,
     analysis,
     leaderboard,
+    employeeSignals,
     customPrompt: input.customPrompt
   };
 

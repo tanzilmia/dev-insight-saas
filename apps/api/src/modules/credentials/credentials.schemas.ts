@@ -31,3 +31,11 @@ export const createCredentialSchema = z.object({
 export const reconnectCredentialSchema = z.object({
   token
 });
+
+// Repo-access setting: which affiliations "Sync from GitHub" lists. At least
+// one must stay selected or the sync list would always be empty.
+export const updateRepoAccessSchema = z.object({
+  repoAffiliations: z
+    .array(z.enum(["owner", "collaborator", "organization_member"]))
+    .min(1)
+});

@@ -21,7 +21,7 @@ function startOfDay(date: Date) {
  * wrong commits) in any server timezone ahead of UTC, since the buckets are
  * keyed by *local* midnight.
  */
-function toLocalDateKey(date: Date): string {
+export function toLocalDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");

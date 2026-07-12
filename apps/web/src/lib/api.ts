@@ -263,6 +263,8 @@ export type GitCredential = {
   tokenLast4: string | null;
   accountLogin: string | null;
   scopes: string[];
+  /** Which repo affiliations "Sync from GitHub" lists (owner/collaborator/organization_member). */
+  repoAffiliations: string[];
   lastValidatedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -323,6 +325,18 @@ export async function reconnectCredential(credentialId: string, token: string) {
   const response = await api.patch<{ credential: GitCredential }>(
     `/api/git-credentials/${credentialId}/reconnect`,
     { token }
+  );
+
+  return response.data.credential;
+}
+
+export async function updateCredentialRepoAccess(
+  credentialId: string,
+  repoAffiliations: string[]
+) {
+  const response = await api.patch<{ credential: GitCredential }>(
+    `/api/git-credentials/${credentialId}/repo-access`,
+    { repoAffiliations }
   );
 
   return response.data.credential;
@@ -876,6 +890,92 @@ export async function getStatisticsOverview(
   });
 
   return response.data.overview;
+}
+
+/* ------------------------------------------------------------------ */
+/* Project analysis (manager-only per-employee activity cards)        */
+/* ------------------------------------------------------------------ */
+
+export type AnalysisEmployee = {
+  rank: number;
+  userId: string;
+  name: string;
+  email: string;
+  projectRole: string;
+  usernames: string[];
+  hasGitIdentity: boolean;
+  commits: number;
+  additions: number;
+  deletions: number;
+  lines: number;
+  /** Line count with lockfiles/generated/vendored files excluded. */
+  filteredLines: number;
+  excludedLines: number;
+  activeDays: number;
+  moduleCount: number;
+  topModules: string[];
+  categories: Record<string, number>;
+  riskyCommits: number;
+  largeCommits: number;
+  lastCommitAt: string | null;
+  sampleMessages: string[];
+};
+
+export type ProjectAnalysis = {
+  period: { from: string; to: string };
+  project: { id: string; name: string };
+  daysInPeriod: number;
+  truncated: boolean;
+  totals: {
+    commits: number;
+    filteredLines: number;
+    rawLines: number;
+    activeContributors: number;
+    members: number;
+  };
+  employees: AnalysisEmployee[];
+  unmapped: { name: string; commits: number; filteredLines: number }[];
+};
+
+export type AnalysisPeriod = StatPeriod | "custom";
+
+export async function getProjectAnalysis(
+  organizationId: string,
+  projectId: string,
+  period: AnalysisPeriod = "last_30_days",
+  customRange?: { from: string; to: string }
+) {
+  const response = await api.get<{ analysis: ProjectAnalysis }>("/api/analysis/project", {
+    params: { organizationId, projectId, period, ...(customRange ?? {}) }
+  });
+
+  return response.data.analysis;
+}
+
+/** One row of the per-employee commit details table. */
+export type AnalysisCommit = {
+  sha: string;
+  message: string;
+  committedAt: string;
+  category: string;
+  additions: number;
+  deletions: number;
+  changedFilesCount: number;
+};
+
+export async function getEmployeeCommits(
+  organizationId: string,
+  projectId: string,
+  userId: string,
+  period: AnalysisPeriod = "last_30_days",
+  customRange?: { from: string; to: string }
+) {
+  const response = await api.get<{ commits: AnalysisCommit[] }>(
+    "/api/analysis/project/commits",
+    { params: { organizationId, projectId, userId, period, ...(customRange ?? {}) } }
+  );
+
+  return response.data.commits;
 }
 
 /* ------------------------------------------------------------------ */

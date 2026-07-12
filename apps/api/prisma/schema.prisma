@@ -163,6 +163,10 @@ model GitCredential {
   tokenLast4      String?
   accountLogin    String?
   scopes          String?
+  // Which repo affiliations "Sync from GitHub" lists (CSV, mirrors GitHub's
+  // affiliation param). A browse filter only — narrowing it never untracks
+  // already-tracked repositories.
+  repoAffiliations String          @default("owner,collaborator,organization_member")
   status          CredentialStatus @default(CONNECTED)
   lastValidatedAt DateTime?
   createdById     String?

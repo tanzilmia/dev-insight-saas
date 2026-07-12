@@ -9,6 +9,7 @@ import {
 } from "../../common/access/organization-access.js";
 import { decryptToken } from "../../common/crypto/token-cipher.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
+import { REPO_AFFILIATIONS, type RepoAffiliation } from "../git-providers/git-provider.js";
 import { discoverContributorsForRepository } from "../contributors/contributors.service.js";
 
 type RepositoryInput = {
@@ -50,6 +51,21 @@ const projectSelect = {
   _count: { select: { commits: true } }
 } satisfies Prisma.RepositoryInclude;
 
+/**
+ * Parses the credential's stored repo-access CSV into known affiliation
+ * values; falls back to all affiliations when empty or unrecognized.
+ */
+function credentialAffiliations(credential: { repoAffiliations: string }): RepoAffiliation[] {
+  const known = credential.repoAffiliations
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value): value is RepoAffiliation =>
+      (REPO_AFFILIATIONS as readonly string[]).includes(value)
+    );
+
+  return known.length ? known : [...REPO_AFFILIATIONS];
+}
+
 /** Loads the organization's GitHub credential or throws a helpful error. */
 async function getOrganizationCredential(organizationId: string) {
   const credential = await prisma.gitCredential.findFirst({
@@ -84,7 +100,9 @@ export async function syncRepositories(actorId: string, organizationId: string) 
 
   const credential = await getOrganizationCredential(organizationId);
   const token = decryptToken(credential.encryptedToken);
-  const available = await getGitProvider(credential.provider).listRepositories(token);
+  const available = await getGitProvider(credential.provider).listRepositories(token, {
+    affiliations: credentialAffiliations(credential)
+  });
 
   const tracked = await prisma.repository.findMany({
     where: { organizationId },

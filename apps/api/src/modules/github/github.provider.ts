@@ -1,6 +1,6 @@
 import { AppError } from "../../common/errors/app-error.js";
 import { env } from "../../config/env.js";
-import { GitRateLimitError } from "../git-providers/git-provider.js";
+import { GitRateLimitError, REPO_AFFILIATIONS } from "../git-providers/git-provider.js";
 import type {
   CredentialValidationResult,
   GitBranch,
@@ -10,7 +10,8 @@ import type {
   GitProvider,
   GitRepository,
   GitUser,
-  ListCommitsOptions
+  ListCommitsOptions,
+  ListRepositoriesOptions
 } from "../git-providers/git-provider.js";
 
 const PER_PAGE = 100;
@@ -182,14 +183,21 @@ export class GitHubProvider implements GitProvider {
     };
   }
 
-  async listRepositories(token: string): Promise<GitRepository[]> {
+  async listRepositories(
+    token: string,
+    options: ListRepositoriesOptions = {}
+  ): Promise<GitRepository[]> {
     const repositories: GitRepository[] = [];
+    // The credential's repo-access setting decides which affiliations are
+    // listed; omitted → all (GitHub's own default for /user/repos).
+    const affiliation = (options.affiliations?.length
+      ? options.affiliations
+      : REPO_AFFILIATIONS
+    ).join(",");
 
     for (let page = 1; page <= MAX_PAGES; page += 1) {
-      // affiliation=owner → only repositories the authenticated user owns
-      // (excludes collaborator/organization-member repos).
       const response = await this.request(
-        `/user/repos?per_page=${PER_PAGE}&page=${page}&sort=full_name&affiliation=owner`,
+        `/user/repos?per_page=${PER_PAGE}&page=${page}&sort=full_name&affiliation=${affiliation}`,
         token
       );
 

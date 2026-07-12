@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  FolderGit2,
   GitBranch,
   KeyRound,
   Loader2,
@@ -20,6 +21,7 @@ import {
   getApiErrorMessage,
   listCredentials,
   reconnectCredential,
+  updateCredentialRepoAccess,
   validateCredential
 } from "@/lib/api";
 import { canManage, useSession } from "@/lib/use-session";
@@ -30,6 +32,24 @@ import {
 
 const fieldClass =
   "field w-full rounded-lg px-3.5 py-2.5 font-mono text-sm text-(--text) placeholder:font-sans placeholder:font-normal";
+
+const AFFILIATION_OPTIONS = [
+  {
+    value: "owner",
+    label: "Own repositories",
+    hint: "Repositories the connected account owns"
+  },
+  {
+    value: "collaborator",
+    label: "Repositories shared with you",
+    hint: "Where the account was added as a collaborator"
+  },
+  {
+    value: "organization_member",
+    label: "Organization repositories",
+    hint: "From GitHub organizations the account belongs to"
+  }
+] as const;
 
 function statusTone(status: GitCredential["status"]) {
   if (status === "CONNECTED") {
@@ -69,6 +89,10 @@ export function GitConnection() {
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const [affiliations, setAffiliations] = useState<Set<string>>(new Set());
+  const [savingAccess, setSavingAccess] = useState(false);
+  const [accessNotice, setAccessNotice] = useState<string | null>(null);
+
   // .then callbacks keep setState deferred (react-hooks/set-state-in-effect).
   const refresh = useCallback(() => {
     if (!organizationId) {
@@ -77,7 +101,9 @@ export function GitConnection() {
 
     return listCredentials(organizationId)
       .then((credentials) => {
-        setCredential(credentials.find((item) => item.provider === "GITHUB") ?? null);
+        const found = credentials.find((item) => item.provider === "GITHUB") ?? null;
+        setCredential(found);
+        setAffiliations(new Set(found?.repoAffiliations ?? []));
         setLoadError(null);
       })
       .catch((error) => {
@@ -153,6 +179,39 @@ export function GitConnection() {
     }
   }
 
+  function toggleAffiliation(value: string) {
+    setAccessNotice(null);
+    setAffiliations((current) => {
+      const next = new Set(current);
+      if (next.has(value)) {
+        next.delete(value);
+      } else {
+        next.add(value);
+      }
+      return next;
+    });
+  }
+
+  async function handleSaveAccess() {
+    if (!credential || affiliations.size === 0) {
+      return;
+    }
+
+    setSavingAccess(true);
+    setActionError(null);
+    setAccessNotice(null);
+
+    try {
+      await updateCredentialRepoAccess(credential.id, [...affiliations]);
+      setAccessNotice("Repository access updated.");
+      await refresh();
+    } catch (error) {
+      setActionError(getApiErrorMessage(error));
+    } finally {
+      setSavingAccess(false);
+    }
+  }
+
   async function handleDisconnect() {
     if (!credential) {
       return;
@@ -185,6 +244,11 @@ export function GitConnection() {
   if (!session) {
     return null;
   }
+
+  const savedAffiliations = credential?.repoAffiliations ?? [];
+  const accessDirty =
+    affiliations.size !== savedAffiliations.length ||
+    savedAffiliations.some((value) => !affiliations.has(value));
 
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
@@ -249,6 +313,76 @@ export function GitConnection() {
                   </dd>
                 </div>
               </dl>
+
+              {manageable ? (
+                <div className="glass-soft rounded-2xl p-5">
+                  <p className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--muted)">
+                    <FolderGit2 size={14} />
+                    Repository access
+                  </p>
+                  <p className="mt-1.5 text-xs leading-5 text-(--muted)">
+                    Choose which repositories appear in “Sync from GitHub” on the
+                    Repositories page. Narrowing this never untracks repositories
+                    you already track.
+                  </p>
+
+                  <div className="mt-4 grid gap-2.5">
+                    {AFFILIATION_OPTIONS.map((option) => (
+                      <label
+                        key={option.value}
+                        className="flex cursor-pointer items-start gap-3 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={affiliations.has(option.value)}
+                          onChange={() => toggleAffiliation(option.value)}
+                          disabled={savingAccess}
+                          className="mt-0.5 h-4 w-4 accent-(--accent)"
+                        />
+                        <span>
+                          <span className="block font-bold text-(--text)">
+                            {option.label}
+                          </span>
+                          <span className="block text-xs text-(--muted)">
+                            {option.hint}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleSaveAccess}
+                      disabled={savingAccess || !accessDirty || affiliations.size === 0}
+                      className="btn-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold"
+                    >
+                      {savingAccess ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <CheckCircle2 size={14} />
+                      )}
+                      Save access
+                    </button>
+                    {affiliations.size === 0 ? (
+                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                        Select at least one option.
+                      </span>
+                    ) : accessNotice ? (
+                      <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        {accessNotice}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <p className="mt-3 text-[11px] leading-4 text-(--muted)">
+                    Note: a fine-grained token only returns repositories it was
+                    granted, and organization repositories may require the
+                    organization to authorize the token (SSO).
+                  </p>
+                </div>
+              ) : null}
 
               {actionError ? (
                 <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-600 dark:text-red-400">

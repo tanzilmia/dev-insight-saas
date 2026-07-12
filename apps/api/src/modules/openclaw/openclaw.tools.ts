@@ -239,6 +239,9 @@ export type ReportCommit = {
   deletions: number;
 };
 
+/** Per-employee focus signals (top categories/modules), keyed by employeeId. */
+export type EmployeeSignalMap = Map<string, { topCategories: string[]; topModules: string[] }>;
+
 export type ReportContext = {
   reportType: ReportType;
   range: DateRange;
@@ -249,6 +252,8 @@ export type ReportContext = {
   sampleCommits: ReportCommit[];
   analysis?: ActivityAnalysis;
   leaderboard?: EmployeeLeaderboardRow[];
+  /** Optional — lets "Who did what" say what each person focused on. */
+  employeeSignals?: EmployeeSignalMap;
   customPrompt?: string;
 };
 
@@ -304,13 +309,26 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
     ? [
         "",
         "Contributor leaderboard (ranked by lines changed):",
-        ...leaderboard.map(
-          (row) =>
+        ...leaderboard.map((row) => {
+          const signal = row.employeeId
+            ? context.employeeSignals?.get(row.employeeId)
+            : undefined;
+          const focusLine = signal
+            ? `\n   focus: ${[
+                signal.topCategories.length ? signal.topCategories.join(", ") : null,
+                signal.topModules.length ? `areas: ${signal.topModules.join(", ")}` : null
+              ]
+                .filter(Boolean)
+                .join(" · ")}`
+            : "";
+          return (
             `${row.rank}. ${row.name}${row.mapped ? "" : " (unmapped)"} — ${row.commits} commit(s), +${row.additions}/-${row.deletions} (${row.lines} lines)` +
             (row.sampleMessages.length
               ? `\n   worked on: ${row.sampleMessages.join("; ")}`
-              : "")
-        )
+              : "") +
+            focusLine
+          );
+        })
       ].join("\n")
     : null;
 
@@ -370,17 +388,31 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
     "## Activity",
     `Commits: ${context.activity.commits} · +${context.activity.additions} / -${context.activity.deletions} · ${context.activity.filesChanged} files`,
     ...(leaderboard.length
-      ? [
-          "",
-          "## Who did what (ranked by lines changed)",
-          "",
-          "| # | Contributor | Commits | +/- lines | Files |",
-          "| --- | --- | ---: | ---: | ---: |",
-          ...leaderboard.map(
-            (row) =>
-              `| ${row.rank} | ${row.name}${row.mapped ? "" : " _(unmapped)_"} | ${row.commits} | +${row.additions} / -${row.deletions} | ${row.filesChanged} |`
-          )
-        ]
+      ? (() => {
+          const hasSignals = leaderboard.some(
+            (row) => row.employeeId && context.employeeSignals?.has(row.employeeId)
+          );
+          return [
+            "",
+            "## Who did what (ranked by lines changed)",
+            "",
+            `| # | Contributor | Commits | +/- lines | Files |${hasSignals ? " Focus |" : ""}`,
+            `| --- | --- | ---: | ---: | ---: |${hasSignals ? " --- |" : ""}`,
+            ...leaderboard.map((row) => {
+              const signal = row.employeeId
+                ? context.employeeSignals?.get(row.employeeId)
+                : undefined;
+              const focusCell = hasSignals
+                ? ` ${
+                    signal
+                      ? [...signal.topCategories, ...signal.topModules].join(", ") || "—"
+                      : "—"
+                  } |`
+                : "";
+              return `| ${row.rank} | ${row.name}${row.mapped ? "" : " _(unmapped)_"} | ${row.commits} | +${row.additions} / -${row.deletions} | ${row.filesChanged} |${focusCell}`;
+            })
+          ];
+        })()
       : []),
     "",
     "## Summary",

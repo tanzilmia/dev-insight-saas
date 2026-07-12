@@ -91,6 +91,18 @@ export type ListCommitsOptions = {
 };
 
 /**
+ * Which relationships between the token's account and a repository make it
+ * appear in listRepositories. Mirrors GitHub's `affiliation` values.
+ */
+export const REPO_AFFILIATIONS = ["owner", "collaborator", "organization_member"] as const;
+export type RepoAffiliation = (typeof REPO_AFFILIATIONS)[number];
+
+export type ListRepositoriesOptions = {
+  /** Defaults to all affiliations when omitted. */
+  affiliations?: RepoAffiliation[];
+};
+
+/**
  * Common abstraction over Git hosting providers. GitHub is the only
  * implementation for the MVP; GitLab/Bitbucket can be added behind the same
  * interface without touching callers. Later phases will extend this with
@@ -106,7 +118,7 @@ export interface GitProvider {
   validateCredential(token: string): Promise<CredentialValidationResult>;
   /** Resolves a single account by login/handle. Returns null if it doesn't exist. */
   getUser(token: string, username: string): Promise<GitUser | null>;
-  listRepositories(token: string): Promise<GitRepository[]>;
+  listRepositories(token: string, options?: ListRepositoriesOptions): Promise<GitRepository[]>;
   listContributors(token: string, owner: string, repo: string): Promise<GitContributor[]>;
   /**
    * Repository collaborators (people granted access), regardless of whether

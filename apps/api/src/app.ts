@@ -5,6 +5,7 @@ import { pinoHttp } from "pino-http";
 
 import { errorHandler } from "./common/middleware/error-handler.js";
 import { activityRouter } from "./modules/activity/activity.controller.js";
+import { analysisRouter } from "./modules/analysis/analysis.controller.js";
 import { authRouter } from "./modules/auth/auth.controller.js";
 import { contributorsRouter } from "./modules/contributors/contributors.controller.js";
 import { credentialsRouter } from "./modules/credentials/credentials.controller.js";
@@ -50,6 +51,7 @@ export function createApp() {
   app.use("/api/public/reports", publicReportsRouter);
   app.use("/api/reports", reportsRouter);
   app.use("/api/statistics", statisticsRouter);
+  app.use("/api/analysis", analysisRouter);
   app.use("/api/schedules", schedulesRouter);
   app.use(errorHandler);
 

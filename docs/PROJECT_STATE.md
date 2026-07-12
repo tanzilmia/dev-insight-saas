@@ -782,6 +782,99 @@ validates.
 **Still deferred:** email-based resolve (best-effort, public emails only);
 unmapped-contributors dashboard nudge; bulk CSV employee import.
 
+**Repository access control (affiliations) — DONE (2026-07-12):** the provider
+hardcoded `affiliation=owner`, so only the PAT owner's own repos appeared in
+"Sync from GitHub" — collaborator + organization repos were invisible. Now:
+- `GitCredential.repoAffiliations` (CSV, migration `credential_repo_affiliations`,
+  **default `owner,collaborator,organization_member`** — existing credential
+  backfilled to all-on per product decision). Surfaced in the credential DTO as
+  `repoAffiliations: string[]`.
+- `GitProvider.listRepositories(token, { affiliations? })` + exported
+  `REPO_AFFILIATIONS`; GitHub impl builds the `affiliation=` param (omitted →
+  all three). `syncRepositories` passes the credential's setting;
+  **`resyncRepository` deliberately passes none (= all)** so narrowing the
+  filter can't fail metadata refresh of an already-tracked repo.
+- **Semantics: a browse/sync-list filter, not access revocation** — narrowing
+  never untracks tracked repos (verified).
+- `PATCH /api/git-credentials/:id/repo-access` (manager-gated, zod `.min(1)`,
+  AuditLog `credential.repo_access.update`).
+- Web: `/dashboard/git` connected card gains a **"Repository access"** section —
+  three checkboxes (Own / Shared with you / Organization), Save disabled when
+  unchanged or zero selected, copy notes the sync-list-only semantics + the
+  fine-grained-PAT/org-SSO caveat. `updateCredentialRepoAccess` in `api.ts`.
+- Verified against an affiliation-aware mock (3 repos, one per affiliation):
+  default all-three, owner-only narrowing hides the other two, tracked
+  collaborator repo survives + resyncs, empty array → 400. typecheck + lint +
+  build clean both workspaces.
+
+### Project Analysis page — per-employee activity cards (2026-07-12) ✅
+
+Phase 1 of the management-analysis vision (per-employee cards → compare view →
+daily digest/leaderboard history → employee-of-the-month). **Manager-only**
+(first fully manager-gated page): pick a project + period → one card per
+project member with activity signals. Explicitly framed as **activity signals,
+not performance verdicts** (UI carries the disclaimer).
+
+- **`isNoisePath`** (`report-engine/commit-classifier.ts`) — lockfiles
+  (package-lock/yarn/pnpm/Cargo/Gemfile/composer/poetry/go.sum), generated dirs
+  (node_modules/dist/build/out/.next/vendor/coverage/__snapshots__), minified/
+  artifacts (.min.js/.min.css/.map/.snap). Analysis line counts exclude these
+  so a dependency bump can't inflate anyone (verified: 11,460 raw → 1,260
+  filtered on mock data). 22 unit cases checked (incl. `distribution/`,
+  `locksmith.ts` negatives).
+- **`modules/analysis/`** — `GET /api/analysis/project?organizationId=&projectId=&period=`
+  (JWT + `requireOrganizationRole(MANAGER_ROLES)`, 404 on foreign project).
+  `getProjectAnalysis`: resolvePeriod → project members + their
+  `EmployeeGitMapping` usernames → **single-pass** over the project window's
+  commits (cap 2000) + changed files (cap 10,000; `truncated` flag) →
+  per-member buckets: commits, raw vs **filtered** lines, excludedLines,
+  activeDays (`toLocalDateKey`, now exported from statistics.service), module
+  count + top-3 (`moduleFromPath`, noise excluded), category mix
+  (`classifyCommit`), risky/large commits, lastCommitAt, 3 sample messages.
+  Ranked by filteredLines. Zero-activity members still get a card with a
+  `hasGitIdentity` flag; non-member git activity returns as `unmapped[]`.
+- **Web:** nav item **Analysis** (`BarChart3`) — first role-gated nav entry
+  (`NAV_ITEMS` gained `managerOnly?`, sidebar filters with `canManage`).
+  `/dashboard/analysis` → `components/analysis/analysis-manager.tsx`
+  (statistics-dashboard template): project + period selectors, StatTile totals,
+  employee card grid (rank, role chip, commits/lines/active-days, BarList
+  category mix, areas line, amber risk line, sample messages, "No GitHub
+  identity linked" nudge), "Unattributed activity" panel linking to
+  Contributors, truncation note, footer disclaimer. EMPLOYEE role sees an
+  access notice (backend enforces anyway).
+- Verified end-to-end vs mock (19 assertions): totals/cards/rank/noise-filter/
+  activeDays/categories/idle-member flag/403 non-member/404/401. typecheck +
+  lint + build clean both workspaces. No schema changes.
+- Next phases (agreed): compare view → daily digest + leaderboard history →
+  employee-of-the-month (LLM shortlist, management confirms).
+
+**Analysis page v2 (2026-07-12) ✅ — custom range, commit details, AI report:**
+- **Custom range:** frontend-only (backend already accepted `period=custom` +
+  `from`/`to`) — `AnalysisPeriod = StatPeriod | "custom"` in web `api.ts`, period
+  select gains "Custom range" → two date inputs + inverted-range guard (loading
+  is skipped until the range is valid). Reminder: bare dates parse as whole
+  LOCAL days (inclusive end), by design.
+- **Per-employee commit details:** `GET /api/analysis/project/commits?...&userId=`
+  (manager-gated; matching by the employee's mapped usernames, case-insensitive
+  `in`; cap 100 newest). Each card gets a **Details** button → full-width panel
+  with a table (Date | Commit+sha | Category pill | +/- | Files). Unmapped
+  employee → empty table.
+- **AI narrative report:** header **AI report** button calls the EXISTING
+  `POST /api/openclaw/reports/generate` (project + same window) — orchestration,
+  auto-collect, fingerprint cache, persistence, template fallback all reused.
+  Result renders inline (react-markdown, `.report-md`, Cached/Template badges,
+  "View in Reports →" deep-link). **Prompt enrichment (all channels benefit):**
+  `buildProjectEmployeeSignals` (analysis.service; org-wide mapping keyed by
+  userId, caps 1000 commits/5000 files, noise-excluded) feeds new
+  `ReportContext.employeeSignals`; leaderboard prompt lines gain
+  `focus: 108 Fix, 47 Feature · areas: src` and the template table gains a
+  **Focus** column. Computed only for project reports, non-fatal on error.
+- Verified (mock GitHub + mock LLM that records the prompt): custom window =
+  51.00 local days inclusive; inverted → 400 `PERIOD_RANGE_INVALID`; details
+  rows (sha7/category/date); template PARTIAL report has the Focus column; LLM
+  report GENERATED with `focus:`/`areas:` lines in the received prompt;
+  identical repeat → `cached: true`. typecheck + lint + build clean.
+
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
 Goal (from product owner): reports over **any date window** (not just last 90 days) —
