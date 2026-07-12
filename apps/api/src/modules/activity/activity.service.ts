@@ -25,8 +25,26 @@ const MAX_FILES_PER_COMMIT = 300;
 // Multi-branch collection is one listCommits call per branch — bound it. The
 // default branch is always collected first.
 const MAX_BRANCHES = 25;
+// Deep collection: report progress (and check for cancellation) every N stored
+// commits, stop bisecting below a 1-hour window or 12 levels deep.
+const PROGRESS_EVERY = 25;
+const MIN_BISECT_WINDOW_MS = 60 * 60 * 1000;
+const MAX_BISECT_DEPTH = 12;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 type Range = { since?: string; until?: string };
+
+export type IngestOptions = {
+  /** Per-window detail-fetch cap. Defaults to {@link MAX_DETAIL_COMMITS}; deep jobs pass Infinity. */
+  maxDetailCommits?: number;
+  /** Sleep between getCommitDetail calls (ms) so deep jobs stay rate-limit friendly. */
+  detailDelayMs?: number;
+  /** Recursively split the window when listCommits hits the provider's pagination ceiling. */
+  bisectOnTruncation?: boolean;
+  /** Called every {@link PROGRESS_EVERY} stored commits. Return "cancel" to stop cleanly. */
+  onProgress?: (delta: { newCommits: number }) => Promise<"continue" | "cancel">;
+};
 
 /**
  * Records a fully-collected [since, until] window into the coverage ledger,
@@ -146,7 +164,8 @@ export async function collectActivity(actorId: string, repositoryId: string, ran
       metadataJson: {
         collected: result.newCollected,
         branchesChecked: result.branchesChecked,
-        rangesCollected: result.rangesCollected
+        rangesCollected: result.rangesCollected,
+        capped: result.capped
       }
     }
   });
@@ -159,7 +178,7 @@ export async function collectActivity(actorId: string, repositoryId: string, ran
  * row for each (default branch first, capped at {@link MAX_BRANCHES}). Returns
  * the stored rows so collection can key coverage + commit links by branch.
  */
-async function syncBranches(
+export async function syncBranches(
   repository: Repository,
   token: string,
   provider: ReturnType<typeof getGitProvider>
@@ -205,25 +224,60 @@ async function syncBranches(
  * stores new ones (with per-commit stats/files), links every stored commit to
  * the branch via CommitBranch (a shared commit is deduped but linked to each
  * branch), and records per-branch coverage when the window was fully collected.
- * Does NO access checks — callers gate access.
+ * A capped/cancelled/interrupted run checkpoints the fully-stored newest suffix
+ * of the window, so every pass shrinks the missing range and later passes
+ * resume instead of restarting. Does NO access checks — callers gate access.
  */
-async function ingestBranchRange(
+export async function ingestBranchRange(
   repository: Repository,
   branch: Branch,
   token: string,
   provider: ReturnType<typeof getGitProvider>,
   since: Date,
-  until: Date
-) {
+  until: Date,
+  options: IngestOptions = {},
+  depth = 0
+): Promise<{ newCollected: number; detailCapped: boolean; cancelled: boolean }> {
   const commits = await provider.listCommits(token, repository.owner, repository.name, {
     since: since.toISOString(),
     until: until.toISOString(),
     branch: branch.name
   });
 
+  // The provider's pagination ceiling means commits may be silently missing
+  // from this listing (it returns the newest ones first).
+  const listingTruncated = Boolean(
+    provider.maxCommitsPerList && commits.length >= provider.maxCommitsPerList
+  );
+
+  if (listingTruncated && options.bisectOnTruncation) {
+    if (until.getTime() - since.getTime() > MIN_BISECT_WINDOW_MS && depth < MAX_BISECT_DEPTH) {
+      // Split the window and recurse, newest half first (matches collection
+      // order elsewhere and keeps partial checkpoints contiguous with `until`).
+      const mid = new Date(Math.floor((since.getTime() + until.getTime()) / 2));
+      const newer = await ingestBranchRange(
+        repository, branch, token, provider, mid, until, options, depth + 1
+      );
+      if (newer.cancelled) {
+        return { ...newer, cancelled: true };
+      }
+      const older = await ingestBranchRange(
+        repository, branch, token, provider, since, mid, options, depth + 1
+      );
+      return {
+        newCollected: newer.newCollected + older.newCollected,
+        detailCapped: newer.detailCapped || older.detailCapped,
+        cancelled: older.cancelled
+      };
+    }
+    console.warn(
+      `[activity] ${repository.fullName}#${branch.name}: window ${since.toISOString()}..${until.toISOString()} still exceeds the listing ceiling at the bisection floor; collecting the newest ${commits.length} commits only.`
+    );
+  }
+
   if (!commits.length) {
     await recordCoverage(repository.id, branch.name, since, until);
-    return { newCollected: 0, detailCapped: false };
+    return { newCollected: 0, detailCapped: false, cancelled: false };
   }
 
   const existing = await prisma.commit.findMany({
@@ -232,51 +286,84 @@ async function ingestBranchRange(
   });
   const idBySha = new Map(existing.map((commit) => [commit.sha, commit.id]));
   const newCommits = commits.filter((commit) => !idBySha.has(commit.sha));
-  const toCollect = newCommits.slice(0, MAX_DETAIL_COMMITS);
+  const cap = options.maxDetailCommits ?? MAX_DETAIL_COMMITS;
+  const toCollect = newCommits.slice(0, cap);
 
   let collected = 0;
-  for (const commit of toCollect) {
-    const detail = await provider.getCommitDetail(
-      token,
-      repository.owner,
-      repository.name,
-      commit.sha
-    );
+  let cancelled = false;
+  let pendingProgress = 0;
+  let loopError: unknown = null;
 
-    const createdId = await prisma.$transaction(async (tx) => {
-      const created = await tx.commit.create({
-        data: {
-          repositoryId: repository.id,
-          sha: commit.sha,
-          message: commit.message,
-          authorName: commit.authorName,
-          authorEmail: commit.authorEmail,
-          username: commit.username,
-          committedAt: new Date(commit.committedAt),
-          additions: detail.additions,
-          deletions: detail.deletions,
-          changedFilesCount: detail.changedFilesCount
+  const reportProgress = async () => {
+    if (!options.onProgress || pendingProgress === 0) {
+      return;
+    }
+    const verdict = await options.onProgress({ newCommits: pendingProgress });
+    pendingProgress = 0;
+    if (verdict === "cancel") {
+      cancelled = true;
+    }
+  };
+
+  // Errors (e.g. a rate limit mid-window) must not lose the commits already
+  // stored: catch, checkpoint coverage below, then rethrow.
+  try {
+    for (const commit of toCollect) {
+      if (options.detailDelayMs) {
+        await sleep(options.detailDelayMs);
+      }
+      const detail = await provider.getCommitDetail(
+        token,
+        repository.owner,
+        repository.name,
+        commit.sha
+      );
+
+      const createdId = await prisma.$transaction(async (tx) => {
+        const created = await tx.commit.create({
+          data: {
+            repositoryId: repository.id,
+            sha: commit.sha,
+            message: commit.message,
+            authorName: commit.authorName,
+            authorEmail: commit.authorEmail,
+            username: commit.username,
+            committedAt: new Date(commit.committedAt),
+            additions: detail.additions,
+            deletions: detail.deletions,
+            changedFilesCount: detail.changedFilesCount
+          }
+        });
+
+        if (detail.files.length) {
+          await tx.changedFile.createMany({
+            data: detail.files.slice(0, MAX_FILES_PER_COMMIT).map((file) => ({
+              commitId: created.id,
+              filePath: file.filePath,
+              status: file.status,
+              additions: file.additions,
+              deletions: file.deletions,
+              changes: file.changes
+            }))
+          });
         }
+
+        return created.id;
       });
 
-      if (detail.files.length) {
-        await tx.changedFile.createMany({
-          data: detail.files.slice(0, MAX_FILES_PER_COMMIT).map((file) => ({
-            commitId: created.id,
-            filePath: file.filePath,
-            status: file.status,
-            additions: file.additions,
-            deletions: file.deletions,
-            changes: file.changes
-          }))
-        });
+      idBySha.set(commit.sha, createdId);
+      collected += 1;
+      pendingProgress += 1;
+      if (pendingProgress >= PROGRESS_EVERY) {
+        await reportProgress();
+        if (cancelled) {
+          break;
+        }
       }
-
-      return created.id;
-    });
-
-    idBySha.set(commit.sha, createdId);
-    collected += 1;
+    }
+    await reportProgress();
+  } catch (error) {
+    loopError = error;
   }
 
   // Link every stored commit in this window to the branch (idempotent).
@@ -288,14 +375,28 @@ async function ingestBranchRange(
     await prisma.commitBranch.createMany({ data: links, skipDuplicates: true });
   }
 
-  const detailCapped = newCommits.length > MAX_DETAIL_COMMITS;
-  // Only mark the window covered when it was fully collected — a capped run left
-  // commits unfetched, so the range must stay "missing" for a later pass.
-  if (!detailCapped) {
+  const complete = !listingTruncated && loopError === null && collected === newCommits.length;
+  if (complete) {
     await recordCoverage(repository.id, branch.name, since, until);
+  } else if (collected > 0) {
+    // Partial checkpoint: listings are newest-first, so everything from just
+    // AFTER the oldest commit we stored up to `until` is now fully collected
+    // (older listed commits either pre-existed or were never fetched). The
+    // +1ms keeps an unfetched commit sharing that exact timestamp out of the
+    // claimed interval — under-covering is safe, over-covering loses data.
+    const oldest = toCollect[collected - 1]!;
+    const boundary = new Date(new Date(oldest.committedAt).getTime() + 1);
+    if (boundary < until) {
+      await recordCoverage(repository.id, branch.name, boundary, until);
+    }
   }
 
-  return { newCollected: collected, detailCapped };
+  if (loopError) {
+    throw loopError;
+  }
+
+  const detailCapped = listingTruncated || newCommits.length > cap;
+  return { newCollected: collected, detailCapped, cancelled };
 }
 
 /**
@@ -327,7 +428,13 @@ async function ingestRepository(
       }
     }
     if (allCovered) {
-      return { branchesChecked: known.length, branchesCollected: 0, rangesCollected: 0, newCollected: 0 };
+      return {
+        branchesChecked: known.length,
+        branchesCollected: 0,
+        rangesCollected: 0,
+        newCollected: 0,
+        capped: false
+      };
     }
   }
 
@@ -335,6 +442,7 @@ async function ingestRepository(
   let branchesCollected = 0;
   let rangesCollected = 0;
   let newCollected = 0;
+  let capped = false;
 
   for (const branch of branches) {
     const missing = await getMissingRanges(repository.id, branch.name, since, until);
@@ -345,11 +453,12 @@ async function ingestRepository(
       const result = await ingestBranchRange(repository, branch, token, provider, gap.start, gap.end);
       rangesCollected += 1;
       newCollected += result.newCollected;
+      capped = capped || result.detailCapped;
     }
     branchesCollected += 1;
   }
 
-  return { branchesChecked: branches.length, branchesCollected, rangesCollected, newCollected };
+  return { branchesChecked: branches.length, branchesCollected, rangesCollected, newCollected, capped };
 }
 
 export type CollectScope = {

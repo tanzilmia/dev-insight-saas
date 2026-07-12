@@ -370,6 +370,8 @@ export type CollectActivityResult = {
   branchesChecked: number;
   branchesCollected: number;
   rangesCollected: number;
+  /** True when a per-run cap truncated the window — click Collect again or use Deep collect. */
+  capped: boolean;
 };
 
 export async function collectActivity(repositoryId: string) {
@@ -379,6 +381,60 @@ export async function collectActivity(repositoryId: string) {
   );
 
   return response.data.activity;
+}
+
+export type CollectionJobStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
+
+/** A background deep-history collection job (latest one per repository). */
+export type CollectionJob = {
+  id: string;
+  repositoryId: string;
+  status: CollectionJobStatus;
+  rangeStart: string;
+  rangeEnd: string;
+  branchesTotal: number;
+  branchesDone: number;
+  chunksTotal: number;
+  chunksDone: number;
+  commitsCollected: number;
+  currentBranch: string | null;
+  currentPhase: string | null;
+  cancelRequested: boolean;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+export async function startDeepCollection(repositoryId: string, lookbackDays: number) {
+  const response = await api.post<{ job: CollectionJob }>(
+    `/api/repositories/${repositoryId}/deep-collect`,
+    { lookbackDays }
+  );
+
+  return response.data.job;
+}
+
+export async function listCollectionJobs(organizationId: string) {
+  const response = await api.get<{ jobs: CollectionJob[] }>(
+    "/api/repositories/collection-jobs",
+    { params: { organizationId } }
+  );
+
+  return response.data.jobs;
+}
+
+export async function cancelDeepCollection(repositoryId: string) {
+  const response = await api.post<{ job: CollectionJob }>(
+    `/api/repositories/${repositoryId}/deep-collect/cancel`
+  );
+
+  return response.data.job;
 }
 
 export async function listRepositories(organizationId: string) {

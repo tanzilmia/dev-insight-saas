@@ -1,5 +1,6 @@
 import { AppError } from "../../common/errors/app-error.js";
 import { env } from "../../config/env.js";
+import { GitRateLimitError } from "../git-providers/git-provider.js";
 import type {
   CredentialValidationResult,
   GitBranch,
@@ -63,6 +64,8 @@ type GitHubCommitDetail = {
 
 /** GitHub implementation of {@link GitProvider} using the REST API. */
 export class GitHubProvider implements GitProvider {
+  readonly maxCommitsPerList = PER_PAGE * MAX_PAGES;
+
   private authHeaders(token: string) {
     return {
       Authorization: `Bearer ${token}`,
@@ -73,13 +76,40 @@ export class GitHubProvider implements GitProvider {
   }
 
   private async request(path: string, token: string): Promise<Response> {
+    let response: Response;
     try {
-      return await fetch(`${env.GITHUB_API_BASE_URL}${path}`, {
+      response = await fetch(`${env.GITHUB_API_BASE_URL}${path}`, {
         headers: this.authHeaders(token)
       });
     } catch {
       throw new AppError(502, "Could not reach GitHub", "GIT_PROVIDER_UNREACHABLE");
     }
+
+    // Primary limit: 403/429 + x-ratelimit-remaining: 0. Secondary limit:
+    // 403/429 + retry-after. Must be detected here, before the per-method
+    // 403 → INVALID_CREDENTIAL branches, so a rate-limited call is never
+    // misread as a bad token. A genuine auth 403 has remaining > 0.
+    if (
+      (response.status === 403 || response.status === 429) &&
+      (response.headers.get("x-ratelimit-remaining") === "0" ||
+        response.headers.get("retry-after") !== null)
+    ) {
+      throw new GitRateLimitError(this.rateLimitResetAt(response));
+    }
+
+    return response;
+  }
+
+  private rateLimitResetAt(response: Response): Date | null {
+    const retryAfter = response.headers.get("retry-after"); // seconds
+    if (retryAfter && Number.isFinite(Number(retryAfter))) {
+      return new Date(Date.now() + Number(retryAfter) * 1000);
+    }
+    const reset = response.headers.get("x-ratelimit-reset"); // unix epoch seconds
+    if (reset && Number.isFinite(Number(reset))) {
+      return new Date(Number(reset) * 1000);
+    }
+    return null;
   }
 
   async validateCredential(token: string): Promise<CredentialValidationResult> {

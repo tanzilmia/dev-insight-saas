@@ -1,32 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Check,
   DownloadCloud,
   FolderGit2,
   Globe,
+  HardDriveDownload,
   History,
   Loader2,
   Lock,
   Plus,
   RefreshCw,
   Search,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 
 import {
   type AvailableRepository,
+  type CollectionJob,
   type Project,
   type TrackedRepository,
   assignRepositoryProject,
+  cancelDeepCollection,
   collectActivity,
   getApiErrorMessage,
+  listCollectionJobs,
   listProjects,
   listRepositories,
   resyncRepository,
   selectRepositories,
+  startDeepCollection,
   syncRepositories,
   untrackRepository
 } from "@/lib/api";
@@ -35,6 +41,39 @@ import {
   DashboardChrome,
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
+
+const DEEP_LOOKBACKS = [
+  { days: 180, label: "6 months" },
+  { days: 365, label: "1 year" },
+  { days: 730, label: "2 years" },
+  { days: 3650, label: "Full history" }
+] as const;
+
+const FINISHED_BADGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function isActiveJob(job: CollectionJob | undefined): boolean {
+  return Boolean(job && (job.status === "QUEUED" || job.status === "RUNNING"));
+}
+
+/**
+ * Latest job per repository, dropping stale completed/cancelled ones so old
+ * badges don't clutter the table (failures stay until dismissed). Runs in data
+ * callbacks, not render, so Date.now() is fine here.
+ */
+function toJobMap(rows: CollectionJob[]): Record<string, CollectionJob> {
+  const now = Date.now();
+  return Object.fromEntries(
+    rows
+      .filter(
+        (job) =>
+          isActiveJob(job) ||
+          job.status === "FAILED" ||
+          (job.finishedAt &&
+            now - new Date(job.finishedAt).getTime() < FINISHED_BADGE_MAX_AGE_MS)
+      )
+      .map((job) => [job.repositoryId, job])
+  );
+}
 
 function PrivacyBadge({ isPrivate }: { isPrivate: boolean }) {
   return (
@@ -69,10 +108,25 @@ export function RepositoriesManager() {
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
-  const [rowNotice, setRowNotice] = useState<string | null>(null);
+  const [rowNotice, setRowNotice] = useState<{
+    text: string;
+    tone: "success" | "warning";
+  } | null>(null);
 
   const [availableQuery, setAvailableQuery] = useState("");
   const [trackedQuery, setTrackedQuery] = useState("");
+
+  // Deep-history collection jobs, keyed by repository id (latest per repo).
+  const [jobs, setJobs] = useState<Record<string, CollectionJob>>({});
+  const [dismissedJobs, setDismissedJobs] = useState<Set<string>>(new Set());
+  const [deepFormId, setDeepFormId] = useState<string | null>(null);
+  const [deepLookback, setDeepLookback] = useState<number>(365);
+  const prevActiveJobsRef = useRef<Set<string>>(new Set());
+
+  const activeJobCount = useMemo(
+    () => Object.values(jobs).filter((job) => isActiveJob(job)).length,
+    [jobs]
+  );
 
   const refresh = useCallback(() => {
     if (!organizationId) {
@@ -105,6 +159,48 @@ export function RepositoriesManager() {
       .then(setProjects)
       .catch(() => setProjects([]));
   }, [organizationId]);
+
+  // Load the latest job per repository once, so an in-flight deep collection
+  // resumes showing progress after a page reload.
+  useEffect(() => {
+    if (!organizationId) {
+      return;
+    }
+
+    listCollectionJobs(organizationId)
+      .then((rows) => setJobs(toJobMap(rows)))
+      .catch(() => {});
+  }, [organizationId]);
+
+  // Poll while any job is queued/running (first polling in the app: cheap
+  // indexed read, cleared as soon as the last job settles or on unmount).
+  useEffect(() => {
+    if (!organizationId || activeJobCount === 0) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      listCollectionJobs(organizationId)
+        .then((rows) => setJobs(toJobMap(rows)))
+        .catch(() => {});
+    }, 2500);
+
+    return () => clearInterval(timer);
+  }, [organizationId, activeJobCount]);
+
+  // When a job finishes, refresh the repository list once (commit counts).
+  useEffect(() => {
+    const nowActive = new Set(
+      Object.values(jobs)
+        .filter((job) => isActiveJob(job))
+        .map((job) => job.id)
+    );
+    const finished = [...prevActiveJobsRef.current].some((id) => !nowActive.has(id));
+    prevActiveJobsRef.current = nowActive;
+    if (finished) {
+      void refresh();
+    }
+  }, [jobs, refresh]);
 
   const untrackedAvailable = useMemo(
     () => available?.filter((repo) => !repo.tracked) ?? [],
@@ -248,15 +344,59 @@ export function RepositoriesManager() {
 
     try {
       const result = await collectActivity(repo.id);
-      setRowNotice(
-        `Collected ${result.newCollected} new commit(s) across ${result.branchesChecked} branch(es) from ${repo.fullName} (last 90 days).`
-      );
+      if (result.capped) {
+        setRowNotice({
+          tone: "warning",
+          text: `Collected ${result.newCollected} new commit(s) from ${repo.fullName}, but hit the per-run cap — click Collect again to continue, or use Deep collect for full history.`
+        });
+      } else {
+        setRowNotice({
+          tone: "success",
+          text: `Collected ${result.newCollected} new commit(s) across ${result.branchesChecked} branch(es) from ${repo.fullName} (last 90 days).`
+        });
+      }
       await refresh();
     } catch (error) {
       setRowError(getApiErrorMessage(error));
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function handleDeepStart(repo: TrackedRepository) {
+    setBusyId(repo.id);
+    setRowError(null);
+    setRowNotice(null);
+
+    try {
+      const job = await startDeepCollection(repo.id, deepLookback);
+      setJobs((current) => ({ ...current, [repo.id]: job }));
+      setDeepFormId(null);
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDeepCancel(repo: TrackedRepository) {
+    setRowError(null);
+
+    try {
+      const job = await cancelDeepCollection(repo.id);
+      setJobs((current) => ({ ...current, [repo.id]: job }));
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    }
+  }
+
+  function dismissJob(jobId: string) {
+    setDismissedJobs((current) => new Set(current).add(jobId));
+  }
+
+  // Stale completed/cancelled jobs are already filtered out by toJobMap.
+  function shouldShowJob(job: CollectionJob | undefined): job is CollectionJob {
+    return Boolean(job && (isActiveJob(job) || !dismissedJobs.has(job.id)));
   }
 
   if (status === "loading") {
@@ -421,8 +561,14 @@ export function RepositoriesManager() {
             </p>
           ) : null}
           {rowNotice ? (
-            <p className="mb-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-600 dark:text-emerald-400">
-              {rowNotice}
+            <p
+              className={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${
+                rowNotice.tone === "warning"
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              }`}
+            >
+              {rowNotice.text}
             </p>
           ) : null}
 
@@ -471,6 +617,17 @@ export function RepositoriesManager() {
                       <tbody>
                         {filteredTracked.map((repo) => {
                           const busy = busyId === repo.id;
+                          const job = jobs[repo.id];
+                          const jobActive = isActiveJob(job);
+                          const jobPct =
+                            job && job.chunksTotal > 0
+                              ? Math.min(
+                                  100,
+                                  Math.round((job.chunksDone / job.chunksTotal) * 100)
+                                )
+                              : 0;
+                          const jobIndeterminate =
+                            jobActive && (job?.status === "QUEUED" || job?.chunksTotal === 0);
                           return (
                             <tr
                               key={repo.id}
@@ -489,6 +646,93 @@ export function RepositoriesManager() {
                                   {repo.commitCount} commit{repo.commitCount === 1 ? "" : "s"}
                                   {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ""}
                                 </p>
+                                {shouldShowJob(job) ? (
+                                  <div className="mt-2 max-w-sm">
+                                    {jobActive ? (
+                                      <>
+                                        <div className="flex items-center gap-2">
+                                          <span
+                                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                                              job.status === "QUEUED"
+                                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                                                : "bg-(--accent-soft) text-(--accent)"
+                                            }`}
+                                          >
+                                            {job.status === "QUEUED"
+                                              ? "Queued"
+                                              : job.cancelRequested
+                                                ? "Cancelling…"
+                                                : "Collecting"}
+                                          </span>
+                                          <span className="text-[11px] text-(--muted)">
+                                            {job.commitsCollected} commits
+                                            {job.branchesTotal > 0
+                                              ? ` · branch ${Math.min(job.branchesDone + 1, job.branchesTotal)}/${job.branchesTotal}`
+                                              : ""}
+                                            {job.currentBranch ? ` (${job.currentBranch})` : ""}
+                                          </span>
+                                          {manageable && !job.cancelRequested ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDeepCancel(repo)}
+                                              className="text-[11px] font-bold text-(--muted) underline transition hover:text-red-600 dark:hover:text-red-400"
+                                            >
+                                              Cancel
+                                            </button>
+                                          ) : null}
+                                        </div>
+                                        <div
+                                          role="progressbar"
+                                          aria-label={`Deep collection of ${repo.fullName}`}
+                                          aria-valuenow={jobIndeterminate ? undefined : jobPct}
+                                          aria-valuemin={0}
+                                          aria-valuemax={100}
+                                          className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-(--surface-soft)"
+                                        >
+                                          <div
+                                            className={`h-full rounded-full bg-(--accent) transition-[width] duration-500 ${
+                                              jobIndeterminate ? "animate-pulse" : ""
+                                            }`}
+                                            style={{
+                                              width: jobIndeterminate ? "100%" : `${Math.max(3, jobPct)}%`
+                                            }}
+                                          />
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <div className="flex items-center gap-2">
+                                        <span
+                                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                                            job.status === "COMPLETED"
+                                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                                              : job.status === "FAILED"
+                                                ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                                                : "bg-(--surface-soft) text-(--muted)"
+                                          }`}
+                                        >
+                                          {job.status === "COMPLETED"
+                                            ? `Deep history collected · ${job.commitsCollected} commits`
+                                            : job.status === "FAILED"
+                                              ? "Deep collect failed"
+                                              : "Deep collect cancelled"}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => dismissJob(job.id)}
+                                          aria-label="Dismiss"
+                                          className="grid h-5 w-5 place-items-center rounded-full text-(--muted) transition hover:bg-(--surface-soft) hover:text-(--text)"
+                                        >
+                                          <X size={12} />
+                                        </button>
+                                      </div>
+                                    )}
+                                    {!jobActive && job.status === "FAILED" && job.error ? (
+                                      <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">
+                                        {job.error}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                               </td>
                               <td className="px-4 py-3">
                                 <PrivacyBadge isPrivate={repo.isPrivate} />
@@ -520,42 +764,97 @@ export function RepositoriesManager() {
                               </td>
                               {manageable ? (
                                 <td className="px-4 py-3">
-                                  <div className="flex items-center justify-end gap-1.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleCollect(repo)}
-                                      disabled={busy}
-                                      className="inline-flex items-center gap-1.5 rounded-md border border-(--border) px-3 py-1.5 text-xs font-semibold text-(--text) transition hover:bg-(--surface)"
-                                    >
-                                      {busy ? (
-                                        <Loader2 size={13} className="animate-spin" />
-                                      ) : (
-                                        <History size={13} />
-                                      )}
-                                      Collect
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleResync(repo)}
-                                      disabled={busy}
-                                      aria-label="Resync"
-                                      className="grid h-8 w-8 place-items-center rounded-md border border-(--border) text-(--text) transition hover:bg-(--surface)"
-                                    >
-                                      {busy ? (
-                                        <Loader2 size={14} className="animate-spin" />
-                                      ) : (
-                                        <RefreshCw size={14} />
-                                      )}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleUntrack(repo)}
-                                      disabled={busy}
-                                      aria-label="Untrack"
-                                      className="grid h-8 w-8 place-items-center rounded-md text-(--muted) transition hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
+                                  <div className="flex flex-col items-end gap-1.5">
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCollect(repo)}
+                                        disabled={busy || jobActive}
+                                        className="inline-flex items-center gap-1.5 rounded-md border border-(--border) px-3 py-1.5 text-xs font-semibold text-(--text) transition hover:bg-(--surface) disabled:cursor-not-allowed disabled:opacity-55"
+                                      >
+                                        {busy ? (
+                                          <Loader2 size={13} className="animate-spin" />
+                                        ) : (
+                                          <History size={13} />
+                                        )}
+                                        Collect
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDeepLookback(365);
+                                          setDeepFormId((current) =>
+                                            current === repo.id ? null : repo.id
+                                          );
+                                        }}
+                                        disabled={busy || jobActive}
+                                        title="Fetch months or years of history across all branches (runs in the background)"
+                                        className="inline-flex items-center gap-1.5 rounded-md border border-(--border) px-3 py-1.5 text-xs font-semibold text-(--text) transition hover:bg-(--surface) disabled:cursor-not-allowed disabled:opacity-55"
+                                      >
+                                        <HardDriveDownload size={13} />
+                                        Deep collect
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleResync(repo)}
+                                        disabled={busy}
+                                        aria-label="Resync"
+                                        className="grid h-8 w-8 place-items-center rounded-md border border-(--border) text-(--text) transition hover:bg-(--surface)"
+                                      >
+                                        {busy ? (
+                                          <Loader2 size={14} className="animate-spin" />
+                                        ) : (
+                                          <RefreshCw size={14} />
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUntrack(repo)}
+                                        disabled={busy}
+                                        aria-label="Untrack"
+                                        className="grid h-8 w-8 place-items-center rounded-md text-(--muted) transition hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                    {deepFormId === repo.id ? (
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        <select
+                                          value={deepLookback}
+                                          onChange={(event) =>
+                                            setDeepLookback(Number(event.target.value))
+                                          }
+                                          className="field rounded-md px-2 py-1.5 text-xs font-semibold text-(--text)"
+                                        >
+                                          {DEEP_LOOKBACKS.map((option) => (
+                                            <option key={option.days} value={option.days}>
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeepStart(repo)}
+                                          disabled={busy}
+                                          className="btn-gradient inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold"
+                                        >
+                                          {busy ? (
+                                            <Loader2 size={13} className="animate-spin" />
+                                          ) : (
+                                            <HardDriveDownload size={13} />
+                                          )}
+                                          Start
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setDeepFormId(null)}
+                                          aria-label="Close"
+                                          className="grid h-7 w-7 place-items-center rounded-md text-(--muted) transition hover:bg-(--surface-soft) hover:text-(--text)"
+                                        >
+                                          <X size={13} />
+                                        </button>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </td>
                               ) : null}

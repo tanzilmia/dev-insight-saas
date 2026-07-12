@@ -1,3 +1,18 @@
+import { AppError } from "../../common/errors/app-error.js";
+
+/**
+ * Thrown when the provider reports a rate limit. `resetAt` is when the quota
+ * window resets (null when the provider didn't say). Callers decide policy:
+ * the background collection worker reschedules the job for after the reset;
+ * synchronous paths surface a clean 429 (manual collect) or a per-repo
+ * warning (report auto-collect). The provider itself never sleeps.
+ */
+export class GitRateLimitError extends AppError {
+  constructor(public readonly resetAt: Date | null) {
+    super(429, "GitHub rate limit exceeded. Try again later.", "GIT_RATE_LIMITED");
+  }
+}
+
 export type CredentialValidationResult = {
   valid: boolean;
   accountLogin?: string;
@@ -82,6 +97,12 @@ export type ListCommitsOptions = {
  * commit and activity methods.
  */
 export interface GitProvider {
+  /**
+   * Max commits a single listCommits call can return (pagination ceiling),
+   * if the provider has one. Deep collection bisects a window when a listing
+   * hits this ceiling, so no commits are silently dropped.
+   */
+  readonly maxCommitsPerList?: number;
   validateCredential(token: string): Promise<CredentialValidationResult>;
   /** Resolves a single account by login/handle. Returns null if it doesn't exist. */
   getUser(token: string, username: string): Promise<GitUser | null>;

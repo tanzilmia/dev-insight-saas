@@ -53,6 +53,14 @@ enum ScheduleCadence {
   MONTHLY
 }
 
+enum CollectionJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -69,6 +77,7 @@ model User {
   gitAliases         EmployeeGitAlias[]
   reportsRequested   Report[]             @relation("ReportsRequested")
   reportSchedules    ReportSchedule[]     @relation("ScheduleCreator")
+  collectionJobs     CollectionJob[]      @relation("CollectionJobsRequested")
   requestLogs        RequestLog[]
   auditLogs          AuditLog[]           @relation("AuditActor")
 
@@ -91,6 +100,7 @@ model Organization {
   gitAliases            EmployeeGitAlias[]
   reports               Report[]
   reportSchedules       ReportSchedule[]
+  collectionJobs        CollectionJob[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
 }
@@ -187,10 +197,11 @@ model Repository {
   organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   project      Project?              @relation(fields: [projectId], references: [id], onDelete: SetNull)
   credential   GitCredential         @relation(fields: [credentialId], references: [id], onDelete: Cascade)
-  contributors ContributorIdentity[]
-  commits      Commit[]
-  coverage     RepositoryCoverage[]
-  branches     Branch[]
+  contributors   ContributorIdentity[]
+  commits        Commit[]
+  coverage       RepositoryCoverage[]
+  branches       Branch[]
+  collectionJobs CollectionJob[]
 
   @@unique([organizationId, provider, externalId])
   @@index([organizationId])
@@ -366,6 +377,56 @@ model CommitBranch {
 
   @@id([commitId, branchId])
   @@index([branchId])
+}
+
+/**
+ * Phase E: a background deep-history collection job for one repository.
+ * DB-backed so jobs survive restarts; claimed atomically by the collection
+ * worker (same pattern as ReportSchedule) so multiple API instances never run
+ * the same job. Progress is checkpointed via the coverage ledger, so a resumed
+ * job re-plans only what is still missing. A partial unique index (raw SQL in
+ * the migration) enforces at most one QUEUED/RUNNING job per repository.
+ */
+model CollectionJob {
+  id             String              @id @default(cuid())
+  organizationId String
+  repositoryId   String
+  requestedById  String?
+  status         CollectionJobStatus @default(QUEUED)
+
+  // Requested window (fixed at creation so progress totals stay stable).
+  rangeStart DateTime
+  rangeEnd   DateTime
+
+  // Progress (updated by the worker per chunk / every few commits).
+  branchesTotal    Int     @default(0)
+  branchesDone     Int     @default(0)
+  chunksTotal      Int     @default(0)
+  chunksDone       Int     @default(0)
+  commitsCollected Int     @default(0)
+  currentBranch    String?
+  currentPhase     String?
+
+  // Worker bookkeeping.
+  claimedBy         String?
+  heartbeatAt       DateTime?
+  attempts          Int       @default(0)
+  resumeAt          DateTime?
+  cancelRequestedAt DateTime?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  error             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  requestedBy  User?        @relation("CollectionJobsRequested", fields: [requestedById], references: [id], onDelete: SetNull)
+
+  @@index([status, resumeAt])
+  @@index([repositoryId, createdAt])
+  @@index([organizationId, createdAt])
 }
 
 model Report {

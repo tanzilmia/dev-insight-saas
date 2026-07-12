@@ -646,8 +646,8 @@ share link** + print/PDF:
   token → 401 (JWT-gated). typecheck + lint clean.
 
 Remaining: **Feature phases** — channel delivery (14c: Telegram/Discord auto-send, scheduler
-is ready), employee login/invite, Phase E multi-instance background history. No audit rough
-edges left.
+is ready), employee login/invite. (Phase E background deep-history collection ✅ done
+2026-07-12 — see §11.6 E.) No audit rough edges left.
 - **Sharing**: `ReportShare` model + share action + channel placeholders.
 - **Tests**: set up Vitest + Supertest first (none installed). Unit-test
   `token-cipher`, permission helpers, commit classification; integration-test the
@@ -870,9 +870,72 @@ Phases (build in this order, small & verifiable, update this doc after each):
     (deduped) — so in-progress (unmerged) work is now included, which is intended. A
     branch-filtered report (via `CommitBranch`) is a future option (relevant to Phase F).
     Typecheck + lint clean.
-- **E — Background deep-history collection**: move collection to an in-process worker
-  (Redis later), paginate full 1–2yr history respecting GitHub rate limits, lift the
-  150-detail cap; progress/status tracking + UI.
+- **E — Background deep-history collection — ✅ DONE (2026-07-12).** Manual per-repo
+  trigger (product decision: user-selectable lookback 6mo/1yr/2yr/full — default 1yr;
+  polling UI; NO auto-run on connect). Verified end-to-end against a 1,720-commit mock
+  (incl. a 1,050-commit month) — bisection, rate-limit pause/resume, crash reclaim,
+  cancel, ledger resume all pass; typecheck+lint+build clean both workspaces.
+  - **Rate limits (`github.provider.ts` + `git-provider.ts`):** `request()` now detects
+    403/429 + (`x-ratelimit-remaining: 0` or `retry-after`) and throws typed
+    `GitRateLimitError extends AppError(429, GIT_RATE_LIMITED)` with `resetAt` — BEFORE
+    the 403→INVALID_CREDENTIAL branches (that misclassification is fixed). **The
+    provider never sleeps**: manual collect surfaces a clean 429, report auto-collect
+    turns it into a per-repo warning, only the background worker reschedules.
+    `GitProvider.maxCommitsPerList` (GitHub: 1000 = PER_PAGE×MAX_PAGES) tells deep
+    collection when to bisect.
+  - **Model `CollectionJob`** (+ `CollectionJobStatus` QUEUED/RUNNING/COMPLETED/FAILED/
+    CANCELLED; migration `20260712143610_collection_jobs`): range, progress counters
+    (branchesTotal/Done, chunksTotal/Done, commitsCollected, currentBranch/Phase),
+    worker bookkeeping (claimedBy, heartbeatAt, attempts, resumeAt, cancelRequestedAt),
+    timestamps/error. **Partial unique index** (raw SQL in the migration —
+    `CollectionJob_one_active_per_repo` WHERE status IN (QUEUED,RUNNING)) enforces one
+    active job per repo at the DB level; service pre-checks (409 `JOB_ALREADY_ACTIVE`)
+    and catches P2002 for the race.
+  - **`ingestBranchRange` parameterized** (`IngestOptions`: maxDetailCommits,
+    detailDelayMs, bisectOnTruncation, onProgress) — existing callers unchanged. **Two
+    shared-path fixes:** (1) *checkpoint flaw*: a capped/cancelled/errored run now
+    records partial coverage `[oldestCollected+1ms, until]` (listings are newest-first),
+    so every pass shrinks the missing range — repeated manual Collects now PROGRESS
+    through >150-commit windows instead of refetching; a mid-window error checkpoints
+    before rethrowing. (2) *false coverage on listing truncation*: a page-capped listing
+    (≥1000) no longer records full coverage (was silently claiming unfetched commits).
+    `capped` now surfaces: `ingestRepository` → `collectActivity` → web
+    `CollectActivityResult.capped` → amber "hit the per-run cap" notice.
+  - **`modules/activity/deep-collection.ts`:** `startDeepCollection` (manager-gated,
+    lookbackDays 30..3650), `listCollectionJobs` (member; latest per repo),
+    `cancelDeepCollection` (QUEUED → atomic immediate cancel, RUNNING →
+    `cancelRequestedAt`, worker finalizes at next progress beat), `runCollectionJob`
+    (worker-only): syncBranches → plan chunks per branch from the coverage ledger
+    (30-day chunks ≤730d lookback, 120-day beyond; newest-first) → per chunk
+    `ingestBranchRange` with cap=∞, 150ms detail throttle, bisection, onProgress
+    (one query = heartbeat + commitsCollected + cancel check every 25 commits).
+    Permanent errors (INVALID_CREDENTIAL/NO_CREDENTIAL/REPO_NOT_ON_PROVIDER/
+    PROVIDER_UNSUPPORTED) → FAILED; GitRateLimitError + transient → rethrown to worker.
+  - **`modules/activity/collection-worker.ts`** (started from `main.ts` after
+    `startScheduler()`): 5s tick, re-entrancy guard, one job at a time per instance.
+    Claims via conditional `updateMany` (schedules pattern) — QUEUED-with-resumeAt-due
+    OR RUNNING-with-stale-heartbeat (>3min = dead instance reclaim, conditioned on the
+    stale heartbeat). Rate limit → requeue QUEUED with `resumeAt = clamp(resetAt+5s,
+    now+5s, now+90min)`; transient → backoff 60s×attempts; **runs that made chunk
+    progress reset `attempts`**; >5 no-progress attempts → FAILED.
+  - **Routes** (activityRouter, `/api/repositories`): `GET /collection-jobs?organizationId=`
+    (poll + resume-on-reload), `POST /:id/deep-collect` (202; body `{lookbackDays}`),
+    `POST /:id/deep-collect/cancel`. Verified: repositoriesRouter has no `GET /:id`,
+    so the literal path isn't shadowed. AuditLog on start/cancel.
+  - **Web:** `api.ts` `CollectionJob` type + `startDeepCollection`/`listCollectionJobs`/
+    `cancelDeepCollection`; `repositories-manager.tsx` — per-row **Deep collect** button
+    → inline lookback select (6mo/1yr/2yr/Full=3650d) + Start; progress row under the
+    repo name (status pill, BarList-style track/fill %, commits+branch counts, Cancel);
+    **polling** (first in app): `setInterval` 2.5s only while a job is active, latest
+    jobs loaded on mount for resume-after-reload, one `refresh()` when a job finishes;
+    stale COMPLETED/CANCELLED badges age out in `toJobMap` (24h; FAILED stays until
+    dismissed — Date.now() kept out of render for the `react-hooks/purity` rule).
+    Collect + Deep collect disabled while that repo has an active job.
+  - **Known trade-offs (documented):** coverage writes from a concurrent report
+    auto-collect can race a deep job only in the *under-coverage* (safe) direction;
+    bisection floor (≤1h window still >1000 commits) collects the newest 1000 +
+    partial-checkpoints (warn logged); GitHub filters since/until by committer date
+    while we store author date (pre-existing).
 - **F — Per-employee project report (leaderboard) — ✅ DONE.**
   - `activity.service.ts` `buildEmployeeLeaderboard(query)`: `commit.groupBy(username)`
     for stats, folds **multiple Git usernames of the same mapped employee together**
