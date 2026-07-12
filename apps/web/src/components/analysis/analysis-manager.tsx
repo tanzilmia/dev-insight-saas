@@ -41,6 +41,7 @@ import { BarList, StatTile } from "@/components/statistics/charts";
 import { ComparePanel } from "./compare-panel";
 
 const PERIODS: { value: AnalysisPeriod; label: string }[] = [
+  { value: "today", label: "Today" },
   { value: "yesterday", label: "Yesterday" },
   { value: "last_7_days", label: "Last 7 days" },
   { value: "last_30_days", label: "Last 30 days" },
