@@ -3,15 +3,25 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { prisma } from "../../config/database.js";
 import { decryptToken } from "../../common/crypto/token-cipher.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
-import { ingestRepository } from "../activity/activity.service.js";
+import {
+  ingestPushedCommits,
+  ingestRepository,
+  type PushedCommitInput
+} from "../activity/activity.service.js";
 
-// Ingest window starts a little before the earliest pushed commit so clock
-// drift between GitHub and commit timestamps can't drop anything.
-const PUSH_WINDOW_BUFFER_MS = 5 * 60 * 1000;
+// Fallback ingest window (payload without a commit list, e.g. odd events):
+// re-list the last 48h so date semantics can't drop late-pushed commits.
+const FALLBACK_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 /** Push payload fields we read — GitHub sends far more; the rest is ignored. */
 type PushPayload = {
-  commits?: { timestamp?: string }[];
+  ref?: string;
+  commits?: {
+    id?: string;
+    message?: string;
+    timestamp?: string;
+    author?: { name?: string; email?: string; username?: string };
+  }[];
   head_commit?: { timestamp?: string } | null;
 };
 
@@ -33,17 +43,26 @@ export function verifySignature(rawBody: Buffer, secret: string, header: string 
 const running = new Set<string>();
 const trailing = new Set<string>();
 
-function pushWindowStart(payload: PushPayload): Date {
-  const timestamps = [
-    ...(payload.commits ?? []).map((commit) => commit.timestamp),
-    payload.head_commit?.timestamp
-  ]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => Date.parse(value))
-    .filter((value) => Number.isFinite(value));
+/** "refs/heads/main" → "main"; null for tags/other refs. */
+function branchFromRef(ref: string | undefined): string | null {
+  if (!ref?.startsWith("refs/heads/")) {
+    return null;
+  }
+  const name = ref.slice("refs/heads/".length);
+  return name.length ? name : null;
+}
 
-  const earliest = timestamps.length ? Math.min(...timestamps) : Date.now();
-  return new Date(earliest - PUSH_WINDOW_BUFFER_MS);
+function pushedCommitsFrom(payload: PushPayload): PushedCommitInput[] {
+  return (payload.commits ?? [])
+    .filter((commit): commit is { id: string } & typeof commit => Boolean(commit.id))
+    .map((commit) => ({
+      sha: commit.id!,
+      message: commit.message ?? "",
+      committedAt: commit.timestamp ?? new Date().toISOString(),
+      authorName: commit.author?.name ?? null,
+      authorEmail: commit.author?.email ?? null,
+      username: commit.author?.username ?? null
+    }));
 }
 
 /**
@@ -75,7 +94,26 @@ export async function handlePushDelivery(repositoryId: string, payload: PushPayl
 
       const token = decryptToken(credential.encryptedToken);
       const provider = getGitProvider(credential.provider);
-      await ingestRepository(repository, token, provider, pushWindowStart(payload), new Date());
+
+      const branchName = branchFromRef(payload.ref);
+      const pushed = pushedCommitsFrom(payload);
+      if (branchName && pushed.length) {
+        // Exact-sha ingest: immune to committer-date filtering, so commits
+        // made earlier but pushed now are never missed.
+        await ingestPushedCommits(repository, token, provider, branchName, pushed);
+      } else {
+        // No usable commit list (tag push, empty payload): re-list a recent
+        // window ignoring the ledger.
+        const now = new Date();
+        await ingestRepository(
+          repository,
+          token,
+          provider,
+          new Date(now.getTime() - FALLBACK_WINDOW_MS),
+          now,
+          { forceRelist: true }
+        );
+      }
 
       await prisma.repository.update({
         where: { id: repositoryId },

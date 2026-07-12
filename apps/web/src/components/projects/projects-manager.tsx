@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Archive,
   ArchiveRestore,
@@ -373,7 +374,7 @@ export function ProjectsManager() {
             ) : (
               <ul className="grid gap-3">
                 {projects.map((project) => (
-                  <li key={project.id}>
+                  <li key={project.id} className="relative">
                     <button
                       type="button"
                       onClick={() => handleSelect(project.id)}
@@ -403,6 +404,13 @@ export function ProjectsManager() {
                         {project.memberCount === 1 ? "" : "s"}
                       </p>
                     </button>
+                    {/* Sibling of the card button — anchors must not nest in buttons. */}
+                    <Link
+                      href={`/dashboard/projects/${project.id}`}
+                      className="absolute bottom-4 right-5 text-xs font-bold text-(--accent) hover:underline"
+                    >
+                      Details →
+                    </Link>
                   </li>
                 ))}
               </ul>

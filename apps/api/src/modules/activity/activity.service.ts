@@ -30,6 +30,10 @@ const MAX_BRANCHES = 25;
 const PROGRESS_EVERY = 25;
 const MIN_BISECT_WINDOW_MS = 60 * 60 * 1000;
 const MAX_BISECT_DEPTH = 12;
+// Auto-collect trailing overlap: near-now report windows re-list the last 48h
+// regardless of coverage, catching commit-first-push-later batches.
+const NEAR_NOW_MS = 6 * 60 * 60 * 1000;
+const AUTO_RELIST_TAIL_MS = 48 * 60 * 60 * 1000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -152,7 +156,12 @@ export async function collectActivity(actorId: string, repositoryId: string, ran
   const token = decryptToken(credential.encryptedToken);
   const provider = getGitProvider(credential.provider);
 
-  const result = await ingestRepository(repository, token, provider, since, until);
+  // Manual Collect means "make the DB match GitHub for this window": re-list
+  // everything (dedup keeps it cheap) so commits pushed after an earlier
+  // collection — whose committer dates sit inside "covered" ranges — appear.
+  const result = await ingestRepository(repository, token, provider, since, until, {
+    forceRelist: true
+  });
 
   await prisma.auditLog.create({
     data: {
@@ -406,13 +415,39 @@ export async function ingestBranchRange(
  * branch list (catching new branches) and fetches only each branch's missing
  * sub-ranges.
  */
+export type IngestRepositoryOptions = {
+  /**
+   * Re-list the WHOLE window even where the ledger says it is covered.
+   * Needed because coverage means "listed at collection time" — commits made
+   * earlier but PUSHED later have committer dates inside covered ranges and
+   * would otherwise never be seen again. Sha-dedup keeps re-listing cheap.
+   */
+  forceRelist?: boolean;
+  /** Re-list at least [relistTailFrom, until] regardless of coverage (the
+   *  auto-collect trailing overlap for near-now windows). */
+  relistTailFrom?: Date;
+};
+
 export async function ingestRepository(
   repository: Repository,
   token: string,
   provider: ReturnType<typeof getGitProvider>,
   since: Date,
-  until: Date
+  until: Date,
+  options: IngestRepositoryOptions = {}
 ) {
+  const gapsFor = async (branchName: string): Promise<Interval[]> => {
+    if (options.forceRelist) {
+      return since < until ? [{ start: since, end: until }] : [];
+    }
+    const missing = await getMissingRanges(repository.id, branchName, since, until);
+    if (options.relistTailFrom && options.relistTailFrom < until) {
+      const tailStart = options.relistTailFrom > since ? options.relistTailFrom : since;
+      return mergeIntervals([...missing, { start: tailStart, end: until }]);
+    }
+    return missing;
+  };
+
   const known = await prisma.branch.findMany({
     where: { repositoryId: repository.id },
     select: { name: true }
@@ -421,8 +456,8 @@ export async function ingestRepository(
   if (known.length) {
     let allCovered = true;
     for (const branch of known) {
-      const missing = await getMissingRanges(repository.id, branch.name, since, until);
-      if (missing.length) {
+      const gaps = await gapsFor(branch.name);
+      if (gaps.length) {
         allCovered = false;
         break;
       }
@@ -445,11 +480,11 @@ export async function ingestRepository(
   let capped = false;
 
   for (const branch of branches) {
-    const missing = await getMissingRanges(repository.id, branch.name, since, until);
-    if (!missing.length) {
+    const gaps = await gapsFor(branch.name);
+    if (!gaps.length) {
       continue;
     }
-    for (const gap of missing) {
+    for (const gap of gaps) {
       const result = await ingestBranchRange(repository, branch, token, provider, gap.start, gap.end);
       rangesCollected += 1;
       newCollected += result.newCollected;
@@ -521,6 +556,13 @@ export async function ensureActivityCollected(
   const warnings: string[] = [];
   let rangesCollected = 0;
 
+  // Near-now windows re-list a trailing overlap so commits pushed AFTER an
+  // earlier collection (committer dates inside covered ranges) self-heal on
+  // any report/schedule. Fixed past ranges keep the 0-Git-call fast path.
+  const now = Date.now();
+  const relistTailFrom =
+    until.getTime() > now - NEAR_NOW_MS ? new Date(now - AUTO_RELIST_TAIL_MS) : undefined;
+
   for (const repository of repositories) {
     try {
       const credential = await prisma.gitCredential.findUnique({
@@ -533,7 +575,9 @@ export async function ensureActivityCollected(
 
       const token = decryptToken(credential.encryptedToken);
       const provider = getGitProvider(credential.provider);
-      const result = await ingestRepository(repository, token, provider, from, until);
+      const result = await ingestRepository(repository, token, provider, from, until, {
+        relistTailFrom
+      });
       rangesCollected += result.rangesCollected;
     } catch (error) {
       warnings.push(
@@ -917,4 +961,117 @@ export async function analyzeActivity(input: ActivityQuery): Promise<ActivityAna
   }
 
   return { categories, topModules, risks };
+}
+
+export type PushedCommitInput = {
+  sha: string;
+  message: string;
+  committedAt: string;
+  authorName: string | null;
+  authorEmail: string | null;
+  username: string | null;
+};
+
+/**
+ * Ingests the EXACT commits a push delivered (webhook path). Immune to the
+ * committer-date filtering that makes window listings miss commit-first-
+ * push-later batches: we fetch each pushed sha directly. Metadata comes from
+ * the push payload; stats/files from one getCommitDetail per new sha. Records
+ * NO coverage (point events; under-coverage is the safe direction). Does no
+ * access checks — the webhook layer verified the delivery signature.
+ */
+export async function ingestPushedCommits(
+  repository: Repository,
+  token: string,
+  provider: ReturnType<typeof getGitProvider>,
+  branchName: string,
+  commits: PushedCommitInput[]
+): Promise<{ newCollected: number }> {
+  if (!commits.length) {
+    return { newCollected: 0 };
+  }
+
+  // Push payload lists commits oldest→newest; the last one is the new head.
+  const head = commits[commits.length - 1]!;
+  const branch = await prisma.branch.upsert({
+    where: { repositoryId_name: { repositoryId: repository.id, name: branchName } },
+    create: {
+      repositoryId: repository.id,
+      name: branchName,
+      isDefault: branchName === repository.defaultBranch,
+      headSha: head.sha,
+      isProtected: false
+    },
+    update: { headSha: head.sha, lastSyncedAt: new Date() }
+  });
+
+  const existing = await prisma.commit.findMany({
+    where: { repositoryId: repository.id, sha: { in: commits.map((commit) => commit.sha) } },
+    select: { id: true, sha: true }
+  });
+  const idBySha = new Map(existing.map((commit) => [commit.sha, commit.id]));
+
+  let collected = 0;
+  for (const commit of commits) {
+    if (idBySha.has(commit.sha)) {
+      continue;
+    }
+    try {
+      const detail = await provider.getCommitDetail(
+        token,
+        repository.owner,
+        repository.name,
+        commit.sha
+      );
+
+      const createdId = await prisma.$transaction(async (tx) => {
+        const created = await tx.commit.create({
+          data: {
+            repositoryId: repository.id,
+            sha: commit.sha,
+            message: commit.message,
+            authorName: commit.authorName,
+            authorEmail: commit.authorEmail,
+            username: commit.username,
+            committedAt: new Date(commit.committedAt),
+            additions: detail.additions,
+            deletions: detail.deletions,
+            changedFilesCount: detail.changedFilesCount
+          }
+        });
+        if (detail.files.length) {
+          await tx.changedFile.createMany({
+            data: detail.files.slice(0, MAX_FILES_PER_COMMIT).map((file) => ({
+              commitId: created.id,
+              filePath: file.filePath,
+              status: file.status,
+              additions: file.additions,
+              deletions: file.deletions,
+              changes: file.changes
+            }))
+          });
+        }
+        return created.id;
+      });
+
+      idBySha.set(commit.sha, createdId);
+      collected += 1;
+    } catch (error) {
+      // A sha can vanish (force push) — skip it, keep the rest of the batch.
+      console.warn(
+        `[activity] pushed commit ${commit.sha.slice(0, 7)} could not be fetched for ${repository.fullName}`,
+        error
+      );
+    }
+  }
+
+  const links = commits
+    .map((commit) => idBySha.get(commit.sha))
+    .filter((commitId): commitId is string => Boolean(commitId))
+    .map((commitId) => ({ commitId, branchId: branch.id }));
+  if (links.length) {
+    await prisma.commitBranch.createMany({ data: links, skipDuplicates: true });
+  }
+
+  return { newCollected: collected };
 }

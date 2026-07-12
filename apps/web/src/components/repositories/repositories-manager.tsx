@@ -151,6 +151,7 @@ export function RepositoriesManager() {
   const [dismissedJobs, setDismissedJobs] = useState<Set<string>>(new Set());
   const [deepFormId, setDeepFormId] = useState<string | null>(null);
   const [deepLookback, setDeepLookback] = useState<number>(365);
+  const [deepVerify, setDeepVerify] = useState(false);
   const prevActiveJobsRef = useRef<Set<string>>(new Set());
 
   const activeJobCount = useMemo(
@@ -423,7 +424,7 @@ export function RepositoriesManager() {
     setRowNotice(null);
 
     try {
-      const job = await startDeepCollection(repo.id, deepLookback);
+      const job = await startDeepCollection(repo.id, deepLookback, deepVerify);
       setJobs((current) => ({ ...current, [repo.id]: job }));
       setDeepFormId(null);
     } catch (error) {
@@ -840,6 +841,7 @@ export function RepositoriesManager() {
                                         type="button"
                                         onClick={() => {
                                           setDeepLookback(365);
+                                          setDeepVerify(false);
                                           setDeepFormId((current) =>
                                             current === repo.id ? null : repo.id
                                           );
@@ -900,6 +902,18 @@ export function RepositoriesManager() {
                                     </div>
                                     {deepFormId === repo.id ? (
                                       <div className="flex items-center justify-end gap-1.5">
+                                        <label
+                                          title="Re-checks GitHub for anything missed (e.g. commits pushed after an earlier collection)"
+                                          className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-bold text-(--muted)"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={deepVerify}
+                                            onChange={(event) => setDeepVerify(event.target.checked)}
+                                            className="h-3.5 w-3.5 accent-(--accent)"
+                                          />
+                                          Re-verify
+                                        </label>
                                         <select
                                           value={deepLookback}
                                           onChange={(event) =>

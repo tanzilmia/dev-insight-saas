@@ -408,6 +408,10 @@ model CollectionJob {
   // Requested window (fixed at creation so progress totals stay stable).
   rangeStart DateTime
   rangeEnd   DateTime
+  // Verify mode: re-list the entire range ignoring the coverage ledger, so
+  // commits pushed after earlier collections (committer dates inside covered
+  // ranges) are recovered. Sha-dedup keeps the cost bounded.
+  verify     Boolean  @default(false)
 
   // Progress (updated by the worker per chunk / every few commits).
   branchesTotal    Int     @default(0)

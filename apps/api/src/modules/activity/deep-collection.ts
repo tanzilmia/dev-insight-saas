@@ -91,7 +91,7 @@ async function loadRepository(repositoryId: string) {
 export async function startDeepCollection(
   actorId: string,
   repositoryId: string,
-  input: { lookbackDays: number }
+  input: { lookbackDays: number; verify?: boolean }
 ): Promise<SerializedCollectionJob> {
   const repository = await loadRepository(repositoryId);
   await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
@@ -124,6 +124,7 @@ export async function startDeepCollection(
         requestedById: actorId,
         rangeStart: new Date(now.getTime() - input.lookbackDays * DAY_MS),
         rangeEnd: now,
+        verify: input.verify ?? false,
         currentPhase: "queued"
       }
     });
@@ -145,7 +146,7 @@ export async function startDeepCollection(
       action: "activity.deep_collect.start",
       entityType: "CollectionJob",
       entityId: job.id,
-      metadataJson: { repositoryId, lookbackDays: input.lookbackDays }
+      metadataJson: { repositoryId, lookbackDays: input.lookbackDays, verify: input.verify ?? false }
     }
   });
 
@@ -294,12 +295,13 @@ export async function runCollectionJob(jobId: string): Promise<void> {
     const planned = new Map<string, Interval[]>();
     let plannedChunks = 0;
     for (const branch of branches) {
-      const gaps = await getMissingRanges(
-        repository.id,
-        branch.name,
-        job.rangeStart,
-        job.rangeEnd
-      );
+      // Verify mode re-lists the ENTIRE range regardless of the ledger, so
+      // commits pushed after earlier collections are recovered. (A resumed
+      // verify job re-plans the full range again — wasteful but correct;
+      // sha-dedup keeps the repeat cheap.)
+      const gaps = job.verify
+        ? [{ start: job.rangeStart, end: job.rangeEnd }]
+        : await getMissingRanges(repository.id, branch.name, job.rangeStart, job.rangeEnd);
       const chunks = gaps.flatMap((gap) => splitIntoWindows(gap, chunkMs));
       // Newest-first across gaps too, so progress starts with recent history.
       chunks.sort((a, b) => b.end.getTime() - a.end.getTime());

@@ -443,10 +443,14 @@ export type CollectionJob = {
   finishedAt: string | null;
 };
 
-export async function startDeepCollection(repositoryId: string, lookbackDays: number) {
+export async function startDeepCollection(
+  repositoryId: string,
+  lookbackDays: number,
+  verify = false
+) {
   const response = await api.post<{ job: CollectionJob }>(
     `/api/repositories/${repositoryId}/deep-collect`,
-    { lookbackDays }
+    { lookbackDays, verify }
   );
 
   return response.data.job;

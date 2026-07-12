@@ -952,6 +952,51 @@ real-time flow: `__addcommit` → signed delivery → commitCount incremented).
   are backfilled by any later collect (ledger). Future belt-and-braces: a
   scheduled poller (deliberately out of scope).
 
+### Data-integrity fix — the "commit-first, push-later" hole (2026-07-13) ✅
+
+**Bug (confirmed on real data):** coverage means "listed at collection time T" —
+commits made earlier but PUSHED after T have committer dates inside covered
+ranges; GitHub's `since` filters by committer date, so they were excluded from
+every later listing and the ledger never re-opened the range (deep collect
+planned 0 chunks). Real case: `dev-insight-saas` had `7ed0cf9`/`d662c06`
+missing while their descendant `c647b03` was stored. Four-layer fix, each
+verified against a mock that reproduces the hole (`__addcommit?backdateMinutes=`;
+CONTROL assertion shows the ledger path missing the commit before the fixes):
+
+1. **Manual Collect = force re-list** — `ingestRepository` gained
+   `IngestRepositoryOptions { forceRelist, relistTailFrom }`; `collectActivity`
+   passes `forceRelist: true`. Collect now means "make the DB match GitHub for
+   this window" (sha-dedup keeps re-listing cheap).
+2. **Report auto-collect trailing overlap** — `ensureActivityCollected` passes
+   `relistTailFrom = now − 48h` when the window is near-now (`until > now − 6h`),
+   so any report/schedule self-heals recent holes. Fixed past ranges keep the
+   0-Git-call fast path. Constants `NEAR_NOW_MS`/`AUTO_RELIST_TAIL_MS`.
+3. **Deep collect "verify" mode** — migration `collection_job_verify`
+   (`CollectionJob.verify`), `deepCollectBodySchema.verify`, `runCollectionJob`
+   plans the ENTIRE range ignoring the ledger; web deep-collect form gained a
+   "Re-verify" checkbox. The repair tool for old holes at any depth.
+4. **Webhook ingest by exact SHAs** — new `ingestPushedCommits` (activity
+   service): push payload's commit list (sha/message/timestamp/author) is
+   ingested directly (one getCommitDetail per NEW sha; Branch upsert by ref;
+   CommitBranch links; NO coverage recorded — point events, under-coverage is
+   safe; vanished shas skipped). Fallback for payloads without commits: 48h
+   window with forceRelist. Immune to all date semantics.
+
+### Project details hub — `/dashboard/projects/[id]` (2026-07-13) ✅
+
+- `AnalysisManager` is now embeddable: optional props
+  `{ initialProjectId, hideProjectSelector, embedded }` (embedded = no
+  DashboardChrome; selector + listProjects skipped when hidden; default usage
+  unchanged).
+- New route `app/dashboard/projects/[id]/page.tsx` (Next 16 async params) →
+  `components/projects/project-detail.tsx`: header (status/member/repo counts),
+  **Repositories** section (connected repos + manager-only attach/detach via
+  `assignRepositoryProject`), **Team** section (add/remove members, same
+  endpoints as projects-manager), and the full **embedded analysis** (cards,
+  compare, commit details, branch filter, AI report) locked to the project.
+- Projects page cards gained a "Details →" link (sibling of the card button —
+  anchors must not nest inside buttons).
+
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
 Goal (from product owner): reports over **any date window** (not just last 90 days) —

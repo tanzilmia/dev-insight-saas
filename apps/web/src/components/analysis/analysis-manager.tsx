@@ -65,13 +65,23 @@ function categoryPill(category: string) {
   return "bg-(--surface-soft) text-(--muted)";
 }
 
-export function AnalysisManager() {
+export function AnalysisManager({
+  initialProjectId,
+  hideProjectSelector = false,
+  embedded = false
+}: {
+  /** Lock the analysis to one project (the project details page). */
+  initialProjectId?: string;
+  hideProjectSelector?: boolean;
+  /** Render without the dashboard chrome so it nests inside another page. */
+  embedded?: boolean;
+} = {}) {
   const { session, status, activeOrganization, logout } = useSession();
   const organizationId = activeOrganization?.id;
   const manageable = canManage(activeOrganization?.role);
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(initialProjectId ?? "");
   const [branches, setBranches] = useState<ProjectBranch[]>([]);
   const [branch, setBranch] = useState(""); // "" = all branches
   const [period, setPeriod] = useState<AnalysisPeriod>("last_30_days");
@@ -101,7 +111,9 @@ export function AnalysisManager() {
     period === "custom" && rangeReady ? { from: customFrom, to: customTo } : undefined;
 
   useEffect(() => {
-    if (!organizationId || !manageable) {
+    // With a locked project there is no selector, so the project list (used
+    // only for option labels + auto-pick) is not needed.
+    if (!organizationId || !manageable || hideProjectSelector) {
       return;
     }
 
@@ -117,7 +129,7 @@ export function AnalysisManager() {
         setError(getApiErrorMessage(caught));
         setLoading(false);
       });
-  }, [organizationId, manageable]);
+  }, [organizationId, manageable, hideProjectSelector]);
 
   // Branch selector options for the picked project ("" = all branches).
   useEffect(() => {
@@ -241,13 +253,20 @@ export function AnalysisManager() {
     return null;
   }
 
-  if (!manageable) {
-    return (
+  const withChrome = (node: React.ReactNode) =>
+    embedded ? (
+      <>{node}</>
+    ) : (
       <DashboardChrome email={session.user.email} onLogout={logout}>
-        <div className="glass rounded-xl p-8 text-center text-sm font-bold text-(--muted)">
-          This area is available to owners and managers.
-        </div>
+        {node}
       </DashboardChrome>
+    );
+
+  if (!manageable) {
+    return withChrome(
+      <div className="glass rounded-xl p-8 text-center text-sm font-bold text-(--muted)">
+        This area is available to owners and managers.
+      </div>
     );
   }
 
@@ -256,9 +275,8 @@ export function AnalysisManager() {
     ? analysis?.employees.find((employee) => employee.userId === detailUserId)
     : undefined;
 
-  return (
-    <DashboardChrome email={session.user.email} onLogout={logout}>
-      <div className="grid gap-5">
+  return withChrome(
+    <div className="grid gap-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="mb-1 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-(--accent)">
@@ -276,22 +294,24 @@ export function AnalysisManager() {
             {loading && analysis ? (
               <Loader2 size={16} className="animate-spin text-(--muted)" aria-label="Loading" />
             ) : null}
-            <select
-              value={projectId}
-              onChange={(event) => {
-                setProjectId(event.target.value);
-                setLoading(true);
-                setAiReport(null);
-              }}
-              aria-label="Project"
-              className="field rounded-lg px-3 py-2 text-sm font-medium text-(--text)"
-            >
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
+            {!hideProjectSelector ? (
+              <select
+                value={projectId}
+                onChange={(event) => {
+                  setProjectId(event.target.value);
+                  setLoading(true);
+                  setAiReport(null);
+                }}
+                aria-label="Project"
+                className="field rounded-lg px-3 py-2 text-sm font-medium text-(--text)"
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <select
               value={branch}
               onChange={(event) => {
@@ -781,6 +801,5 @@ export function AnalysisManager() {
           </>
         ) : null}
       </div>
-    </DashboardChrome>
   );
 }
