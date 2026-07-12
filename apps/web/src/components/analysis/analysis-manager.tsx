@@ -11,6 +11,7 @@ import {
   CalendarDays,
   FileDiff,
   FileText,
+  GitCompareArrows,
   Loader2,
   Sparkles,
   Users,
@@ -35,6 +36,7 @@ import {
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
 import { BarList, StatTile } from "@/components/statistics/charts";
+import { ComparePanel } from "./compare-panel";
 
 const PERIODS: { value: AnalysisPeriod; label: string }[] = [
   { value: "yesterday", label: "Yesterday" },
@@ -77,6 +79,10 @@ export function AnalysisManager() {
   const [detailUserId, setDetailUserId] = useState<string | null>(null);
   const [detailCommits, setDetailCommits] = useState<AnalysisCommit[] | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // Compare selection: up to two members from the SAME loaded window, so the
+  // fairness guard (same project + same period) holds by construction.
+  const [compareIds, setCompareIds] = useState<string[]>([]);
 
   const [aiReport, setAiReport] = useState<GeneratedReport | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -125,6 +131,7 @@ export function AnalysisManager() {
         setError(null);
         setDetailUserId(null);
         setDetailCommits(null);
+        setCompareIds([]);
       })
       .catch((caught) => {
         setError(getApiErrorMessage(caught));
@@ -161,6 +168,15 @@ export function AnalysisManager() {
     } finally {
       setDetailLoading(false);
     }
+  }
+
+  function toggleCompare(userId: string) {
+    setCompareIds((current) => {
+      if (current.includes(userId)) {
+        return current.filter((id) => id !== userId);
+      }
+      return current.length >= 2 ? current : [...current, userId];
+    });
   }
 
   async function handleAiReport() {
@@ -396,6 +412,42 @@ export function AnalysisManager() {
               />
             </div>
 
+            {compareIds.length === 1 ? (
+              <div className="glass flex items-center justify-between rounded-xl px-4 py-2.5">
+                <p className="inline-flex items-center gap-2 text-xs font-bold text-(--muted)">
+                  <GitCompareArrows size={14} className="text-(--accent)" />
+                  Select one more member to compare.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setCompareIds([])}
+                  aria-label="Clear selection"
+                  className="grid h-6 w-6 place-items-center rounded-full text-(--muted) transition hover:bg-(--surface-soft) hover:text-(--text)"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ) : null}
+
+            {compareIds.length === 2
+              ? (() => {
+                  const compareLeft = analysis.employees.find(
+                    (employee) => employee.userId === compareIds[0]
+                  );
+                  const compareRight = analysis.employees.find(
+                    (employee) => employee.userId === compareIds[1]
+                  );
+                  return compareLeft && compareRight ? (
+                    <ComparePanel
+                      left={compareLeft}
+                      right={compareRight}
+                      daysInPeriod={analysis.daysInPeriod}
+                      onClose={() => setCompareIds([])}
+                    />
+                  ) : null;
+                })()
+              : null}
+
             {analysis.employees.length ? (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {analysis.employees.map((employee) => (
@@ -483,30 +535,62 @@ export function AnalysisManager() {
                           </p>
                         ) : null}
 
-                        <div className="mt-3 flex items-center justify-between border-t border-(--border) pt-3">
-                          <span className="text-[11px] text-(--muted)">
+                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-(--border) pt-3">
+                          <span className="min-w-0 truncate text-[11px] text-(--muted)">
                             {employee.lastCommitAt
                               ? `Last commit ${new Date(employee.lastCommitAt).toLocaleDateString()}`
                               : ""}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => void openDetails(employee.userId)}
-                            className={`inline-flex items-center gap-1.5 rounded-md border border-(--border) px-2.5 py-1 text-[11px] font-bold transition hover:bg-(--surface) ${
-                              detailUserId === employee.userId
-                                ? "text-(--accent)"
-                                : "text-(--text)"
-                            }`}
-                          >
-                            <FileText size={12} />
-                            {detailUserId === employee.userId ? "Hide details" : "Details"}
-                          </button>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => void openDetails(employee.userId)}
+                              className={`inline-flex items-center gap-1.5 rounded-md border border-(--border) px-2.5 py-1 text-[11px] font-bold transition hover:bg-(--surface) ${
+                                detailUserId === employee.userId
+                                  ? "text-(--accent)"
+                                  : "text-(--text)"
+                              }`}
+                            >
+                              <FileText size={12} />
+                              {detailUserId === employee.userId ? "Hide details" : "Details"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleCompare(employee.userId)}
+                              disabled={
+                                compareIds.length >= 2 && !compareIds.includes(employee.userId)
+                              }
+                              className={`inline-flex items-center gap-1.5 rounded-md border border-(--border) px-2.5 py-1 text-[11px] font-bold transition hover:bg-(--surface) disabled:cursor-not-allowed disabled:opacity-50 ${
+                                compareIds.includes(employee.userId)
+                                  ? "text-(--accent)"
+                                  : "text-(--text)"
+                              }`}
+                            >
+                              <GitCompareArrows size={12} />
+                              Compare
+                            </button>
+                          </div>
                         </div>
                       </>
                     ) : (
-                      <p className="mt-3 text-xs text-(--muted)">
-                        No commits in this period.
-                      </p>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <p className="text-xs text-(--muted)">No commits in this period.</p>
+                        <button
+                          type="button"
+                          onClick={() => toggleCompare(employee.userId)}
+                          disabled={
+                            compareIds.length >= 2 && !compareIds.includes(employee.userId)
+                          }
+                          className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border border-(--border) px-2.5 py-1 text-[11px] font-bold transition hover:bg-(--surface) disabled:cursor-not-allowed disabled:opacity-50 ${
+                            compareIds.includes(employee.userId)
+                              ? "text-(--accent)"
+                              : "text-(--text)"
+                          }`}
+                        >
+                          <GitCompareArrows size={12} />
+                          Compare
+                        </button>
+                      </div>
                     )}
 
                     {!employee.hasGitIdentity ? (

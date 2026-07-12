@@ -875,6 +875,23 @@ not performance verdicts** (UI carries the disclaimer).
   report GENERATED with `focus:`/`areas:` lines in the received prompt;
   identical repeat → `cached: true`. typecheck + lint + build clean.
 
+**Analysis Phase 2 — employee comparison view (2026-07-12) ✅ (frontend-only):**
+No API change — the loaded `ProjectAnalysis` already carries every per-employee
+signal, so the same-project/same-period fairness guard holds by construction.
+- Each card's footer gains a **Compare** toggle (`GitCompareArrows`; max 2,
+  others disable at 2; available on zero-commit cards too); 1 selected → hint
+  bar; 2 → `components/analysis/compare-panel.tsx` renders above the grid.
+- Panel: two-person header (rank/role/@usernames) + "vs"; neutral metric rows
+  with two-sided magnitude bars (Commits, filtered Lines, Active days, Areas,
+  Feature/Fix commits — larger value bolder, NO good/bad coloring); a
+  no-emphasis caution row (risky/very-large); side-by-side `BarList` work
+  breakdowns; area chips with **shared** highlight (module overlap); sample
+  messages + last commit per side; the standing activity-signals disclaimer.
+- Selection resets on project/period reload. typecheck + lint + build clean.
+- Analysis roadmap remaining: Phase 3 (daily digest enrichment + leaderboard
+  snapshot history), Phase 4 (employee-of-the-month LLM shortlist +
+  branch-filtered analysis).
+
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
 Goal (from product owner): reports over **any date window** (not just last 90 days) —
