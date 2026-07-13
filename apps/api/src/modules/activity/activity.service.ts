@@ -748,20 +748,45 @@ export type EmployeeLeaderboardRow = {
   additions: number;
   deletions: number;
   filesChanged: number;
+  /** Raw lines changed (additions + deletions), including dependency/generated files. */
   lines: number;
+  /**
+   * Lines changed EXCLUDING noise (lockfiles, generated/vendored, minified) — the
+   * ranking metric when `excludeNoise` is set, so a dependency bump can't make
+   * someone look like the top contributor. Equals `lines` when not excluding noise.
+   */
+  effectiveLines: number;
   sampleMessages: string[];
 };
+
+export type LeaderboardOptions = {
+  /**
+   * Exclude noise-path line counts (deps/generated/minified) from the ranking
+   * metric. Reports set this so the "who did what" order reflects real work; the
+   * default (false) keeps the cheap raw path for Statistics/snapshots.
+   */
+  excludeNoise?: boolean;
+};
+
+// Bound the per-report noise scan (one changed-file pass). Generous vs. the
+// analysis caps because ranking wants broad coverage; under-scanning only
+// *reduces* noise correction (safe — never over-credits).
+const LEADERBOARD_NOISE_FILE_CAP = 20000;
 
 /**
  * Per-contributor leaderboard (Phase F) for a scope + range: groups commits by
  * Git username, folds multiple usernames of the same mapped employee together,
- * ranks by lines changed (additions + deletions), and attaches a few recent
- * commit messages per person for the "who did what" narrative. Unmapped Git
- * usernames appear under their own name, flagged `mapped: false`.
+ * ranks by lines changed, and attaches a few recent commit messages per person
+ * for the "who did what" narrative. Unmapped Git usernames appear under their own
+ * name, flagged `mapped: false`.
+ *
+ * With `excludeNoise`, ranking uses **noise-free** lines (dependency/generated/
+ * minified files subtracted) so a `npm install`-style bump can't top the board.
  */
 export async function buildEmployeeLeaderboard(
   input: ActivityQuery,
-  samplePerEmployee = 5
+  samplePerEmployee = 5,
+  options: LeaderboardOptions = {}
 ): Promise<EmployeeLeaderboardRow[]> {
   const where = buildCommitWhere(input);
 
@@ -842,6 +867,7 @@ export async function buildEmployeeLeaderboard(
       existing.deletions += deletions;
       existing.filesChanged += filesChanged;
       existing.lines += additions + deletions;
+      existing.effectiveLines += additions + deletions;
       if (identity.username && !existing.usernames.includes(identity.username)) {
         existing.usernames.push(identity.username);
       }
@@ -857,8 +883,44 @@ export async function buildEmployeeLeaderboard(
         deletions,
         filesChanged,
         lines: additions + deletions,
+        effectiveLines: additions + deletions,
         sampleMessages: []
       });
+    }
+  }
+
+  // Noise correction (reports only): subtract lines that landed in dependency/
+  // generated/minified files from each person's ranking metric, attributing each
+  // noise file to its commit's author. We SUBTRACT from the accurate commit-level
+  // totals (rather than recomputing from files) so commits whose files weren't
+  // collected still keep their real lines — undercorrection is the safe direction.
+  if (options.excludeNoise) {
+    const noiseFiles = await prisma.changedFile.findMany({
+      where: { commit: where },
+      select: {
+        additions: true,
+        deletions: true,
+        filePath: true,
+        commit: { select: { username: true, authorEmail: true, authorName: true } }
+      },
+      take: LEADERBOARD_NOISE_FILE_CAP
+    });
+
+    const noiseByKey = new Map<string, number>();
+    for (const file of noiseFiles) {
+      if (!isNoisePath(file.filePath)) {
+        continue;
+      }
+      const { key } = identityFor(
+        file.commit.username,
+        file.commit.authorEmail,
+        file.commit.authorName
+      );
+      noiseByKey.set(key, (noiseByKey.get(key) ?? 0) + file.additions + file.deletions);
+    }
+
+    for (const [key, row] of rows) {
+      row.effectiveLines = Math.max(0, row.lines - (noiseByKey.get(key) ?? 0));
     }
   }
 
@@ -880,8 +942,10 @@ export async function buildEmployeeLeaderboard(
     }
   }
 
+  // Rank by effective (noise-free) lines — identical to raw `lines` unless
+  // excludeNoise was set, so Statistics/snapshots keep their existing order.
   const sorted = [...rows.values()].sort(
-    (a, b) => b.lines - a.lines || b.commits - a.commits
+    (a, b) => b.effectiveLines - a.effectiveLines || b.commits - a.commits
   );
   sorted.forEach((row, index) => {
     row.rank = index + 1;

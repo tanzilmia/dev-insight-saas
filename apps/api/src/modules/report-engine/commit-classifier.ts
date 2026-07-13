@@ -18,24 +18,49 @@ const PREFIX_MAP: Record<string, CommitCategory> = {
   fix: "Fix",
   bugfix: "Fix",
   hotfix: "Fix",
+  bug: "Fix",
+  revert: "Fix",
   refactor: "Refactor",
+  refac: "Refactor",
+  cleanup: "Refactor",
+  style: "Refactor",
   docs: "Docs",
   doc: "Docs",
   test: "Test",
   tests: "Test",
   chore: "Chore",
   deps: "Chore",
+  dep: "Chore",
+  config: "Chore",
+  setup: "Chore",
+  init: "Chore",
   build: "Build",
   ci: "Build",
+  release: "Build",
+  deploy: "Build",
   perf: "Perf"
 };
 
-/** Classifies a commit by its subject line (conventional-commit prefix first). */
+/**
+ * Classifies a commit by its subject line. A conventional-commit prefix wins
+ * first (`feat:`, `fix(scope):`, `chore!:` …); otherwise a prioritized set of
+ * keyword / imperative-verb patterns catches the messy real-world messages that
+ * plain teams write ("Added login page", "wip dashboard", "bump deps"), so the
+ * work breakdown isn't dominated by a useless "Other" bucket. Everything is
+ * deterministic — the LLM handles the semantic "what shipped" narrative
+ * separately; this only needs to be a good-enough tally, and it feeds Statistics
+ * and the Analysis page too (which must never depend on an LLM).
+ */
 export function classifyCommit(message: string): CommitCategory {
   const subject = (message.split("\n")[0] ?? "").trim().toLowerCase();
 
+  // Merge / integration commits are overhead, not authored work.
+  if (/^merge\b|^merged\b|^merge (branch|pull request|remote|tag)/.test(subject)) {
+    return "Chore";
+  }
+
   // "type", "type(scope)", "type!:" conventional-commit forms.
-  const prefix = subject.match(/^([a-z]+)(\([^)]*\))?!?:/);
+  const prefix = subject.match(/^([a-z0-9]+)(\([^)]*\))?!?:/);
   if (prefix) {
     const mapped = PREFIX_MAP[prefix[1]!];
     if (mapped) {
@@ -43,11 +68,29 @@ export function classifyCommit(message: string): CommitCategory {
     }
   }
 
-  if (/\b(fix|bug|patch)\b/.test(subject)) return "Fix";
-  if (/\b(add|implement|introduce|feature|support)\b/.test(subject)) return "Feature";
-  if (/\b(refactor|cleanup|rename|restructure)\b/.test(subject)) return "Refactor";
-  if (/\bdoc(s|umentation)?\b/.test(subject)) return "Docs";
-  if (/\btest(s|ing)?\b/.test(subject)) return "Test";
+  // Keyword / imperative-verb fallback — MOST SPECIFIC FIRST so, e.g., "add tests"
+  // is a Test not a Feature, and "update deps" is a Chore not a generic change.
+  if (/\brevert(ed|s)?\b|\brollback\b|\broll back\b/.test(subject)) return "Fix";
+  if (/\b(fix(e[ds])?|fixing|bug(s|fix)?|patch(e[ds])?|hotfix|crash(e[ds])?|regression|broke(n)?|error|issue|resolve[ds]?|correct(ed|s)?|repair)\b/.test(subject))
+    return "Fix";
+  if (/\b(perf|performance|optimi[sz]e[ds]?|optimi[sz]ation|speed ?up|faster|throughput|latency|memory leak)\b/.test(subject))
+    return "Perf";
+  if (/\b(test(s|ing|ed)?|spec(s)?|coverage|e2e|unit ?tests?|integration ?tests?)\b/.test(subject))
+    return "Test";
+  if (/\b(docs?|documentation|readme|changelog|comment(s|ed)?|jsdoc|javadoc)\b/.test(subject))
+    return "Docs";
+  if (/\b(ci|pipeline|workflow|release|deploy(ment|ed)?|docker|makefile|webpack|rollup|vite|bundl(e|ing))\b/.test(subject))
+    return "Build";
+  if (/\b(bump|upgrade[ds]?|downgrade|dependenc(y|ies)|deps?|package(s)?\.json|lockfile|chore|gitignore|\.env|scaffold)\b/.test(subject))
+    return "Chore";
+  if (/\b(refactor(ed|ing|s)?|clean ?up|cleaned|rename[ds]?|restructure[ds]?|reorganiz|extract(ed|s)?|split|simplif(y|ied)|dedup|tidy|lint(ed|ing)?|format(ted|ting)?|reformat|style)\b/.test(subject))
+    return "Refactor";
+  if (/\b(add(ed|s|ing)?|implement(ed|ing|s)?|introduc(e|ed|ing)|creat(e|ed|ing)|support(s|ed)?|enabl(e|ed|ing)|new|feature|integrat(e|ed|ing)|build ?out|wire ?up|hook(ed| )?up|connect(ed|s|ing)?)\b/.test(subject))
+    return "Feature";
+  if (/\b(remove[ds]?|removing|delete[ds]?|deleting|drop(ped|s)?|deprecat)\b/.test(subject)) return "Refactor";
+  if (/\b(updat(e|ed|ing|es)|improv(e|ed|ing)|enhanc(e|ed|ing)|chang(e|ed|ing)|modif(y|ied)|adjust(ed|s)?|tweak(ed|s)?|revis(e|ed)|polish|refine|rework(ed|ing|s)?)\b/.test(subject))
+    return "Refactor";
+
   return "Other";
 }
 

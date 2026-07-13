@@ -9,6 +9,7 @@ import {
 import { buildProjectEmployeeSignals } from "../analysis/analysis.service.js";
 import { buildComparison } from "../report-engine/comparison.js";
 import { buildInsights } from "../report-engine/insights.js";
+import { buildCaveats } from "../report-engine/plain-language.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
 import { createReport, findCachedReport } from "../reports/reports.service.js";
 import type { GenerateReportInput } from "./openclaw.schemas.js";
@@ -39,6 +40,18 @@ function computeFingerprint(activity: {
   // totals alone would keep serving a stale cached report.
   const t = activity.lastCommitAt ? activity.lastCommitAt.getTime() : 0;
   return `c${activity.commits}-a${activity.additions}-d${activity.deletions}-f${activity.filesChanged}-t${t}-s${activity.lastSha ?? ""}`;
+}
+
+/**
+ * Appends the deterministic "Good to know" trust-calibration footer to a report.
+ * Kept separate from the LLM narrative (and baked into the saved markdown) so the
+ * caveats can never be paraphrased away, and so they render in every channel.
+ */
+function appendCaveats(markdown: string, caveats: string[]): string {
+  if (!caveats.length) {
+    return markdown;
+  }
+  return `${markdown}\n\n---\n\n## Good to know\n\n${caveats.map((caveat) => `- ${caveat}`).join("\n")}`;
 }
 
 /** The equal-length window immediately before `range` (for the trend comparison). */
@@ -102,7 +115,8 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
 
   const activity = await fetchGitActivity(activityQuery);
   const analysis = await analyzeActivity(activityQuery);
-  const leaderboard = await buildEmployeeLeaderboard(activityQuery);
+  // Reports rank by noise-free lines so a dependency bump can't top the board.
+  const leaderboard = await buildEmployeeLeaderboard(activityQuery, 5, { excludeNoise: true });
 
   // Report advance A/B: period-over-period comparison + auto-surfaced insights.
   // The previous window is the equal-length span just before this one, read
@@ -111,7 +125,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
   const prevRange = previousPeriod(range);
   const prevQuery = { ...activityQuery, since: prevRange.from, until: prevRange.to };
   const prevActivity = await fetchGitActivity(prevQuery);
-  const prevLeaderboard = await buildEmployeeLeaderboard(prevQuery, 0);
+  const prevLeaderboard = await buildEmployeeLeaderboard(prevQuery, 0, { excludeNoise: true });
   const comparison = buildComparison({
     previousPeriod: { from: prevRange.from.toISOString(), to: prevRange.to.toISOString() },
     current: {
@@ -144,6 +158,15 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     analysis,
     leaderboard: leaderboard.map((row) => ({ name: row.name, lines: row.lines })),
     comparison
+  });
+
+  // Trust-calibration caveats: what the numbers do and don't cover. Deterministic
+  // and appended to the saved markdown (both the LLM and template paths) so a
+  // non-technical reader always knows the limits — never paraphrased away.
+  const caveats = buildCaveats({
+    hasBaseline: comparison.hasBaseline,
+    unmappedContributors: leaderboard.filter((row) => !row.mapped && row.commits > 0).length,
+    skippedRepositories: collection.warnings.length
   });
 
   // Fold the branch AND the previous-period baseline into the fingerprint: a
@@ -200,6 +223,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
         leaderboard,
         comparison,
         insights,
+        caveats,
         status: "GENERATED" as const,
         pending: [] as string[],
         warnings: collection.warnings,
@@ -209,7 +233,9 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     }
   }
 
-  const commits = await sampleCommits(activityQuery);
+  // Pass more update messages than the on-screen sample so the LLM has enough
+  // material to cluster the work into "what shipped" themes (Phase 2).
+  const commits = await sampleCommits(activityQuery, 60);
 
   // Project reports get per-employee focus signals (top categories/modules)
   // so the narrative can say WHAT each person worked on. Optional — a failure
@@ -265,6 +291,10 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
       pending = ["AI narrative failed to generate; showing a deterministic template instead."];
     }
   }
+
+  // Bake the deterministic caveats into the persisted markdown so they show in
+  // every channel (dashboard, history, share link, Telegram) regardless of generator.
+  markdown = appendCaveats(markdown, caveats);
 
   const savedReport = await createReport({
     organizationId: input.organizationId,
@@ -324,6 +354,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     leaderboard,
     comparison,
     insights,
+    caveats,
     status,
     pending,
     warnings: collection.warnings,

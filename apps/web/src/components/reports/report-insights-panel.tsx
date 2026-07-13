@@ -17,22 +17,25 @@ import type {
   ReportRankMovement
 } from "@/lib/api";
 
-const STRIPPED_SECTIONS = ["key insights", "trend vs previous period"];
-
 /**
- * Removes the "## Key insights" and "## Trend vs previous period" sections from
- * report markdown for DISPLAY only — those are shown by the structured panel, so
- * keeping them in the rendered markdown would duplicate. The raw markdown still
- * carries them (Telegram / copy / download stay complete).
+ * Drops any `#`/`##` section whose heading starts with one of `titles` (case-
+ * insensitive) from report markdown. A horizontal rule (`---`, the caveats-footer
+ * separator) always ends skipping, so a trailing block with no heading — the
+ * "Good to know" caveats — survives even when the section before it was dropped.
  */
-export function stripStructuredSections(markdown: string): string {
+function dropSectionsByHeading(markdown: string, titles: string[]): string {
   const out: string[] = [];
   let skipping = false;
   for (const line of markdown.split("\n")) {
+    if (/^---+\s*$/.test(line)) {
+      skipping = false;
+      out.push(line);
+      continue;
+    }
     const heading = line.match(/^(#{1,2})\s+(.*)$/);
     if (heading) {
       const text = heading[2]!.trim().toLowerCase();
-      skipping = STRIPPED_SECTIONS.some((title) => text.startsWith(title));
+      skipping = titles.some((title) => text.startsWith(title));
       if (skipping) {
         continue; // drop the target heading itself
       }
@@ -42,6 +45,30 @@ export function stripStructuredSections(markdown: string): string {
     }
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+const STRIPPED_SECTIONS = ["key insights", "trend vs previous period"];
+
+/**
+ * Removes the "## Key insights" and "## Trend vs previous period" sections from
+ * report markdown for DISPLAY only — those are shown by the structured panel, so
+ * keeping them in the rendered markdown would duplicate. The raw markdown still
+ * carries them (Telegram / copy / download stay complete).
+ */
+export function stripStructuredSections(markdown: string): string {
+  return dropSectionsByHeading(markdown, STRIPPED_SECTIONS);
+}
+
+const DETAIL_SECTIONS = ["activity", "who did what", "trend vs previous period"];
+
+/**
+ * "Simple" reading mode: also hides the number-heavy sections (raw totals, the
+ * who-did-what table, the trend numbers), leaving just the plain narrative
+ * (Summary, What shipped) plus the "Good to know" caveats. Apply on top of
+ * {@link stripStructuredSections}.
+ */
+export function simplifyReportMarkdown(markdown: string): string {
+  return dropSectionsByHeading(markdown, DETAIL_SECTIONS);
 }
 
 function DeltaChip({ delta }: { delta: ReportMetricDelta }) {
@@ -116,12 +143,15 @@ function MoverBadge({ mover }: { mover: ReportRankMovement }) {
 
 export function ReportInsightsPanel({
   comparison,
-  insights
+  insights,
+  showTrend = true
 }: {
   comparison?: ReportComparison | null;
   insights?: ReportInsight[] | null;
+  /** Hide the numeric trend tiles (e.g. in Simple reading mode). Insights stay. */
+  showTrend?: boolean;
 }) {
-  const hasTrend = Boolean(comparison?.hasBaseline);
+  const hasTrend = showTrend && Boolean(comparison?.hasBaseline);
   const hasInsights = Boolean(insights?.length);
   if (!hasTrend && !hasInsights) {
     return null;

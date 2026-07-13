@@ -1236,6 +1236,164 @@ surfaced directly, plus 2 new insight types, plus the panel on the Analysis page
   test-coverage-ratio insight, forced prev-period collection for a guaranteed
   baseline.
 
+### Plain-language executive report layer — Phase 1 (2026-07-13) ✅
+
+User goal: make reports **non-technical readable + reliable** (a manager/PM/CEO,
+not a developer, is the reader). All backend-side in the report pipeline, so
+**every channel (dashboard, chat, Telegram, share link) benefits** — no migration,
+no shared-query rewrite, no frontend change (the report markdown already renders
+everywhere). typecheck + lint clean both workspaces; pure helpers unit-verified
+(13 cases) + template markdown + LLM prompt rendered and eyeballed.
+
+- **New pure module `report-engine/plain-language.ts`** (no IO, unit-testable):
+  - `activityLevel(commits, days)` → No activity / Light / Steady / Busy / Very busy,
+    **normalized by period length** (updates-per-day) so 15/day and 15/quarter don't
+    read the same.
+  - `humanizeWorkMix(categories)` → "mostly bug fixes (45%), new features (30%)"
+    (top-3 by share; "mostly" prefix only when the top ≥ 50%). Category→plain map
+    (Feature→"new features", Fix→"bug fixes", Refactor→"code clean-up", …).
+  - `humanizeArea(module)` / `humanizeAreas(modules)` → directory bucket → business
+    name (`api`→Backend, `src`→Core code, `prisma`→Database, `components`→UI
+    components, …; unknown → title-cased). De-dups.
+  - `buildPlainSummary(...)` → deterministic 2–4 sentence executive paragraph
+    ("Busy period: 3 people made 127 updates over 31 days. The work was … Rahim was
+    the most active. Overall activity was up 20% … 2 items may need a closer look.").
+    Handles the 0-activity case with a helpful message.
+  - `buildCaveats({hasBaseline, unmappedContributors, skippedRepositories})` →
+    trust-calibration notes (no baseline → trend hidden; N contributors unlinked;
+    repos skipped in collection).
+- **`openclaw.tools.ts` `buildReportPrompt`** — system prompt now targets
+  "managers and non-technical stakeholders … plain business language, not developer
+  jargon". Added a **plain-language facts block** (activity level, work mix, main
+  areas, most-active person, attention count) and a rewritten instruction requiring
+  a first `## Summary` section (3–4 jargon-free sentences; explicitly bans
+  commit/lines/refactor/repo/branch/SHA), then Key insights / Who did what / Trend.
+  The contributor block is reframed "a signal of involvement, not a performance rating".
+- **`openclaw.tools.ts` `buildReportMarkdown`** (template fallback) — now leads with
+  `## Summary` (buildPlainSummary), an `## Activity` section with **Activity level /
+  Type of work / Main areas** in plain words above the raw "Detailed totals:" line,
+  and the leaderboard header changed to `## Who did what` + italic disclaimer
+  ("a signal of activity, not a performance rating"); "Commits" column → "Updates".
+- **`openclaw.service.ts` `orchestrateReport`** — computes `caveats` once (before the
+  cache check) and **bakes a deterministic "Good to know" footer into the persisted
+  markdown for BOTH the LLM and template paths** (`appendCaveats`), so caveats can
+  never be paraphrased away and show in every channel. `caveats: string[]` returned
+  on both the cache-hit and generated responses (extra field; no web type change).
+- **Reliability (Rel1 framing):** the "Who did what" block is reframed as an
+  activity signal, and the dependency-churn insight already flags high noise share.
+
+### Plain-language layer — Phase 1.5: noise-free leaderboard ranking (2026-07-13) ✅
+
+Closes the sharpest reliability hole for a non-technical reader: the report
+leaderboard used to rank by RAW lines, so a single `npm install` (a lockfile bump
+of tens of thousands of lines) made that person look like the top contributor.
+Fixed — ranking now uses **noise-free** lines. typecheck + lint clean; the ranking
+algorithm unit-verified (11 cases incl. the dependency-bump flip, mixed
+real+noise, and no-files-collected safety).
+
+- **`activity.service.ts` `buildEmployeeLeaderboard(input, samplePerEmployee, options)`**
+  gained `options.excludeNoise` (default false → unchanged fast path, so Statistics
+  `topContributors` and the snapshot writer are untouched). `EmployeeLeaderboardRow`
+  gained `effectiveLines` (raw `lines` minus lines in `isNoisePath` files); ranking
+  now sorts by `effectiveLines` (identical to before when not excluding noise).
+- **Robust subtraction, not recompute:** noise is *subtracted* from the accurate
+  commit-level totals (one extra `changedFile.findMany({ where: { commit } })` pass,
+  capped `LEADERBOARD_NOISE_FILE_CAP = 20000`, attributed to each file's commit
+  author via the same `identityFor`). Commits whose files weren't collected (detail
+  cap) contribute 0 noise, so they keep their real lines — **undercorrection is the
+  safe direction** (never zero-out real work, never over-credit). Under-scanning a
+  huge scope only reduces correction.
+- **Reports opt in:** `orchestrateReport` calls the current AND previous leaderboard
+  with `{ excludeNoise: true }` (previous too, so rank-movement stays consistent).
+- **Display:** the LLM prompt's contributor block and the template's "## Who did
+  what" table now show `effectiveLines` as "real work (lines)" (raw `+/-` dropped
+  from the table — jargon anyway), with a disclaimer noting dependency/generated
+  files are excluded.
+- **Still raw (documented boundary):** the aggregate `## Trend vs previous period`
+  line totals and the `## Activity` "Detailed totals" come from `aggregateActivity`
+  and remain raw (team-wide, far less misleading than per-person). Noise-adjusting
+  the aggregate trend is a possible later polish.
+- **Next (agreed roadmap):** Phase 2 = LLM theme/initiative clustering ("what
+  shipped", grouping related commits) — the real "smart" jump; Phase 3 = better
+  commit classification (regex/prefix → LLM-assisted so non-conventional-commit teams
+  aren't 80% "Other") + a Simple/Detailed reading-mode toggle.
+
+### Plain-language layer — Phase 2: "What shipped" initiative clustering (2026-07-13) ✅
+
+The "smart" jump: reports now tell a manager **what actually shipped** — related
+updates grouped into named initiatives — instead of only category tallies. Folded
+into the **existing** report LLM call (no extra call/cost/latency; fits the report
+cache; all channels get it via markdown; template fallback unchanged). **Verified
+end-to-end against the real Groq LLM**: 18 varied update messages clustered into 5
+clean initiatives ("Payment Webhook Retries", "Refund Flow", "Telegram Report
+Delivery", "Two-Factor Login", "Report Enhancements"), correctly dropping
+`chore: bump dependencies`/eslint as non-initiatives.
+
+- **`openclaw.service.ts`** — `sampleCommits(activityQuery, 60)` (was 30) so the
+  LLM has enough update messages to cluster (recent-60; note: a very long window
+  clusters from the recent tail — acceptable first cut).
+- **`openclaw.tools.ts` `buildReportPrompt`** — the update-messages block is
+  relabelled "source material … cluster into the '## What shipped' initiatives", and
+  the instruction gains a new section (marked THE MOST IMPORTANT): `## What shipped`
+  — group updates into 3-6 concrete initiatives, each a **bold plain title** + one
+  sentence on what it delivered + rough size, grounded ONLY in the real messages,
+  merging related updates. Order: Summary → Key insights → **What shipped** → Who did
+  what → Trend. Word cap 450 → 600 to give it room.
+- **No template-fallback clustering** (semantic grouping needs an LLM): the no-LLM
+  template keeps Summary/Activity/etc., whose plain-language areas+work-mix already
+  convey the shape. LLM reports (the normal path with Groq configured) are richer —
+  same pattern as the rest of the codebase.
+- **Boundary/next:** clustering is prompt-side (folded call), not a dedicated
+  structured extraction, so themes live in the markdown, not as a structured field/UI
+  panel. A future Phase 2.5 could do a dedicated structured `clusterThemes()` call
+  (broader commit coverage + a frontend panel) if wanted.
+
+### Plain-language layer — Phase 3: better classification + reading-mode (2026-07-13) ✅
+
+Two parts. typecheck + lint + **build** clean both workspaces; classifier verified
+(39/40 message styles) + section-filter verified (17/17). No migration.
+
+**Part A — richer commit classification (`report-engine/commit-classifier.ts`).**
+The old `classifyCommit` was conventional-commit-prefix + a thin keyword fallback,
+so teams that DON'T write `feat:`/`fix:` got most work bucketed as "Other" — a
+useless work-breakdown. Rewritten (still fully deterministic, so Statistics /
+Analysis, which must never call an LLM, are unaffected — the LLM only does the
+semantic "What shipped" narrative):
+- Expanded `PREFIX_MAP` (revert/style/config/setup/init/release/deploy/dep…).
+- **Merge commits** (`^merge …`) → Chore (integration overhead, not authored work).
+- A prioritized **imperative-verb / keyword** fallback, MOST-SPECIFIC-FIRST so
+  "add tests" → Test (not Feature), "update deps" → Chore (not a generic change),
+  "revert" → Fix, "optimize/speed up" → Perf, "rename/remove/clean up/extract" →
+  Refactor, "add/implement/wire up/support" → Feature, generic "update/improve/
+  change" → Refactor. Only truly vague messages (misc/stuff/asdf) fall through to
+  "Other". Verified: 40 real-world styles → 39 correct, only 3 "Other" (all
+  genuinely meaningless). Benefits reports' work-mix + Statistics + Analysis at once.
+
+**Part B — Simple / Detailed reading-mode toggle (frontend, dashboard reports only).**
+A segmented toggle on the report card lets a reader switch between the executive
+narrative and the full report.
+- `report-insights-panel.tsx`: refactored the section-stripper into
+  `dropSectionsByHeading(md, titles)` and added `simplifyReportMarkdown` (drops the
+  number-heavy `## Activity` / `## Who did what` / `## Trend` sections, leaving
+  `## Summary` + `## What shipped` + the caveats). The stripper now **resets on a
+  `---` rule** so the "Good to know" caveats survive even when the section directly
+  before them is dropped (verified). `ReportInsightsPanel` gained `showTrend?`
+  (hide the numeric trend tiles in Simple mode; insights always stay).
+- `openclaw.service.ts` `appendCaveats`: the footer is now a real `## Good to know`
+  heading (was bold text) so it's a proper section the filters preserve.
+- `reports-manager.tsx`: `readingMode` state (**default "detailed"** — no data hidden
+  by surprise; the executive Summary + What shipped already lead every report). Simple
+  mode hides the 4 raw-stat tiles + trend tiles + the detail markdown sections and
+  force-expands (short narrative). Scoped to the dashboard reports view for now
+  (`shared-report.tsx` / Analysis AI-report could get it later).
+
+**Reporting-improvement track status: Phase 1 + 1.5 + 2 + 3 all done.** Reports are
+now executive-readable (plain Summary, business words), reliable (noise-free
+ranking, "Good to know" caveats, deterministic classification), and smart ("What
+shipped" initiative clustering). Open polish: Phase 2.5 structured theme panel;
+noise-adjusting the aggregate trend totals; extending the reading-mode toggle to
+the share page.
+
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
 Goal (from product owner): reports over **any date window** (not just last 90 days) —

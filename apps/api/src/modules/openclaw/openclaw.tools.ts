@@ -11,6 +11,12 @@ import type {
   ReportComparison
 } from "../report-engine/comparison.js";
 import type { Insight } from "../report-engine/insights.js";
+import {
+  activityLevel,
+  buildPlainSummary,
+  humanizeAreas,
+  humanizeWorkMix
+} from "../report-engine/plain-language.js";
 import type { ChatMessage } from "../llm/llm-provider.js";
 import type { Period, ReportType } from "./openclaw.schemas.js";
 
@@ -361,7 +367,7 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
   const leaderboardLines = leaderboard.length
     ? [
         "",
-        "Contributor leaderboard (ranked by lines changed):",
+        "Contributor activity (most involved first — ranked by real work, i.e. lines excluding dependency/generated files; a signal of involvement, not a performance rating):",
         ...leaderboard.map((row) => {
           const signal = row.employeeId
             ? context.employeeSignals?.get(row.employeeId)
@@ -375,7 +381,7 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
                 .join(" · ")}`
             : "";
           return (
-            `${row.rank}. ${row.name}${row.mapped ? "" : " (unmapped)"} — ${row.commits} commit(s), +${row.additions}/-${row.deletions} (${row.lines} lines)` +
+            `${row.rank}. ${row.name}${row.mapped ? "" : " (unmapped)"} — ${row.commits} update(s), ~${row.effectiveLines} lines of real work` +
             (row.sampleMessages.length
               ? `\n   worked on: ${row.sampleMessages.join("; ")}`
               : "") +
@@ -385,8 +391,43 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
       ].join("\n")
     : null;
 
+  // Plain-language facts for the executive '## Summary' — the same wording a
+  // non-technical reader (manager/PM/exec) sees, so the LLM writes in their
+  // language rather than in developer metrics.
+  const days = Math.max(
+    1,
+    Math.round((context.range.to.getTime() - context.range.from.getTime()) / DAY_MS)
+  );
+  const level = activityLevel(context.activity.commits, days);
+  const workMix = humanizeWorkMix(analysis?.categories ?? {});
+  const areas = humanizeAreas(analysis?.topModules ?? []);
+  const topContributor = leaderboard[0]?.name ?? null;
+  const attentionCount = context.insights?.filter((i) => i.severity === "warn").length ?? 0;
+  const plainFactsLines = [
+    "",
+    "Plain-language facts for the '## Summary' section — write these for a non-technical reader (use words like 'updates', 'changes', 'bug fixes', 'new features'; do NOT use 'commit', 'lines of code', 'refactor', 'repository', 'branch', or SHAs):",
+    `- Activity level: ${level.label} — ${context.activity.commits} update(s) over ${days} day(s), ${leaderboard.length} contributor(s).`,
+    workMix.text ? `- Type of work: ${workMix.text}.` : null,
+    areas.length ? `- Main areas worked on: ${areas.join(", ")}.` : null,
+    topContributor ? `- Most active person: ${topContributor}.` : null,
+    attentionCount > 0 ? `- ${attentionCount} item(s) may need attention (see the insights below).` : null
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+
   const system =
-    "You are DevInsight, an assistant that writes concise, factual developer work reports for engineering managers from Git commit activity. Write in Markdown. Be specific and reference actual commit themes. Never invent data. If there are no commits, say so plainly.";
+    "You are DevInsight, an assistant that writes clear developer work reports for managers and non-technical stakeholders, based on real Git activity. Explain the work in plain business language, not developer jargon. Write in Markdown. Be specific and factual, reference the actual themes of the work, and never invent data. If there is no activity, say so plainly.";
+
+  const instruction = [
+    "Write the report in Markdown for a non-technical reader (a manager or executive). Structure it exactly like this:",
+    "1. A short title (H1).",
+    "2. A section titled exactly '## Summary' — 3-4 plain sentences built from the plain-language facts above. Say what the team worked on, who was most active, how activity compares with the period before, and anything that needs attention. Avoid developer jargon (no 'commit', 'lines of code', 'refactor', 'repository', 'branch', 'diff', or SHAs).",
+    "3. If key insights are provided, a section titled exactly '## Key insights' — 3-5 short bullets on the most important signals (trend, risks, concentration, roster changes), each grounded in the data provided.",
+    "4. THE MOST IMPORTANT SECTION — a section titled exactly '## What shipped'. Read the update messages listed below and GROUP them into 3-6 concrete pieces of work or initiatives (for example 'Payment webhook retries', 'Refund flow', 'Login redesign', 'Telegram report delivery'). For each initiative write a short **bold plain-language title**, then one sentence on what it delivered and roughly how much work it was (e.g. 'about a dozen updates by 2 people'). Base every item ONLY on the actual update messages — never invent a feature or a name. Merge related updates into one initiative rather than listing them separately. If the work is genuinely too scattered to group, briefly describe the main areas of activity instead.",
+    "5. If a contributor leaderboard is provided, a section titled exactly '## Who did what' listing each person most-active first, one plain line each on what they worked on. Present this as involvement/activity, NOT a performance rating.",
+    "6. If a previous-period comparison is provided, a section titled exactly '## Trend vs previous period' with the key changes.",
+    "Never invent people or work. Keep it under 600 words."
+  ].join("\n");
 
   const user = [
     `Report type: ${context.reportType}`,
@@ -396,6 +437,7 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
     categoryLine,
     modulesLine,
     risksLine,
+    plainFactsLines,
     context.employees.length
       ? `Employees: ${context.employees.map((employee) => employee.name).join(", ")}`
       : null,
@@ -404,10 +446,10 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
     insightsLines,
     leaderboardLines,
     "",
-    "Recent commits:",
+    "Update messages (source material — read these and cluster them into the '## What shipped' initiatives):",
     commitLines,
     "",
-    "Write the report in Markdown: a short title (H1), then a 2-3 sentence overview that names who did the most work. If key insights are provided, add a section titled exactly '## Key insights' right after the overview — 3-5 short bullets highlighting the most important signals (trend vs last period, risks, concentration, roster changes); ground every bullet in the provided data and never invent. If a contributor leaderboard is provided, add a '## Who did what' section listing each contributor ranked most-active first (by lines changed), each with a one-line summary of what they worked on. If a previous-period comparison is provided, add a section titled exactly '## Trend vs previous period' with the key deltas (e.g. commits up/down %, lines, contributors). Then a bulleted list of the key themes/work, and a one-line note on volume. Never invent contributors or work. Keep it under 400 words."
+    instruction
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -427,6 +469,28 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
   const period = `${formatDate(context.range.from)} → ${formatDate(context.range.to)}`;
   const leaderboard = context.leaderboard ?? [];
 
+  const days = Math.max(
+    1,
+    Math.round((context.range.to.getTime() - context.range.from.getTime()) / DAY_MS)
+  );
+  const level = activityLevel(context.activity.commits, days);
+  const workMix = humanizeWorkMix(context.analysis?.categories ?? {});
+  const areas = humanizeAreas(context.analysis?.topModules ?? []);
+  const commitsDeltaPct = context.comparison?.hasBaseline
+    ? context.comparison.commits.deltaPct
+    : null;
+  const attentionCount = context.insights?.filter((i) => i.severity === "warn").length ?? 0;
+  const summary = buildPlainSummary({
+    commits: context.activity.commits,
+    days,
+    contributors: leaderboard.length,
+    workMixText: workMix.text,
+    topAreas: areas,
+    topContributor: leaderboard[0]?.name ?? null,
+    commitsDeltaPct,
+    attentionCount
+  });
+
   const lines = [
     `# ${title}`,
     "",
@@ -434,11 +498,14 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
     context.repository ? `**Repository:** ${context.repository.fullName}` : null,
     context.project ? `**Project:** ${context.project.name}` : null,
     context.employees.length
-      ? `**Employees:** ${context.employees
+      ? `**People:** ${context.employees
           .map((employee) => `${employee.name} (${employee.mappedIdentities} mapped)`)
           .join(", ")}`
       : null,
     context.customPrompt ? `**Prompt:** ${context.customPrompt}` : null,
+    "",
+    "## Summary",
+    summary,
     ...(context.insights?.length
       ? [
           "",
@@ -450,7 +517,10 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
       : []),
     "",
     "## Activity",
-    `Commits: ${context.activity.commits} · +${context.activity.additions} / -${context.activity.deletions} · ${context.activity.filesChanged} files`,
+    `**Activity level:** ${level.label} — ${context.activity.commits} update(s) over ${days} day(s).`,
+    workMix.text ? `**Type of work:** ${workMix.text}.` : null,
+    areas.length ? `**Main areas:** ${areas.join(", ")}.` : null,
+    `Detailed totals: ${context.activity.commits} commits · +${context.activity.additions} / -${context.activity.deletions} lines · ${context.activity.filesChanged} files.`,
     ...(context.comparison?.hasBaseline
       ? (() => {
           const c = context.comparison;
@@ -471,9 +541,10 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
           );
           return [
             "",
-            "## Who did what (ranked by lines changed)",
+            "## Who did what",
+            "_Ordered by real work (lines changed, excluding dependency/generated files) — a signal of activity, not a performance rating._",
             "",
-            `| # | Contributor | Commits | +/- lines | Files |${hasSignals ? " Focus |" : ""}`,
+            `| # | Contributor | Updates | Work (lines) | Files |${hasSignals ? " Focus |" : ""}`,
             `| --- | --- | ---: | ---: | ---: |${hasSignals ? " --- |" : ""}`,
             ...leaderboard.map((row) => {
               const signal = row.employeeId
@@ -486,16 +557,11 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
                       : "—"
                   } |`
                 : "";
-              return `| ${row.rank} | ${row.name}${row.mapped ? "" : " _(unmapped)_"} | ${row.commits} | +${row.additions} / -${row.deletions} | ${row.filesChanged} |${focusCell}`;
+              return `| ${row.rank} | ${row.name}${row.mapped ? "" : " _(unmapped)_"} | ${row.commits} | ${row.effectiveLines.toLocaleString()} | ${row.filesChanged} |${focusCell}`;
             })
           ];
         })()
-      : []),
-    "",
-    "## Summary",
-    context.activity.commits > 0
-      ? `Based on ${context.activity.commits} commit(s) in this period.`
-      : "No commit activity found for this target and period. Collect commits on the Repositories page, then regenerate."
+      : [])
   ].filter((line): line is string => line !== null);
 
   return { title, markdown: lines.join("\n") };

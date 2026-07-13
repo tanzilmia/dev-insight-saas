@@ -49,7 +49,11 @@ import {
   DashboardChrome,
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
-import { ReportInsightsPanel, stripStructuredSections } from "./report-insights-panel";
+import {
+  ReportInsightsPanel,
+  simplifyReportMarkdown,
+  stripStructuredSections
+} from "./report-insights-panel";
 
 const REPORT_TYPES: { value: ReportType; label: string }[] = [
   { value: "repository", label: "Repository" },
@@ -142,6 +146,7 @@ export function ReportsManager() {
   const [copied, setCopied] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [readingMode, setReadingMode] = useState<"simple" | "detailed">("detailed");
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
@@ -449,6 +454,19 @@ export function ReportsManager() {
         }
       : null;
 
+  // Structured sections (insights/trend) are shown by the panel, so strip them
+  // from the rendered markdown; Simple mode additionally drops the number-heavy
+  // sections, leaving the plain narrative.
+  const displayMarkdown = renderedReport
+    ? (() => {
+        const stripped =
+          renderedReport.comparison || renderedReport.insights
+            ? stripStructuredSections(renderedReport.markdown)
+            : renderedReport.markdown;
+        return readingMode === "simple" ? simplifyReportMarkdown(stripped) : stripped;
+      })()
+    : "";
+
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
       <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
@@ -731,26 +749,51 @@ export function ReportsManager() {
                 </p>
               ) : null}
 
-              <div className="mb-4 grid grid-cols-4 gap-2 text-center">
-                {[
-                  ["Commits", renderedReport.statistics.commits],
-                  ["+Lines", renderedReport.statistics.additions],
-                  ["-Lines", renderedReport.statistics.deletions],
-                  ["Files", renderedReport.statistics.filesChanged]
-                ].map(([label, value]) => (
-                  <div key={label} className="glass-soft rounded-2xl px-2 py-3">
-                    <p className="text-lg font-black text-(--text)">{value}</p>
-                    <p className="text-[10px] font-black uppercase tracking-wide text-(--muted)">
-                      {label}
-                    </p>
-                  </div>
-                ))}
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <div className="inline-flex rounded-lg border border-(--border) bg-(--surface-soft) p-0.5 text-xs font-bold">
+                  {(["simple", "detailed"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setReadingMode(mode)}
+                      className={`rounded-md px-2.5 py-1 capitalize transition ${
+                        readingMode === mode
+                          ? "bg-(--accent) text-white"
+                          : "text-(--muted) hover:text-(--text)"
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[10px] font-medium text-(--muted)">
+                  {readingMode === "simple" ? "Plain summary — no numbers" : "Full report with metrics"}
+                </span>
               </div>
+
+              {readingMode === "detailed" ? (
+                <div className="mb-4 grid grid-cols-4 gap-2 text-center">
+                  {[
+                    ["Commits", renderedReport.statistics.commits],
+                    ["+Lines", renderedReport.statistics.additions],
+                    ["-Lines", renderedReport.statistics.deletions],
+                    ["Files", renderedReport.statistics.filesChanged]
+                  ].map(([label, value]) => (
+                    <div key={label} className="glass-soft rounded-2xl px-2 py-3">
+                      <p className="text-lg font-black text-(--text)">{value}</p>
+                      <p className="text-[10px] font-black uppercase tracking-wide text-(--muted)">
+                        {label}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="mb-4">
                 <ReportInsightsPanel
                   comparison={renderedReport.comparison}
                   insights={renderedReport.insights}
+                  showTrend={readingMode === "detailed"}
                 />
               </div>
 
@@ -863,22 +906,20 @@ export function ReportsManager() {
               ) : null}
 
               <ReportMarkdown
-                markdown={
-                  renderedReport.comparison || renderedReport.insights
-                    ? stripStructuredSections(renderedReport.markdown)
-                    : renderedReport.markdown
-                }
-                expanded={expanded}
+                markdown={displayMarkdown}
+                expanded={readingMode === "simple" ? true : expanded}
               />
 
-              <button
-                type="button"
-                onClick={() => setExpanded((value) => !value)}
-                className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-(--accent)"
-              >
-                {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                {expanded ? "Collapse" : "Expand"}
-              </button>
+              {readingMode === "detailed" ? (
+                <button
+                  type="button"
+                  onClick={() => setExpanded((value) => !value)}
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-(--accent)"
+                >
+                  {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  {expanded ? "Collapse" : "Expand"}
+                </button>
+              ) : null}
 
               {renderedReport.pending.length ? (
                 <div className="mt-4 rounded-2xl border border-(--border) bg-(--surface-soft) p-4">
