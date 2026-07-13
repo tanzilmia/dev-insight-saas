@@ -11,6 +11,7 @@ import { decryptToken } from "../../common/crypto/token-cipher.js";
 import {
   classifyCommit,
   hasRiskKeyword,
+  isNoisePath,
   isSensitivePath,
   moduleFromPath
 } from "../report-engine/commit-classifier.js";
@@ -897,6 +898,12 @@ export type ActivityAnalysis = {
   categories: Record<string, number>;
   topModules: { module: string; changes: number }[];
   risks: string[];
+  /** Commits analyzed (capped) — the denominator for the ratios below. */
+  analyzedCommits: number;
+  /** Commits authored late-night (before 06:00 / after 22:00) or on a weekend. */
+  offHoursCommits: number;
+  /** Share (0–1) of changed lines that landed in noise paths (deps/generated). */
+  noiseChangeShare: number;
 };
 
 /**
@@ -911,12 +918,13 @@ export async function analyzeActivity(input: ActivityQuery): Promise<ActivityAna
     where,
     orderBy: { committedAt: "desc" },
     take: ANALYSIS_COMMIT_CAP,
-    select: { id: true, message: true, additions: true, deletions: true }
+    select: { id: true, message: true, additions: true, deletions: true, committedAt: true }
   });
 
   const categories: Record<string, number> = {};
   let riskyCommits = 0;
   let largeCommits = 0;
+  let offHoursCommits = 0;
 
   for (const commit of commits) {
     const category = classifyCommit(commit.message);
@@ -926,6 +934,11 @@ export async function analyzeActivity(input: ActivityQuery): Promise<ActivityAna
     }
     if (commit.additions + commit.deletions > LARGE_COMMIT_THRESHOLD) {
       largeCommits += 1;
+    }
+    const hour = commit.committedAt.getHours();
+    const day = commit.committedAt.getDay();
+    if (hour < 6 || hour >= 22 || day === 0 || day === 6) {
+      offHoursCommits += 1;
     }
   }
 
@@ -939,10 +952,17 @@ export async function analyzeActivity(input: ActivityQuery): Promise<ActivityAna
 
   const moduleChanges: Record<string, number> = {};
   let sensitiveHits = 0;
+  let totalChanges = 0;
+  let noiseChanges = 0;
 
   for (const file of files) {
     const bucket = moduleFromPath(file.filePath);
-    moduleChanges[bucket] = (moduleChanges[bucket] ?? 0) + (file.changes || 0);
+    const changes = file.changes || 0;
+    moduleChanges[bucket] = (moduleChanges[bucket] ?? 0) + changes;
+    totalChanges += changes;
+    if (isNoisePath(file.filePath)) {
+      noiseChanges += changes;
+    }
     if (isSensitivePath(file.filePath)) {
       sensitiveHits += 1;
     }
@@ -966,7 +986,14 @@ export async function analyzeActivity(input: ActivityQuery): Promise<ActivityAna
     );
   }
 
-  return { categories, topModules, risks };
+  return {
+    categories,
+    topModules,
+    risks,
+    analyzedCommits: commits.length,
+    offHoursCommits,
+    noiseChangeShare: totalChanges > 0 ? noiseChanges / totalChanges : 0
+  };
 }
 
 export type PushedCommitInput = {

@@ -9,6 +9,8 @@ import {
 } from "../../common/access/organization-access.js";
 import { AppError } from "../../common/errors/app-error.js";
 import { prisma } from "../../config/database.js";
+import type { ReportComparison } from "../report-engine/comparison.js";
+import type { Insight } from "../report-engine/insights.js";
 import type { ReportType } from "../openclaw/openclaw.schemas.js";
 
 type ReportStatistics = {
@@ -17,6 +19,34 @@ type ReportStatistics = {
   deletions: number;
   filesChanged: number;
 };
+
+/**
+ * `statisticsJson` holds the 4 headline counts plus (optionally) the persisted
+ * period comparison + key insights (Report advances A/B), so a saved/history
+ * report renders the same structured panel as a freshly generated one. Splits
+ * the stored blob back into its parts for the response.
+ */
+function splitStatistics(json: unknown): {
+  statistics: ReportStatistics | null;
+  comparison: ReportComparison | null;
+  insights: Insight[] | null;
+} {
+  const j = (json ?? {}) as Record<string, unknown>;
+  const statistics =
+    j.commits !== undefined
+      ? {
+          commits: Number(j.commits) || 0,
+          additions: Number(j.additions) || 0,
+          deletions: Number(j.deletions) || 0,
+          filesChanged: Number(j.filesChanged) || 0
+        }
+      : null;
+  return {
+    statistics,
+    comparison: (j.comparison as ReportComparison | undefined) ?? null,
+    insights: (j.insights as Insight[] | undefined) ?? null
+  };
+}
 
 type CreateReportContributorInput = {
   userId?: string;
@@ -37,6 +67,8 @@ type CreateReportInput = {
   title: string;
   markdownContent: string;
   statistics: ReportStatistics;
+  comparison?: ReportComparison | null;
+  insights?: Insight[] | null;
   status: "GENERATED" | "PARTIAL";
   generatedBy: "llm" | "template";
   dataFingerprint?: string;
@@ -58,7 +90,7 @@ function toSummary(report: Report) {
       from: report.periodStart,
       to: report.periodEnd
     },
-    statistics: report.statisticsJson,
+    statistics: splitStatistics(report.statisticsJson).statistics,
     createdAt: report.createdAt
   };
 }
@@ -74,6 +106,7 @@ function toContributor(contributor: ReportContributor) {
 }
 
 function toDetail(report: ReportWithContributors) {
+  const { comparison, insights } = splitStatistics(report.statisticsJson);
   return {
     ...toSummary(report),
     markdown: report.markdownContent,
@@ -81,12 +114,20 @@ function toDetail(report: ReportWithContributors) {
     projectId: report.projectId,
     requestedById: report.requestedById,
     shareToken: report.shareToken,
+    comparison,
+    insights,
     contributors: report.contributors.map(toContributor)
   };
 }
 
 export async function createReport(input: CreateReportInput) {
-  const statisticsJson = input.statistics as unknown as Prisma.InputJsonObject;
+  // Persist the headline stats plus (optionally) the comparison/insights so a
+  // history report renders the same structured panel as a fresh one.
+  const statisticsJson = {
+    ...input.statistics,
+    ...(input.comparison ? { comparison: input.comparison } : {}),
+    ...(input.insights?.length ? { insights: input.insights } : {})
+  } as unknown as Prisma.InputJsonObject;
 
   const report = await prisma.$transaction(async (tx) => {
     const created = await tx.report.create({
@@ -289,6 +330,7 @@ export async function getPublicReport(token: string) {
   if (!report) {
     throw new AppError(404, "This shared report is no longer available", "SHARED_REPORT_NOT_FOUND");
   }
+  const { statistics, comparison, insights } = splitStatistics(report.statisticsJson);
   return {
     title: report.title,
     markdown: report.markdownContent,
@@ -296,7 +338,9 @@ export async function getPublicReport(token: string) {
     targetLabel: report.targetLabel,
     status: report.status,
     period: { from: report.periodStart, to: report.periodEnd },
-    statistics: report.statisticsJson,
+    statistics,
+    comparison,
+    insights,
     createdAt: report.createdAt
   };
 }

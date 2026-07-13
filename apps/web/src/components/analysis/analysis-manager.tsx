@@ -40,6 +40,10 @@ import {
 import { BarList, StatTile } from "@/components/statistics/charts";
 import { ComparePanel } from "./compare-panel";
 import { AwardsPanel } from "./awards-panel";
+import {
+  ReportInsightsPanel,
+  stripStructuredSections
+} from "@/components/reports/report-insights-panel";
 
 const PERIODS: { value: AnalysisPeriod; label: string }[] = [
   { value: "today", label: "Today" },
@@ -441,8 +445,15 @@ export function AnalysisManager({
                 </button>
               </div>
             </div>
+            <div className="mb-3">
+              <ReportInsightsPanel comparison={aiReport.comparison} insights={aiReport.insights} />
+            </div>
             <div className="report-md glass-soft max-h-128 overflow-y-auto rounded-lg px-4 py-3 text-sm">
-              <ReactMarkdown remarkPlugins={markdownPlugins}>{aiReport.markdown}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={markdownPlugins}>
+                {aiReport.comparison || aiReport.insights
+                  ? stripStructuredSections(aiReport.markdown)
+                  : aiReport.markdown}
+              </ReactMarkdown>
             </div>
           </div>
         ) : null}

@@ -673,6 +673,30 @@ export type EmployeeLeaderboardRow = {
   sampleMessages: string[];
 };
 
+export type ReportMetricDelta = { current: number; previous: number; deltaPct: number | null };
+
+export type ReportRankMovement = {
+  name: string;
+  employeeId: string | null;
+  currentRank: number | null;
+  previousRank: number | null;
+  status: "up" | "down" | "same" | "new" | "dropped";
+  delta: number | null;
+};
+
+export type ReportComparison = {
+  previousPeriod: { from: string; to: string };
+  hasBaseline: boolean;
+  commits: ReportMetricDelta;
+  additions: ReportMetricDelta;
+  deletions: ReportMetricDelta;
+  filesChanged: ReportMetricDelta;
+  contributors: ReportMetricDelta;
+  movers: ReportRankMovement[];
+};
+
+export type ReportInsight = { kind: string; severity: "info" | "warn"; text: string };
+
 export type GeneratedReport = {
   reportId: string;
   reportType: ReportType;
@@ -689,6 +713,8 @@ export type GeneratedReport = {
   }[];
   statistics: ReportStatistics;
   leaderboard?: EmployeeLeaderboardRow[];
+  comparison?: ReportComparison | null;
+  insights?: ReportInsight[] | null;
   status: ReportStatus;
   pending: string[];
   /** Non-fatal collection notes, e.g. a repo skipped for a missing credential. */
@@ -724,6 +750,8 @@ export type ReportDetail = ReportSummary & {
   projectId: string | null;
   requestedById: string | null;
   shareToken: string | null;
+  comparison?: ReportComparison | null;
+  insights?: ReportInsight[] | null;
   contributors: ReportContributor[];
 };
 
@@ -770,6 +798,8 @@ export type PublicReport = {
   status: ReportStatus;
   period: { from: string; to: string };
   statistics: ReportStatistics | null;
+  comparison?: ReportComparison | null;
+  insights?: ReportInsight[] | null;
   createdAt: string;
 };
 

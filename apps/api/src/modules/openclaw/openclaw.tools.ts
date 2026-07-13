@@ -5,6 +5,12 @@ import {
   type ActivityAnalysis,
   type EmployeeLeaderboardRow
 } from "../activity/activity.service.js";
+import type {
+  MetricDelta,
+  RankMovement,
+  ReportComparison
+} from "../report-engine/comparison.js";
+import type { Insight } from "../report-engine/insights.js";
 import type { ChatMessage } from "../llm/llm-provider.js";
 import type { Period, ReportType } from "./openclaw.schemas.js";
 
@@ -255,6 +261,10 @@ export type ReportContext = {
   sampleCommits: ReportCommit[];
   analysis?: ActivityAnalysis;
   leaderboard?: EmployeeLeaderboardRow[];
+  /** Period-over-period trend (Report advance A). */
+  comparison?: ReportComparison;
+  /** Auto-surfaced key insights (Report advance B). */
+  insights?: Insight[];
   /** Optional — lets "Who did what" say what each person focused on. */
   employeeSignals?: EmployeeSignalMap;
   customPrompt?: string;
@@ -279,6 +289,34 @@ function deriveTarget(context: ReportContext): string {
 /** Deterministic title used in the report header regardless of generator. */
 export function deriveTitle(context: ReportContext): string {
   return `${context.reportType} report — ${deriveTarget(context)}`;
+}
+
+function pctSuffix(delta: MetricDelta): string {
+  return delta.deltaPct === null ? "" : ` (${delta.deltaPct > 0 ? "+" : ""}${delta.deltaPct}%)`;
+}
+
+/** Short human label for a leaderboard rank movement. */
+function moverLabel(move: RankMovement): string {
+  if (move.status === "new") return `${move.name} (new)`;
+  if (move.status === "dropped") return `${move.name} (dropped off)`;
+  const arrow = move.status === "up" ? "↑" : move.status === "down" ? "↓" : "→";
+  return `${move.name} ${arrow}${Math.abs(move.delta ?? 0)}`;
+}
+
+/** Prompt/template lines describing the trend vs the previous period. */
+function comparisonPromptLines(comparison?: ReportComparison): string | null {
+  if (!comparison || !comparison.hasBaseline) {
+    return null;
+  }
+  const c = comparison;
+  return [
+    "",
+    `Compared to the previous period (${c.previousPeriod.from.slice(0, 10)} to ${c.previousPeriod.to.slice(0, 10)}):`,
+    `- Commits: ${c.commits.current} vs ${c.commits.previous}${pctSuffix(c.commits)}`,
+    `- Lines: +${c.additions.current}/-${c.deletions.current} vs +${c.additions.previous}/-${c.deletions.previous}`,
+    `- Contributors: ${c.contributors.current} vs ${c.contributors.previous}`,
+    ...(c.movers.length ? [`- Rank movement: ${c.movers.map(moverLabel).join("; ")}`] : [])
+  ].join("\n");
 }
 
 /**
@@ -308,6 +346,16 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
       : null;
   const risksLine =
     analysis && analysis.risks.length ? `Risk signals: ${analysis.risks.join("; ")}.` : null;
+
+  const insightsLines = context.insights?.length
+    ? [
+        "",
+        "Detected key insights (weave the important ones into a '## Key insights' section):",
+        ...context.insights.map((insight) => `- [${insight.severity}] ${insight.text}`)
+      ].join("\n")
+    : null;
+
+  const comparisonLines = comparisonPromptLines(context.comparison);
 
   const leaderboard = context.leaderboard ?? [];
   const leaderboardLines = leaderboard.length
@@ -352,12 +400,14 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
       ? `Employees: ${context.employees.map((employee) => employee.name).join(", ")}`
       : null,
     context.customPrompt ? `Extra instructions: ${context.customPrompt}` : null,
+    comparisonLines,
+    insightsLines,
     leaderboardLines,
     "",
     "Recent commits:",
     commitLines,
     "",
-    "Write the report in Markdown: a short title (H1), then a 2-3 sentence overview that names who did the most work. If a contributor leaderboard is provided, add a '## Who did what' section listing each contributor ranked most-active first (by lines changed), each with a one-line summary of what they worked on (grounded in their commits). Then a bulleted list of the key themes/work across the team, a short note on any risk signals, and a one-line note on volume. Never invent contributors or work. Keep it under 350 words."
+    "Write the report in Markdown: a short title (H1), then a 2-3 sentence overview that names who did the most work. If key insights are provided, add a section titled exactly '## Key insights' right after the overview — 3-5 short bullets highlighting the most important signals (trend vs last period, risks, concentration, roster changes); ground every bullet in the provided data and never invent. If a contributor leaderboard is provided, add a '## Who did what' section listing each contributor ranked most-active first (by lines changed), each with a one-line summary of what they worked on. If a previous-period comparison is provided, add a section titled exactly '## Trend vs previous period' with the key deltas (e.g. commits up/down %, lines, contributors). Then a bulleted list of the key themes/work, and a one-line note on volume. Never invent contributors or work. Keep it under 400 words."
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -389,9 +439,31 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
           .join(", ")}`
       : null,
     context.customPrompt ? `**Prompt:** ${context.customPrompt}` : null,
+    ...(context.insights?.length
+      ? [
+          "",
+          "## Key insights",
+          ...context.insights.map(
+            (insight) => `- ${insight.severity === "warn" ? "⚠️ " : ""}${insight.text}`
+          )
+        ]
+      : []),
     "",
     "## Activity",
     `Commits: ${context.activity.commits} · +${context.activity.additions} / -${context.activity.deletions} · ${context.activity.filesChanged} files`,
+    ...(context.comparison?.hasBaseline
+      ? (() => {
+          const c = context.comparison;
+          return [
+            "",
+            "## Trend vs previous period",
+            `- Commits: ${c.commits.current} vs ${c.commits.previous}${pctSuffix(c.commits)}`,
+            `- Lines: +${c.additions.current}/-${c.deletions.current} vs +${c.additions.previous}/-${c.deletions.previous}`,
+            `- Contributors: ${c.contributors.current} vs ${c.contributors.previous}`,
+            ...(c.movers.length ? [`- Movement: ${c.movers.map(moverLabel).join("; ")}`] : [])
+          ];
+        })()
+      : []),
     ...(leaderboard.length
       ? (() => {
           const hasSignals = leaderboard.some(

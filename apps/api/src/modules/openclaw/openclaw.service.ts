@@ -7,6 +7,8 @@ import {
   sampleCommits
 } from "../activity/activity.service.js";
 import { buildProjectEmployeeSignals } from "../analysis/analysis.service.js";
+import { buildComparison } from "../report-engine/comparison.js";
+import { buildInsights } from "../report-engine/insights.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
 import { createReport, findCachedReport } from "../reports/reports.service.js";
 import type { GenerateReportInput } from "./openclaw.schemas.js";
@@ -37,6 +39,14 @@ function computeFingerprint(activity: {
   // totals alone would keep serving a stale cached report.
   const t = activity.lastCommitAt ? activity.lastCommitAt.getTime() : 0;
   return `c${activity.commits}-a${activity.additions}-d${activity.deletions}-f${activity.filesChanged}-t${t}-s${activity.lastSha ?? ""}`;
+}
+
+/** The equal-length window immediately before `range` (for the trend comparison). */
+function previousPeriod(range: { from: Date; to: Date }): { from: Date; to: Date } {
+  const duration = Math.max(1, range.to.getTime() - range.from.getTime());
+  const to = new Date(range.from.getTime() - 1);
+  const from = new Date(to.getTime() - duration);
+  return { from, to };
 }
 
 /**
@@ -93,11 +103,54 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
   const activity = await fetchGitActivity(activityQuery);
   const analysis = await analyzeActivity(activityQuery);
   const leaderboard = await buildEmployeeLeaderboard(activityQuery);
-  // Fold the branch into the fingerprint so a branch-filtered report never
-  // reuses (or is reused by) the all-branches report of the same scope/period.
-  const dataFingerprint = input.branch
-    ? `b:${input.branch}|${computeFingerprint(activity)}`
-    : computeFingerprint(activity);
+
+  // Report advance A/B: period-over-period comparison + auto-surfaced insights.
+  // The previous window is the equal-length span just before this one, read
+  // best-effort from stored data (no extra Git collection). buildComparison
+  // suppresses deltas when there's no baseline, so a first-ever report is fine.
+  const prevRange = previousPeriod(range);
+  const prevQuery = { ...activityQuery, since: prevRange.from, until: prevRange.to };
+  const prevActivity = await fetchGitActivity(prevQuery);
+  const prevLeaderboard = await buildEmployeeLeaderboard(prevQuery, 0);
+  const comparison = buildComparison({
+    previousPeriod: { from: prevRange.from.toISOString(), to: prevRange.to.toISOString() },
+    current: {
+      commits: activity.commits,
+      additions: activity.additions,
+      deletions: activity.deletions,
+      filesChanged: activity.filesChanged,
+      contributors: leaderboard.length
+    },
+    previous: {
+      commits: prevActivity.commits,
+      additions: prevActivity.additions,
+      deletions: prevActivity.deletions,
+      filesChanged: prevActivity.filesChanged,
+      contributors: prevLeaderboard.length
+    },
+    currentLeaders: leaderboard.map((row) => ({
+      name: row.name,
+      employeeId: row.employeeId,
+      rank: row.rank
+    })),
+    previousLeaders: prevLeaderboard.map((row) => ({
+      name: row.name,
+      employeeId: row.employeeId,
+      rank: row.rank
+    }))
+  });
+  const insights = buildInsights({
+    activity: { commits: activity.commits },
+    analysis,
+    leaderboard: leaderboard.map((row) => ({ name: row.name, lines: row.lines })),
+    comparison
+  });
+
+  // Fold the branch AND the previous-period baseline into the fingerprint: a
+  // branch-filtered report never collides with the all-branches one, and a
+  // changed baseline (which changes the trend/insights) busts a stale cache.
+  const baseFingerprint = `${computeFingerprint(activity)}-p${prevActivity.commits}s${prevActivity.lastSha ?? ""}`;
+  const dataFingerprint = input.branch ? `b:${input.branch}|${baseFingerprint}` : baseFingerprint;
 
   const baseTargetLabel =
     repository?.fullName ??
@@ -145,6 +198,8 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
         statistics,
         analysis,
         leaderboard,
+        comparison,
+        insights,
         status: "GENERATED" as const,
         pending: [] as string[],
         warnings: collection.warnings,
@@ -184,6 +239,8 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     sampleCommits: commits,
     analysis,
     leaderboard,
+    comparison,
+    insights,
     employeeSignals,
     customPrompt: input.customPrompt
   };
@@ -221,6 +278,8 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     title,
     markdownContent: markdown,
     statistics,
+    comparison,
+    insights,
     status,
     generatedBy: status === "GENERATED" ? "llm" : "template",
     // Only fingerprint LLM reports — the cache reuses those, never the template.
@@ -263,6 +322,8 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     statistics,
     analysis,
     leaderboard,
+    comparison,
+    insights,
     status,
     pending,
     warnings: collection.warnings,

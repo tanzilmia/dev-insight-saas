@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { AlertTriangle, Loader2, Printer, Sparkles } from "lucide-react";
 
 import { type PublicReport, getApiErrorMessage, getPublicReport } from "@/lib/api";
+import { ReportInsightsPanel, stripStructuredSections } from "./report-insights-panel";
 
 const markdownPlugins = [remarkGfm];
 
@@ -85,8 +86,16 @@ export function SharedReport({ token }: { token: string }) {
             </div>
           ) : null}
 
+          <div className="my-5">
+            <ReportInsightsPanel comparison={report.comparison} insights={report.insights} />
+          </div>
+
           <div className="report-md">
-            <ReactMarkdown remarkPlugins={markdownPlugins}>{report.markdown}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={markdownPlugins}>
+              {report.comparison || report.insights
+                ? stripStructuredSections(report.markdown)
+                : report.markdown}
+            </ReactMarkdown>
           </div>
         </article>
       ) : null}

@@ -49,6 +49,7 @@ import {
   DashboardChrome,
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
+import { ReportInsightsPanel, stripStructuredSections } from "./report-insights-panel";
 
 const REPORT_TYPES: { value: ReportType; label: string }[] = [
   { value: "repository", label: "Repository" },
@@ -425,6 +426,8 @@ export function ReportsManager() {
         markdown: selectedReport.markdown,
         status: selectedReport.status,
         statistics: selectedReport.statistics ?? emptyStats,
+        comparison: selectedReport.comparison ?? null,
+        insights: selectedReport.insights ?? null,
         pending: [] as string[],
         warnings: [] as string[],
         cached: false,
@@ -437,6 +440,8 @@ export function ReportsManager() {
           markdown: result.markdown,
           status: result.status,
           statistics: result.statistics,
+          comparison: result.comparison ?? null,
+          insights: result.insights ?? null,
           pending: result.pending,
           warnings: result.warnings ?? [],
           cached: result.cached ?? false,
@@ -742,6 +747,13 @@ export function ReportsManager() {
                 ))}
               </div>
 
+              <div className="mb-4">
+                <ReportInsightsPanel
+                  comparison={renderedReport.comparison}
+                  insights={renderedReport.insights}
+                />
+              </div>
+
               {renderedReport.warnings.length ? (
                 <div className="mb-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-bold text-amber-700 dark:text-amber-400">
                   <p className="mb-1 uppercase tracking-wide">Heads up</p>
@@ -850,7 +862,14 @@ export function ReportsManager() {
                 </div>
               ) : null}
 
-              <ReportMarkdown markdown={renderedReport.markdown} expanded={expanded} />
+              <ReportMarkdown
+                markdown={
+                  renderedReport.comparison || renderedReport.insights
+                    ? stripStructuredSections(renderedReport.markdown)
+                    : renderedReport.markdown
+                }
+                expanded={expanded}
+              />
 
               <button
                 type="button"

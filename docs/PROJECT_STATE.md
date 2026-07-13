@@ -1165,6 +1165,77 @@ real bot + group** (message with heading/table/bullets landed correctly).
   OpenClaw config) and Discord/Slack providers; optional `.md` file attachment for
   very long reports (`sendDocument`).
 
+### Reporting advances A + B — trend comparison + key insights (2026-07-13) ✅
+
+Reports are now insight-first and trend-aware. Both live in the backend report
+pipeline, so **every channel (dashboard, chat, Telegram) gets them for free** —
+no per-channel work. No migration. **Verified live** (real Groq LLM report over
+the org's real data wove in a "## Key insights" section + the −11% trend).
+
+- **A — period-over-period comparison** (`report-engine/comparison.ts`, pure):
+  `buildComparison` diffs the current window against the **equal-length window
+  immediately before it**, read **best-effort from stored data** (no extra Git
+  collection). Returns headline `MetricDelta`s (commits/lines/files/contributors
+  with `deltaPct`) + per-contributor `RankMovement` (up/down/same/**new**/
+  **dropped**). `hasBaseline=false` when the prior window has no stored activity,
+  so deltas are suppressed (a first-ever report reads cleanly, no "−100%").
+- **B — auto-surfaced insights** (`report-engine/insights.ts`, pure):
+  `buildInsights` is a deterministic rules pass → volume swing (≥25% vs prior),
+  **risk signals** (from the analysis engine — surfaced early so the 6-insight cap
+  never drops them), work **concentration** (top contributor ≥60% of lines =
+  bus-factor), **new/departed** contributors + notable **climber**, and
+  **work-type skew** (≥50% one category). Each `{ kind, severity, text }`.
+  Unit-verified (14 cases incl. cap/priority).
+- **Wiring** (`openclaw.service.ts`): computes `prevActivity`+`prevLeaderboard`
+  (DB-only, 2 cheap queries), builds `comparison`+`insights` before the cache
+  check, and **folds the previous-period baseline into `dataFingerprint`**
+  (`…-p{prevCommits}s{prevSha}`) so a changed baseline busts a stale cache. Both
+  are returned structured on the cache-hit AND generated paths, and added to
+  `ReportContext`.
+- **Prompt + template** (`openclaw.tools.ts`): the LLM prompt now carries a
+  "Compared to the previous period" block + the detected insights, and is
+  instructed to add a **"## Key insights"** section (3–5 grounded bullets) after
+  the overview and weave the trend in. The **template fallback** renders
+  "## Key insights" + "## Trend vs previous period" deterministically, so the
+  sections appear even with no LLM.
+- Web: `ReportComparison`/`ReportInsight` types on `GeneratedReport` (the report
+  markdown already renders both sections via `.report-md`, so no UI change was
+  needed). typecheck + lint + build clean both workspaces.
+### Reporting advances A/B follow-up — structured panel + more insights (2026-07-13) ✅
+
+Closed the A/B gaps the user spotted (trend shown only as vague LLM prose like
+"lines changed increased"; no severity colors). Now the exact structured data is
+surfaced directly, plus 2 new insight types, plus the panel on the Analysis page.
+
+- **Persistence (no migration):** `createReport` stores `comparison` + `insights`
+  inside `statisticsJson` (extra keys); `splitStatistics` splits them back out on
+  read, so `GET /api/reports/:id` and the public report now return structured
+  `comparison`/`insights` — a **history/shared report renders the same panel as a
+  fresh one**. Verified round-trip (forced cache-miss → saved → read back carries
+  both). Old cached reports lack them until regenerated (expected).
+- **Structured panel** (`components/reports/report-insights-panel.tsx`): **Trend
+  tiles** (Commits/Lines±/Files/Contributors — current value + ▲▼ deltaPct, "was
+  N", `no prior` when no baseline) + **rank-movement badges** (new/off/↑N/↓N) +
+  **severity-colored insight list** (⚠️ amber for `warn`, 💡 accent for `info`).
+  Exact numbers, not LLM paraphrase. Rendered above the markdown in
+  **reports-manager**, **shared-report**, and the **Analysis AI-report**.
+- **No duplication:** the markdown still carries "## Key insights" + "## Trend vs
+  previous period" (so Telegram / copy / download / PDF stay complete — the LLM is
+  now told to use those exact titles), but `stripStructuredSections` removes those
+  two sections **for on-screen display only** (raw markdown unchanged for copy/
+  download/Telegram). Verified: strip drops the two sections, keeps "Who did what".
+- **2 new insight types** (`analyzeActivity` gained signals, no new query cost):
+  `offHoursCommits` (commits before 06:00 / after 22:00 / weekend) →
+  **off-hours/burnout** insight (warn, ≥30%); `noiseChangeShare` (share of changed
+  lines in `isNoisePath` dependency/generated files) → **dependency-churn** insight
+  (info, ≥50%, "real feature churn is smaller than the totals suggest").
+  `ActivityAnalysis` gained `analyzedCommits`/`offHoursCommits`/`noiseChangeShare`
+  (additive — statistics unaffected). Unit-verified fire-above / silent-below.
+- typecheck + lint + build clean both workspaces. Deferred still: period trend on
+  the Statistics Overview stat tiles (the daily-digest card already covers daily),
+  test-coverage-ratio insight, forced prev-period collection for a guaranteed
+  baseline.
+
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
 Goal (from product owner): reports over **any date window** (not just last 90 days) —
