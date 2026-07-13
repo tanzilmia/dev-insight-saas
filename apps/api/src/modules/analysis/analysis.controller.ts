@@ -3,7 +3,12 @@ import { Router } from "express";
 import { asyncHandler } from "../../common/http/async-handler.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import {
+  awardParamsSchema,
+  awardShortlistSchema,
+  awardsQuerySchema,
+  digestQuerySchema,
   employeeCommitsQuerySchema,
+  leaderboardHistoryQuerySchema,
   projectAnalysisQuerySchema,
   projectBranchesQuerySchema
 } from "./analysis.schemas.js";
@@ -12,6 +17,9 @@ import {
   getProjectAnalysis,
   getProjectBranches
 } from "./analysis.service.js";
+import { getLeaderboardHistory } from "./leaderboard-snapshots.js";
+import { getDailyDigest } from "./digest.service.js";
+import { confirmAward, generateShortlist, listAwards } from "./awards.service.js";
 
 export const analysisRouter = Router();
 
@@ -44,5 +52,55 @@ analysisRouter.get(
     const commits = await getEmployeeCommits(req.authUser!.id, query);
 
     res.status(200).json({ commits });
+  })
+);
+
+analysisRouter.get(
+  "/leaderboard-history",
+  asyncHandler(async (req, res) => {
+    const query = leaderboardHistoryQuerySchema.parse(req.query);
+    const snapshots = await getLeaderboardHistory(req.authUser!.id, query);
+
+    res.status(200).json({ snapshots });
+  })
+);
+
+analysisRouter.get(
+  "/digest",
+  asyncHandler(async (req, res) => {
+    const query = digestQuerySchema.parse(req.query);
+    const digest = await getDailyDigest(req.authUser!.id, query);
+
+    res.status(200).json({ digest });
+  })
+);
+
+analysisRouter.get(
+  "/awards",
+  asyncHandler(async (req, res) => {
+    const query = awardsQuerySchema.parse(req.query);
+    const awards = await listAwards(req.authUser!.id, query);
+
+    res.status(200).json({ awards });
+  })
+);
+
+analysisRouter.post(
+  "/awards/shortlist",
+  asyncHandler(async (req, res) => {
+    const input = awardShortlistSchema.parse(req.body);
+    const result = await generateShortlist(req.authUser!.id, input);
+
+    res.status(200).json(result);
+  })
+);
+
+analysisRouter.post(
+  "/awards/:id/confirm",
+  asyncHandler(async (req, res) => {
+    const { id } = awardParamsSchema.parse(req.params);
+    const award = await confirmAward(req.authUser!.id, id);
+
+    res.status(200).json({ award });
   })
 );

@@ -31,6 +31,7 @@ import {
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
 import { AreaChart, BarList, StatTile } from "./charts";
+import { DailyDigestCard } from "./daily-digest-card";
 
 const PERIODS: { value: StatPeriod; label: string }[] = [
   { value: "yesterday", label: "Yesterday" },
@@ -219,6 +220,8 @@ export function StatisticsDashboard() {
             </div>
           </div>
         ) : null}
+
+        <DailyDigestCard organizationId={organizationId} />
 
         {error ? (
           <div className="glass rounded-xl p-5 text-sm font-medium text-red-600 dark:text-red-400">

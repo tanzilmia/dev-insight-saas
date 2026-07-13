@@ -61,6 +61,18 @@ enum CollectionJobStatus {
   CANCELLED
 }
 
+enum SnapshotGranularity {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum AwardStatus {
+  SHORTLISTED
+  CONFIRMED
+  DISMISSED
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -101,6 +113,8 @@ model Organization {
   reports               Report[]
   reportSchedules       ReportSchedule[]
   collectionJobs        CollectionJob[]
+  leaderboardSnapshots  LeaderboardSnapshot[]
+  employeeAwards        EmployeeAward[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
 }
@@ -518,6 +532,86 @@ model ReportSchedule {
 
   @@index([organizationId])
   @@index([enabled, nextRunAt])
+}
+
+// Phase 3a — a periodic snapshot of the contributor leaderboard for a scope
+// (org-wide or a single project) over a completed day/week/month. Powers digest
+// rank-deltas, streaks, and the employee-of-the-month period comparison.
+model LeaderboardSnapshot {
+  id             String              @id @default(cuid())
+  organizationId String
+  // "org" for the whole organization, otherwise the projectId. Non-null so the
+  // unique constraint dedups reliably (a nullable projectId would let Postgres
+  // treat two org-wide rows as distinct).
+  scope          String
+  projectName    String?
+  granularity    SnapshotGranularity
+  periodKey      String
+  rangeStart     DateTime
+  rangeEnd       DateTime
+  totalCommits   Int                 @default(0)
+  totalLines     Int                 @default(0)
+  contributors   Int                 @default(0)
+  generatedAt    DateTime            @default(now())
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rows         LeaderboardSnapshotRow[]
+
+  @@unique([organizationId, scope, granularity, periodKey])
+  @@index([organizationId, granularity, rangeStart])
+}
+
+model LeaderboardSnapshotRow {
+  id           String   @id @default(cuid())
+  snapshotId   String
+  userId       String?
+  name         String
+  usernames    String[]
+  rank         Int
+  commits      Int      @default(0)
+  additions    Int      @default(0)
+  deletions    Int      @default(0)
+  lines        Int      @default(0)
+  filesChanged Int      @default(0)
+
+  snapshot LeaderboardSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([snapshotId])
+  @@index([userId])
+}
+
+// Phase 4b — an employee-of-the-month shortlist entry. The engine proposes
+// SHORTLISTED rows (deterministic score + LLM/template citation); a manager
+// confirms one → CONFIRMED (siblings in the same scope+period → DISMISSED).
+model EmployeeAward {
+  id             String      @id @default(cuid())
+  organizationId String
+  scope          String
+  projectName    String?
+  periodKey      String
+  rangeStart     DateTime
+  rangeEnd       DateTime
+  userId         String?
+  name           String
+  usernames      String[]
+  rank           Int
+  score          Float       @default(0)
+  commits        Int         @default(0)
+  lines          Int         @default(0)
+  activeDays     Int         @default(0)
+  filesChanged   Int         @default(0)
+  citation       String
+  generatedBy    String?
+  status         AwardStatus @default(SHORTLISTED)
+  confirmedById  String?
+  confirmedAt    DateTime?
+  createdById    String?
+  createdAt      DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, scope, periodKey])
+  @@index([organizationId, status])
 }
 
 model RequestLog {

@@ -1031,6 +1031,160 @@ export async function getEmployeeCommits(
 }
 
 /* ------------------------------------------------------------------ */
+/* Daily digest (Phase 3b)                                            */
+/* ------------------------------------------------------------------ */
+
+export type DigestTopMover = {
+  name: string;
+  userId: string | null;
+  usernames: string[];
+  rank: number;
+  commits: number;
+  lines: number;
+  rankDelta: number | null;
+  streak: number;
+};
+
+export type DailyDigest = {
+  date: string;
+  range: { from: string; to: string };
+  hasActivity: boolean;
+  headline: {
+    commits: number;
+    additions: number;
+    deletions: number;
+    filesChanged: number;
+    contributors: number;
+    activeRepos: number;
+  };
+  trend: { commitsPrev: number; deltaPct: number | null };
+  topMovers: DigestTopMover[];
+  risks: string[];
+  categories: Record<string, number>;
+};
+
+export async function getDailyDigest(organizationId: string) {
+  const response = await api.get<{ digest: DailyDigest }>("/api/analysis/digest", {
+    params: { organizationId }
+  });
+
+  return response.data.digest;
+}
+
+/* ------------------------------------------------------------------ */
+/* Leaderboard history (Phase 3a)                                     */
+/* ------------------------------------------------------------------ */
+
+export type SnapshotGranularity = "DAILY" | "WEEKLY" | "MONTHLY";
+
+export type LeaderboardSnapshotRow = {
+  userId: string | null;
+  name: string;
+  usernames: string[];
+  rank: number;
+  commits: number;
+  lines: number;
+  filesChanged: number;
+};
+
+export type LeaderboardSnapshot = {
+  id: string;
+  scope: string;
+  projectName: string | null;
+  granularity: SnapshotGranularity;
+  periodKey: string;
+  rangeStart: string;
+  rangeEnd: string;
+  totalCommits: number;
+  totalLines: number;
+  contributors: number;
+  rows: LeaderboardSnapshotRow[];
+};
+
+export async function getLeaderboardHistory(
+  organizationId: string,
+  scope = "org",
+  granularity: SnapshotGranularity = "MONTHLY",
+  limit = 12
+) {
+  const response = await api.get<{ snapshots: LeaderboardSnapshot[] }>(
+    "/api/analysis/leaderboard-history",
+    { params: { organizationId, scope, granularity, limit } }
+  );
+
+  return response.data.snapshots;
+}
+
+/* ------------------------------------------------------------------ */
+/* Employee of the month (Phase 4b)                                   */
+/* ------------------------------------------------------------------ */
+
+export type AwardStatus = "SHORTLISTED" | "CONFIRMED" | "DISMISSED";
+
+export type EmployeeAward = {
+  id: string;
+  scope: string;
+  projectName: string | null;
+  periodKey: string;
+  rangeStart: string;
+  rangeEnd: string;
+  userId: string | null;
+  name: string;
+  usernames: string[];
+  rank: number;
+  score: number;
+  commits: number;
+  lines: number;
+  activeDays: number;
+  filesChanged: number;
+  citation: string;
+  generatedBy: "llm" | "template" | null;
+  status: AwardStatus;
+  confirmedById: string | null;
+  confirmedAt: string | null;
+  createdAt: string;
+};
+
+export type AwardShortlistResult = {
+  periodKey: string;
+  scope: string;
+  projectName: string | null;
+  generatedBy: "llm" | "template";
+  awards: EmployeeAward[];
+};
+
+export async function listAwards(organizationId: string, scope?: string, limit = 24) {
+  const response = await api.get<{ awards: EmployeeAward[] }>("/api/analysis/awards", {
+    params: { organizationId, ...(scope ? { scope } : {}), limit }
+  });
+
+  return response.data.awards;
+}
+
+export async function generateAwardShortlist(
+  organizationId: string,
+  scope = "org",
+  periodKey?: string
+) {
+  const response = await api.post<AwardShortlistResult>("/api/analysis/awards/shortlist", {
+    organizationId,
+    scope,
+    ...(periodKey ? { periodKey } : {})
+  });
+
+  return response.data;
+}
+
+export async function confirmAward(awardId: string) {
+  const response = await api.post<{ award: EmployeeAward }>(
+    `/api/analysis/awards/${awardId}/confirm`,
+    {}
+  );
+
+  return response.data.award;
+}
+
+/* ------------------------------------------------------------------ */
 /* Scheduled reports (Phase 14a)                                      */
 /* ------------------------------------------------------------------ */
 

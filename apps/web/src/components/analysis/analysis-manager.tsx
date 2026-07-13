@@ -39,6 +39,7 @@ import {
 } from "@/components/dashboard/dashboard-chrome";
 import { BarList, StatTile } from "@/components/statistics/charts";
 import { ComparePanel } from "./compare-panel";
+import { AwardsPanel } from "./awards-panel";
 
 const PERIODS: { value: AnalysisPeriod; label: string }[] = [
   { value: "today", label: "Today" },
@@ -483,6 +484,15 @@ export function AnalysisManager({
                 icon={CalendarDays}
               />
             </div>
+
+            {organizationId && projectId ? (
+              <AwardsPanel
+                organizationId={organizationId}
+                scope={projectId}
+                projectName={projects.find((project) => project.id === projectId)?.name ?? null}
+                canManage={manageable}
+              />
+            ) : null}
 
             {compareIds.length === 1 ? (
               <div className="glass flex items-center justify-between rounded-xl px-4 py-2.5">

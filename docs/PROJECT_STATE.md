@@ -1049,25 +1049,68 @@ the branch applied.
 - Note: the chat/MCP path (`devinsight_generate_report`) doesn't expose `branch`
   yet — dashboard-only for now; adding it there is a small follow-up.
 
-### Analysis Phase 3–4 roadmap (agreed with product owner, 2026-07-13)
+### Analysis Phase 3–4 — ALL DONE (2026-07-13) ✅ (4a, 3a, 3b, 4b)
 
-Recommended build order (dependency-driven): **4a done** ✅ → 3a → 3b → 4b.
-- **3a — Leaderboard snapshot history** (foundation for deltas + awards). New
-  models `LeaderboardSnapshot` + `LeaderboardSnapshotRow` (org/project scope,
-  DAILY/WEEKLY/MONTHLY, `periodKey`, unique per scope+granularity+periodKey);
-  a once-a-day writer on the existing scheduler tick populating rows from
-  `buildEmployeeLeaderboard`; `GET /api/analysis/leaderboard-history`. (migration)
-- **3b — Daily digest.** A `digest` object: yesterday's headline, top mover,
-  biggest rank riser/faller vs the prior period (from 3a), new risk signals,
-  active-day streaks; a "Daily digest" card on Overview/Analysis. Optionally
-  wired to channel delivery (14c). (mostly read + UI once 3a exists)
-- **4b — Employee-of-the-month.** Deterministic balanced score over the monthly
-  snapshot (commits + noise-filtered lines + active days + low risk + module
-  breadth) → top-N shortlist → LLM citation per candidate (grounded, template
-  fallback). New model `EmployeeAward` (SHORTLISTED→CONFIRMED, manager confirms);
-  `POST /awards/shortlist`, `POST /awards/:id/confirm`, `GET /awards`. Framed as a
-  recognition *suggestion* (keeps the "activity signals, not verdicts"
-  disclaimer). (migration + scoring + LLM + confirm UI)
+Full Analysis roadmap shipped. One additive migration
+`20260713055234_analysis_snapshots_and_awards` (applied to Neon + `prisma
+generate`) adds `LeaderboardSnapshot`/`LeaderboardSnapshotRow`/`EmployeeAward` +
+enums `SnapshotGranularity`, `AwardStatus`. All new endpoints live under the
+existing `analysisRouter` (`/api/analysis`, JWT). typecheck + lint + build clean
+both workspaces.
+
+**3a — Leaderboard snapshot history.** `modules/analysis/leaderboard-snapshots.ts`:
+- Reusable local-time period helpers `dayRange`/`weekRange`/`monthRange`
+  (`rangeEnd` = last ms; ISO-week keys `YYYY-Www`, month `YYYY-MM`) + `dueTargets`
+  (bounded backfill: 14 days / 4 weeks / 3 months, completed-only). **Unit-verified**
+  (Feb-28, Dec year-boundary, ISO W01/W02, today-excluded/yesterday-included, dedup).
+- `writeDueSnapshots()` — idempotent sweep over every org × scope (`"org"` +
+  each ACTIVE project) × due period; rows come from `buildEmployeeLeaderboard`
+  (called with `samplePerEmployee=0`, which now skips the recent-messages query —
+  a safe new guard). `scope` is a **non-null** `"org"|projectId` so the
+  `@@unique([organizationId, scope, granularity, periodKey])` dedups reliably
+  (nullable projectId would defeat it). P2002 race → skip. Top-50 rows/snapshot.
+- Hooked into `scheduler.ts` tick on a 15-min throttle (snapshots are for
+  completed periods, so slow cadence is fine); kicks on boot.
+- `GET /api/analysis/leaderboard-history?organizationId=&scope=&granularity=&limit=`
+  (org-member) → snapshots newest-first with top-10 rows each.
+- **Verified end-to-end against Neon:** boot sweep wrote 84 snapshots
+  (DAILY 56 / WEEKLY 16 / MONTHLY 12) + 16 rows for the real org+project, no errors.
+
+**3b — Daily digest.** `modules/analysis/digest.service.ts` `getDailyDigest`
+(org-member): an org-wide "yesterday in review" computed **live** (adjacent-day
+leaderboards, so it works before any snapshot exists) — headline
+(commits/contributors/active-repos/lines/files), volume trend vs the prior day,
+top-5 movers with **rank-delta** (prevRank−rank; null = new) and **active-day
+streak** (walked back from commit history over 21 days, snapshot-independent),
+plus risk signals from `analyzeActivity`. `GET /api/analysis/digest?organizationId=`.
+Web: self-loading `DailyDigestCard` on the **Overview** (`statistics-dashboard.tsx`)
+— mini-stats, top-mover list with ▲▼ deltas + 🔥 streaks, trend chip, risks.
+
+**4b — Employee-of-the-month.** `modules/analysis/awards.service.ts`:
+- Deterministic **balanced score** over last-month leaderboard for a scope:
+  `0.30·commits + 0.30·lines + 0.25·activeDays + 0.15·files`, min-max normalized
+  across mapped candidates (activeDays computed live from distinct local commit
+  days). **Unit-verified:** steady broad work (0.88) outranks a single-commit
+  line spike (0.36); all-zero → finite 0 (no divide-by-zero). Only **mapped**
+  employees are eligible; top-5 shortlist.
+- **Citations:** one best-effort LLM call for the whole shortlist, parsed by an
+  index marker (`^\s*(\d+)[).]`); any skipped candidate keeps a deterministic
+  **template** citation, so a partial/failed/absent LLM never leaves a blank.
+  **Unit-verified** (preamble ignored, `1)`/`2.` both parse, missing→template).
+- `generateShortlist` (manager) replaces prior SHORTLISTED for the scope+period
+  (keeps CONFIRMED/DISMISSED), AuditLog. `confirmAward` (manager) → CONFIRMED +
+  siblings→DISMISSED (single winner), AuditLog. `listAwards` (member).
+  `GET /api/analysis/awards`, `POST /api/analysis/awards/shortlist`,
+  `POST /api/analysis/awards/:id/confirm`. All **verified 401 without JWT**.
+- Web: self-loading `AwardsPanel` on the **Analysis** page scoped to the selected
+  project — shortlist cards (rank, score bar, citation, metrics, manager Confirm),
+  a CONFIRMED "Winner" highlight, past-winners list, template/AI note, and the
+  standing "recognition suggestion, not a performance verdict" disclaimer.
+
+**Deferred (documented):** risk-penalty + module-breadth in the award score
+(kept to commits/lines/activeDays/files for MVP transparency); a leaderboard-history
+trend chart UI (endpoint + data shipped, no chart yet); org-wide (`scope="org"`)
+awards UI surface (backend supports it; only project scope is wired in the page).
 
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 

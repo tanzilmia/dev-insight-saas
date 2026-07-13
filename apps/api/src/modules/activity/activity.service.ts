@@ -861,18 +861,21 @@ export async function buildEmployeeLeaderboard(
     }
   }
 
-  // Recent commit messages per person for the point-by-point narrative.
-  const recent = await prisma.commit.findMany({
-    where,
-    orderBy: { committedAt: "desc" },
-    take: 400,
-    select: { username: true, authorEmail: true, authorName: true, message: true }
-  });
-  for (const commit of recent) {
-    const { key } = identityFor(commit.username, commit.authorEmail, commit.authorName);
-    const row = rows.get(key);
-    if (row && row.sampleMessages.length < samplePerEmployee) {
-      row.sampleMessages.push(commit.message.split("\n")[0]!.slice(0, 120));
+  // Recent commit messages per person for the point-by-point narrative. Skipped
+  // entirely when the caller wants no samples (e.g. snapshot writes) to save a query.
+  if (samplePerEmployee > 0) {
+    const recent = await prisma.commit.findMany({
+      where,
+      orderBy: { committedAt: "desc" },
+      take: 400,
+      select: { username: true, authorEmail: true, authorName: true, message: true }
+    });
+    for (const commit of recent) {
+      const { key } = identityFor(commit.username, commit.authorEmail, commit.authorName);
+      const row = rows.get(key);
+      if (row && row.sampleMessages.length < samplePerEmployee) {
+        row.sampleMessages.push(commit.message.split("\n")[0]!.slice(0, 120));
+      }
     }
   }
 
