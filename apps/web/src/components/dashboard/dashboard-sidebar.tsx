@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
+  Award,
   BarChart3,
   CalendarClock,
   FileText,
@@ -29,6 +30,8 @@ export const NAV_ITEMS: {
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   // Analysis compares employees — management-only, hidden from EMPLOYEE roles.
   { href: "/dashboard/analysis", label: "Analysis", icon: BarChart3, managerOnly: true },
+  // Per-employee, evidence-backed appraisal for increment time — management-only.
+  { href: "/dashboard/appraisal", label: "Appraisal", icon: Award, managerOnly: true },
   { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
   { href: "/dashboard/employees", label: "Employees", icon: Users },
   { href: "/dashboard/repositories", label: "Repositories", icon: FolderGit2 },

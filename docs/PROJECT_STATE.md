@@ -1394,6 +1394,53 @@ shipped" initiative clustering). Open polish: Phase 2.5 structured theme panel;
 noise-adjusting the aggregate trend totals; extending the reading-mode toggle to
 the share page.
 
+### Appraisal / Increment view — per-employee, evidence-backed (2026-07-13) ✅
+
+**The product's core purpose made concrete** (see the "why": fair, objective
+analysis at increment time so a good-but-quiet performer isn't overlooked in favour
+of whoever is close to the team lead). A per-employee appraisal view management uses
+at raise time. **Deliberately NOT a single score and NOT an AI verdict** (the user's
+explicit choice) — it returns balanced, hard-to-game signals + **clickable commit
+evidence** + an honest "what data can't see" note, so a human makes the fair call.
+Deterministic (no LLM), manager-gated, noise-free line counts. typecheck + lint +
+build clean; pure helpers unit-verified (8 cases).
+
+- **`modules/analysis/appraisal.service.ts` `getEmployeeAppraisal(actorId, query)`**
+  — manager-gated. Scope = whole org (default) or a project; window = last `months`
+  months (default 6, 1-24) or a custom `from`/`to`. Resolves the employee's mapped
+  usernames; **no linked identity → an honest empty appraisal** (the mapping gap is
+  the finding — that's exactly the invisible person). Single bounded pass (cap 3000
+  commits / 30k files, `truncated` flag) over their commits + files computing:
+  - **Headline:** noise-free lines ("real work"), updates, active days.
+  - **Consistency:** active weeks / total weeks (+%), gap-filled monthly activity —
+    catches the steady contributor vs. a pre-review burst.
+  - **Focus:** plain-language work mix (`humanizeWorkMix`) + humanized areas.
+  - **Ownership:** module breadth + commits in security-critical paths
+    (`isSensitivePath`) + which critical areas.
+  - **Kind of work:** features / bug fixes / refactors / large updates.
+  - **Team comparison:** rank by real work AND by number of updates (two independent
+    rankings so nobody leans on one number), same team + window, via the noise-free
+    `buildEmployeeLeaderboard`.
+  - **Evidence:** the most substantial updates (by real lines, security-critical
+    nudged up) each with a **clickable commit URL** (`commitUrl` from repo
+    remoteUrl/owner/name + sha) — undeniable proof.
+  - **`dataBlindSpots`:** honest notes (counts ≠ difficulty/quality; review,
+    mentoring, planning, incident response aren't in Git; truncation).
+- **`analysis.schemas.ts`** `employeeAppraisalQuerySchema` (custom range needs both
+  from+to); **`GET /api/analysis/appraisal`** on `analysisRouter` (manager, JWT).
+- **Web:** nav item **Appraisal** (`Award`, manager-only), `/dashboard/appraisal` →
+  `components/analysis/appraisal-manager.tsx` — employee + window + scope selectors,
+  a prominent **fairness banner** ("objective evidence to inform a fair decision, not
+  a verdict"), headline StatTiles, a monthly-consistency mini bar chart, focus
+  (BarList + area chips), ownership / kind-of-work / team-standing cards, a
+  **clickable evidence list** (opens the real commit), the "what data can't see"
+  guardrail, a **Print / PDF** button (take it to the review), and a "link their Git
+  identity" nudge. `api.ts` `getEmployeeAppraisal` + `EmployeeAppraisal`/`AppraisalEvidence`
+  types. Loading toggled in event handlers (not effects) per the Next 16 rule.
+- **Deferred (v1 boundary):** an optional LLM "what they shipped" narrative button
+  (reuse the employee report); active-days-based team rank; export beyond print;
+  a per-employee trend across multiple appraisal windows.
+
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
 Goal (from product owner): reports over **any date window** (not just last 90 days) —

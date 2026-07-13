@@ -1024,6 +1024,81 @@ export async function getProjectAnalysis(
   return response.data.analysis;
 }
 
+/** One clickable commit backing an appraisal signal. */
+export type AppraisalEvidence = {
+  sha: string;
+  message: string;
+  committedAt: string;
+  category: string;
+  lines: number;
+  sensitive: boolean;
+  url: string;
+};
+
+/** Per-employee, evidence-backed appraisal (manager-only) for increment time. */
+export type EmployeeAppraisal = {
+  employee: {
+    userId: string;
+    name: string;
+    email: string;
+    usernames: string[];
+    hasGitIdentity: boolean;
+  };
+  period: { from: string; to: string; months: number; days: number };
+  scope: { type: "project"; name: string } | { type: "organization" };
+  hasGitIdentity: boolean;
+  truncated: boolean;
+  headline: {
+    commits: number;
+    effectiveLines: number;
+    rawLines: number;
+    activeDays: number;
+    firstCommitAt: string | null;
+    lastCommitAt: string | null;
+  } | null;
+  consistency: {
+    activeWeeks: number;
+    totalWeeks: number;
+    activeWeekPct: number;
+    monthly: { month: string; commits: number; lines: number }[];
+  };
+  workMix: { text: string; top: { label: string; pct: number }[] };
+  areas: string[];
+  ownership: { sensitiveAreaCommits: number; moduleBreadth: number; criticalAreas: string[] };
+  quality: {
+    features: number;
+    bugFixes: number;
+    refactors: number;
+    largeCommits: number;
+    riskyCommits: number;
+  };
+  teamComparison: {
+    teamSize: number;
+    byRealWork: { rank: number; of: number };
+    byCommits: { rank: number; of: number };
+  } | null;
+  evidence: AppraisalEvidence[];
+  dataBlindSpots: string[];
+};
+
+export async function getEmployeeAppraisal(
+  organizationId: string,
+  userId: string,
+  options: { projectId?: string; months?: number; from?: string; to?: string } = {}
+) {
+  const response = await api.get<{ appraisal: EmployeeAppraisal }>("/api/analysis/appraisal", {
+    params: {
+      organizationId,
+      userId,
+      ...(options.projectId ? { projectId: options.projectId } : {}),
+      ...(options.months ? { months: options.months } : {}),
+      ...(options.from && options.to ? { from: options.from, to: options.to } : {})
+    }
+  });
+
+  return response.data.appraisal;
+}
+
 /** One row of the per-employee commit details table. */
 export type AnalysisCommit = {
   sha: string;

@@ -7,6 +7,7 @@ import {
   awardShortlistSchema,
   awardsQuerySchema,
   digestQuerySchema,
+  employeeAppraisalQuerySchema,
   employeeCommitsQuerySchema,
   leaderboardHistoryQuerySchema,
   projectAnalysisQuerySchema,
@@ -17,6 +18,7 @@ import {
   getProjectAnalysis,
   getProjectBranches
 } from "./analysis.service.js";
+import { getEmployeeAppraisal } from "./appraisal.service.js";
 import { getLeaderboardHistory } from "./leaderboard-snapshots.js";
 import { getDailyDigest } from "./digest.service.js";
 import { confirmAward, generateShortlist, listAwards } from "./awards.service.js";
@@ -52,6 +54,16 @@ analysisRouter.get(
     const commits = await getEmployeeCommits(req.authUser!.id, query);
 
     res.status(200).json({ commits });
+  })
+);
+
+analysisRouter.get(
+  "/appraisal",
+  asyncHandler(async (req, res) => {
+    const query = employeeAppraisalQuerySchema.parse(req.query);
+    const appraisal = await getEmployeeAppraisal(req.authUser!.id, query);
+
+    res.status(200).json({ appraisal });
   })
 );
 

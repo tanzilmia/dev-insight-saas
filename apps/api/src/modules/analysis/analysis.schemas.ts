@@ -25,6 +25,27 @@ export const employeeCommitsQuerySchema = projectAnalysisQuerySchema.extend({
 
 export type EmployeeCommitsQuery = z.infer<typeof employeeCommitsQuerySchema>;
 
+/**
+ * Query for the per-employee appraisal (manager-only). Scope defaults to the
+ * whole organization; pass `projectId` to scope to one project. Window is the
+ * last `months` months unless an explicit custom `from`/`to` is given.
+ */
+export const employeeAppraisalQuerySchema = z
+  .object({
+    organizationId: z.string().min(1),
+    userId: z.string().min(1),
+    projectId: z.string().min(1).optional(),
+    months: z.coerce.number().int().min(1).max(24).default(6),
+    from: isoDate.optional(),
+    to: isoDate.optional()
+  })
+  .refine((value) => (value.from ? Boolean(value.to) : !value.to), {
+    message: "Custom range needs both from and to",
+    path: ["to"]
+  });
+
+export type EmployeeAppraisalQuery = z.infer<typeof employeeAppraisalQuerySchema>;
+
 /** Query for the project's distinct branch names (the branch selector). */
 export const projectBranchesQuerySchema = z.object({
   organizationId: z.string().min(1),
