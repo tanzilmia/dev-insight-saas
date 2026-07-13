@@ -655,6 +655,8 @@ export type GenerateReportInput = {
   period: ReportPeriod;
   customRange?: { from: string; to: string };
   customPrompt?: string;
+  /** Restrict the report to commits reachable from this branch. */
+  branch?: string;
 };
 
 export type EmployeeLeaderboardRow = {

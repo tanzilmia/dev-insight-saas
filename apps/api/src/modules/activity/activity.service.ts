@@ -669,6 +669,8 @@ export type ActivityQuery = {
   repositoryId?: string;
   projectId?: string;
   usernames?: string[];
+  /** Restrict to commits reachable from this branch (via CommitBranch). */
+  branch?: string;
   since: Date;
   until: Date;
 };
@@ -681,7 +683,8 @@ function buildCommitWhere(input: ActivityQuery): Prisma.CommitWhereInput {
     },
     committedAt: { gte: input.since, lte: input.until },
     ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
-    ...(input.usernames?.length ? { username: { in: input.usernames } } : {})
+    ...(input.usernames?.length ? { username: { in: input.usernames } } : {}),
+    ...(input.branch ? { branches: { some: { branch: { name: input.branch } } } } : {})
   };
 }
 

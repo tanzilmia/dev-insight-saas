@@ -1,20 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Activity,
   AlertTriangle,
   FileDiff,
+  FileText,
   FolderGit2,
   Loader2,
   Minus,
   Plus,
-  Users
+  Users,
+  X
 } from "lucide-react";
 
 import {
+  type GeneratedReport,
   type StatPeriod,
   type StatisticsOverview,
+  generateReport,
   getApiErrorMessage,
   getStatisticsOverview
 } from "@/lib/api";
@@ -34,6 +41,8 @@ const PERIODS: { value: StatPeriod; label: string }[] = [
   { value: "last_month", label: "Last month" }
 ];
 
+const markdownPlugins = [remarkGfm];
+
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="glass rounded-xl p-5">
@@ -51,6 +60,31 @@ export function StatisticsDashboard() {
   const [overview, setOverview] = useState<StatisticsOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // One-click "Today's report" — an org-wide team report for the current day.
+  const [todayReport, setTodayReport] = useState<GeneratedReport | null>(null);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  async function handleTodayReport() {
+    if (!organizationId || reportBusy) {
+      return;
+    }
+    setReportBusy(true);
+    setReportError(null);
+    try {
+      const report = await generateReport({
+        organizationId,
+        reportType: "team",
+        period: "today"
+      });
+      setTodayReport(report);
+    } catch (caught) {
+      setReportError(getApiErrorMessage(caught));
+    } finally {
+      setReportBusy(false);
+    }
+  }
 
   // State is set only inside .then/.catch/.finally callbacks (deferred), so this
   // is safe to call directly from an effect (react-hooks/set-state-in-effect).
@@ -103,6 +137,19 @@ export function StatisticsDashboard() {
             {loading && overview ? (
               <Loader2 size={16} className="animate-spin text-(--muted)" aria-label="Loading" />
             ) : null}
+            <button
+              type="button"
+              onClick={handleTodayReport}
+              disabled={reportBusy || !organizationId}
+              className="btn-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-60"
+            >
+              {reportBusy ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <FileText size={15} />
+              )}
+              {reportBusy ? "Generating…" : "Today's report"}
+            </button>
             <select
               value={period}
               onChange={(event) => {
@@ -120,6 +167,58 @@ export function StatisticsDashboard() {
             </select>
           </div>
         </div>
+
+        {reportError ? (
+          <div className="glass rounded-xl p-5 text-sm font-medium text-red-600 dark:text-red-400">
+            {reportError}
+          </div>
+        ) : null}
+
+        {todayReport ? (
+          <div className="glass rounded-xl p-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-bold text-(--text)">{todayReport.title}</h2>
+                {todayReport.cached ? (
+                  <span className="rounded-full bg-(--surface-soft) px-2.5 py-0.5 text-[11px] font-bold text-(--muted)">
+                    Cached
+                  </span>
+                ) : null}
+                {todayReport.status === "PARTIAL" ? (
+                  <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                    Template (no AI configured)
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/dashboard/reports?report=${todayReport.reportId}`}
+                  className="text-xs font-bold text-(--accent) hover:underline"
+                >
+                  View in Reports →
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setTodayReport(null)}
+                  aria-label="Dismiss report"
+                  className="grid h-6 w-6 place-items-center rounded-full text-(--muted) transition hover:bg-(--surface-soft) hover:text-(--text)"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
+            {todayReport.warnings?.length ? (
+              <div className="mb-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                {todayReport.warnings.map((warning, index) => (
+                  <p key={index}>Heads up: {warning}</p>
+                ))}
+              </div>
+            ) : null}
+            <div className="report-md glass-soft max-h-128 overflow-y-auto rounded-lg px-4 py-3 text-sm">
+              <ReactMarkdown remarkPlugins={markdownPlugins}>{todayReport.markdown}</ReactMarkdown>
+            </div>
+          </div>
+        ) : null}
 
         {error ? (
           <div className="glass rounded-xl p-5 text-sm font-medium text-red-600 dark:text-red-400">

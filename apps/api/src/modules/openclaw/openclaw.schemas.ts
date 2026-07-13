@@ -35,7 +35,10 @@ export const generateReportSchema = z
     employeeIds: z.array(z.string().min(1)).max(50).optional(),
     period: periodSchema.default("last_7_days"),
     customRange: z.object({ from: isoDate, to: isoDate }).optional(),
-    customPrompt: z.string().trim().max(2000).optional()
+    customPrompt: z.string().trim().max(2000).optional(),
+    // Optional branch filter: the report reads only commits reachable from this
+    // branch (via CommitBranch). Omitted = across all branches (the default).
+    branch: z.string().trim().min(1).max(255).optional()
   })
   .superRefine((value, ctx) => {
     if (value.period === "custom" && !value.customRange) {
@@ -62,13 +65,13 @@ export const generateReportSchema = z
       });
     }
 
-    if (
-      (value.reportType === "employee" || value.reportType === "team") &&
-      !value.employeeIds?.length
-    ) {
+    // An employee report must name at least one employee. A team report may
+    // omit employeeIds — that means the entire organization (all repos, no
+    // per-employee filter), which powers the one-click "team daily report".
+    if (value.reportType === "employee" && !value.employeeIds?.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "employeeIds is required for an employee or team report",
+        message: "employeeIds is required for an employee report",
         path: ["employeeIds"]
       });
     }

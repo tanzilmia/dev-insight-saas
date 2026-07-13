@@ -85,6 +85,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     repositoryId: repository?.id,
     projectId: project?.id,
     usernames,
+    branch: input.branch,
     since: range.from,
     until: range.to
   };
@@ -92,12 +93,23 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
   const activity = await fetchGitActivity(activityQuery);
   const analysis = await analyzeActivity(activityQuery);
   const leaderboard = await buildEmployeeLeaderboard(activityQuery);
-  const dataFingerprint = computeFingerprint(activity);
+  // Fold the branch into the fingerprint so a branch-filtered report never
+  // reuses (or is reused by) the all-branches report of the same scope/period.
+  const dataFingerprint = input.branch
+    ? `b:${input.branch}|${computeFingerprint(activity)}`
+    : computeFingerprint(activity);
 
-  const targetLabel =
+  const baseTargetLabel =
     repository?.fullName ??
     project?.name ??
-    (employees.length === 1 ? employees[0]!.name : `${employees.length} employees`);
+    (employees.length === 1
+      ? employees[0]!.name
+      : employees.length === 0
+        ? "Entire team"
+        : `${employees.length} employees`);
+  const targetLabel = input.branch
+    ? `${baseTargetLabel} · ${input.branch}`
+    : baseTargetLabel;
 
   const statistics = {
     commits: activity.commits,
@@ -167,6 +179,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     project,
     repository,
     employees,
+    branch: input.branch,
     activity,
     sampleCommits: commits,
     analysis,
@@ -229,6 +242,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
         period: input.period,
         repositoryId: input.repositoryId ?? null,
         projectId: input.projectId ?? null,
+        branch: input.branch ?? null,
         employeeCount: employees.length,
         generatedBy: status === "GENERATED" ? "llm" : "template",
         reportId: savedReport.id,

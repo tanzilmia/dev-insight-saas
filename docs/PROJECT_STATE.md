@@ -5,7 +5,7 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-10.
+> Last updated: 2026-07-13.
 
 ---
 
@@ -996,6 +996,78 @@ CONTROL assertion shows the ledger path missing the commit before the fixes):
   compare, commit details, branch filter, AI report) locked to the project.
 - Projects page cards gained a "Details →" link (sibling of the card button —
   anchors must not nest inside buttons).
+
+### One-click "Today's report" on the Overview dashboard (2026-07-13) ✅
+
+Zero-config daily digest: a **Today's report** button in the Overview
+(`components/statistics/statistics-dashboard.tsx`) header generates an org-wide
+report for the current day in one click — no form.
+- **Backend: `team` report may now omit `employeeIds` = whole organization.**
+  `generateReportSchema` (`openclaw.schemas.ts`) previously required
+  `employeeIds` for both `employee` and `team`; now only `employee` requires it.
+  A `team` report with no `employeeIds` runs with no per-employee username
+  filter (all repos, all commits — matching what the Statistics dashboard shows),
+  and `targetLabel`/`deriveTarget` render **"Entire team"** for the 0-employee
+  case (`openclaw.service.ts`, `openclaw.tools.ts`). Everything downstream
+  already handled `usernames: undefined` (org-wide) — only the guard + label
+  changed. Verified via `generateReportSchema.safeParse`: team-without-ids
+  accepted, employee-without-ids still rejected.
+- **Frontend:** the button calls `generateReport({ reportType: "team",
+  period: "today" })` and renders the result inline (reuses the analysis-manager
+  AI-report panel pattern: title, Cached/Template badges, warnings banner,
+  `react-markdown` `.report-md`, **View in Reports →** deep-link, dismiss). Uses
+  `orchestrateReport` so auto-collect + fingerprint cache + template fallback all
+  apply. Available to any org member (report generation is org-visible, gated by
+  `requireOrganizationMember`, not manager-only). typecheck + lint clean both
+  workspaces.
+### Branch-aware report generation (2026-07-13) ✅ — Analysis Phase 4a
+
+A report can now be scoped to a single branch. Previously reports read across
+ALL branches (deduped via `CommitBranch`), so the Analysis page's AI-report
+button was **disabled** whenever a branch filter was active; now it works with
+the branch applied.
+- **One chokepoint:** every report aggregation (`fetchGitActivity`/
+  `aggregateActivity`, `analyzeActivity`, `buildEmployeeLeaderboard`,
+  `sampleCommits`) routes through `buildCommitWhere` (`activity.service.ts`).
+  `ActivityQuery` gained optional `branch`; `buildCommitWhere` adds the same
+  `{ branches: { some: { branch: { name } } } }` clause the analysis module's
+  `branchFilter` already uses — so all four became branch-aware in one edit. No
+  migration (CommitBranch already existed).
+- **Threaded through** `generateReportSchema` (optional `branch`, ≤255 chars) →
+  `orchestrateReport` `activityQuery` + `ReportContext.branch` (so the report H1
+  reads `… (develop)` via `deriveTarget`) + AuditLog metadata.
+- **Cache-safe:** `dataFingerprint` is prefixed `b:{branch}|…` and `targetLabel`
+  is suffixed ` · {branch}` when a branch is set, so a branch report never reuses
+  (or is reused by) the all-branches report of the same scope/period. Verified:
+  all-branches / main / develop yield distinct cache keys; same branch+data → hit.
+- **Collection unaffected:** auto-collect (`ensureActivityCollected`) still fetches
+  ALL branches; branch is a read-time filter only. The branch selector shows only
+  branches already in the DB, so a filtered report is never empty for that reason.
+- **Frontend:** `GenerateReportInput.branch` (web `api.ts`); the Analysis AI-report
+  button is re-enabled with a branch selected and passes `branch` through
+  (`analysis-manager.tsx`). typecheck + lint clean both workspaces.
+- Note: the chat/MCP path (`devinsight_generate_report`) doesn't expose `branch`
+  yet — dashboard-only for now; adding it there is a small follow-up.
+
+### Analysis Phase 3–4 roadmap (agreed with product owner, 2026-07-13)
+
+Recommended build order (dependency-driven): **4a done** ✅ → 3a → 3b → 4b.
+- **3a — Leaderboard snapshot history** (foundation for deltas + awards). New
+  models `LeaderboardSnapshot` + `LeaderboardSnapshotRow` (org/project scope,
+  DAILY/WEEKLY/MONTHLY, `periodKey`, unique per scope+granularity+periodKey);
+  a once-a-day writer on the existing scheduler tick populating rows from
+  `buildEmployeeLeaderboard`; `GET /api/analysis/leaderboard-history`. (migration)
+- **3b — Daily digest.** A `digest` object: yesterday's headline, top mover,
+  biggest rank riser/faller vs the prior period (from 3a), new risk signals,
+  active-day streaks; a "Daily digest" card on Overview/Analysis. Optionally
+  wired to channel delivery (14c). (mostly read + UI once 3a exists)
+- **4b — Employee-of-the-month.** Deterministic balanced score over the monthly
+  snapshot (commits + noise-filtered lines + active days + low risk + module
+  breadth) → top-N shortlist → LLM citation per candidate (grounded, template
+  fallback). New model `EmployeeAward` (SHORTLISTED→CONFIRMED, manager confirms);
+  `POST /awards/shortlist`, `POST /awards/:id/confirm`, `GET /awards`. Framed as a
+  recognition *suggestion* (keeps the "activity signals, not verdicts"
+  disclaimer). (migration + scoring + LLM + confirm UI)
 
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 

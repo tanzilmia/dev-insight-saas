@@ -225,6 +225,7 @@ export async function fetchGitActivity(input: {
   repositoryId?: string;
   projectId?: string;
   usernames?: string[];
+  branch?: string;
   since: Date;
   until: Date;
 }): Promise<GitActivity> {
@@ -248,6 +249,8 @@ export type ReportContext = {
   project?: { id: string; name: string };
   repository?: { id: string; fullName: string };
   employees: ResolvedEmployee[];
+  /** Optional branch filter — reflected in the report title when set. */
+  branch?: string;
   activity: GitActivity;
   sampleCommits: ReportCommit[];
   analysis?: ActivityAnalysis;
@@ -262,13 +265,15 @@ function formatDate(date: Date) {
 }
 
 function deriveTarget(context: ReportContext): string {
-  return (
+  const base =
     context.repository?.fullName ??
     context.project?.name ??
     (context.employees.length === 1
       ? context.employees[0]!.name
-      : `${context.employees.length} employees`)
-  );
+      : context.employees.length === 0
+        ? "Entire team"
+        : `${context.employees.length} employees`);
+  return context.branch ? `${base} (${context.branch})` : base;
 }
 
 /** Deterministic title used in the report header regardless of generator. */

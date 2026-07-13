@@ -235,7 +235,8 @@ export function AnalysisManager({
         reportType: "project",
         projectId,
         period,
-        ...(period === "custom" ? { customRange: { from: customFrom, to: customTo } } : {})
+        ...(period === "custom" ? { customRange: { from: customFrom, to: customTo } } : {}),
+        ...(branch ? { branch } : {})
       });
       setAiReport(report);
     } catch (caught) {
@@ -350,10 +351,10 @@ export function AnalysisManager({
             <button
               type="button"
               onClick={handleAiReport}
-              disabled={generating || !rangeReady || !projectId || branch !== ""}
+              disabled={generating || !rangeReady || !projectId}
               title={
                 branch
-                  ? "AI report covers all branches — switch back to “All branches” first"
+                  ? `Ask the AI to write a narrative report for this window on “${branch}”`
                   : "Ask the AI to write a narrative report for this exact window"
               }
               className="btn-gradient inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-bold"
