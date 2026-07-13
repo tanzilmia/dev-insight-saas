@@ -7,6 +7,7 @@ import { errorHandler } from "./common/middleware/error-handler.js";
 import { activityRouter } from "./modules/activity/activity.controller.js";
 import { analysisRouter } from "./modules/analysis/analysis.controller.js";
 import { authRouter } from "./modules/auth/auth.controller.js";
+import { channelsRouter } from "./modules/channels/channels.controller.js";
 import { contributorsRouter } from "./modules/contributors/contributors.controller.js";
 import { credentialsRouter } from "./modules/credentials/credentials.controller.js";
 import { employeesRouter } from "./modules/employees/employees.controller.js";
@@ -57,6 +58,7 @@ export function createApp() {
   app.use("/api/statistics", statisticsRouter);
   app.use("/api/analysis", analysisRouter);
   app.use("/api/schedules", schedulesRouter);
+  app.use("/api/channels", channelsRouter);
   app.use(errorHandler);
 
   return app;

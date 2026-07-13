@@ -12,6 +12,7 @@ import {
   History,
   Link2,
   Loader2,
+  Send,
   Share2,
   Sparkles,
   Trash2
@@ -28,15 +29,18 @@ import {
   type ReportStatistics,
   type ReportSummary,
   type ReportType,
+  type NotificationChannel,
   type TrackedRepository,
   deleteReport,
   generateReport,
   getApiErrorMessage,
   getReport,
+  listChannels,
   listEmployees,
   listProjects,
   listReports,
   listRepositories,
+  sendReportToChannel,
   shareReport,
   unshareReport
 } from "@/lib/api";
@@ -141,6 +145,10 @@ export function ReportsManager() {
   const [shareBusy, setShareBusy] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [origin, setOrigin] = useState("");
+  const [channels, setChannels] = useState<NotificationChannel[]>([]);
+  const [sendChannelId, setSendChannelId] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendNotice, setSendNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!organizationId) {
@@ -162,6 +170,12 @@ export function ReportsManager() {
     listEmployees(organizationId)
       .then(setEmployees)
       .catch(() => setEmployees([]));
+    listChannels(organizationId)
+      .then((list) => {
+        setChannels(list);
+        setSendChannelId((current) => current || list.find((c) => c.enabled)?.id || "");
+      })
+      .catch(() => setChannels([]));
   }, [organizationId]);
 
   const refreshHistory = useCallback(() => {
@@ -337,6 +351,23 @@ export function ReportsManager() {
       setDetailError(getApiErrorMessage(caught));
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleSendToChannel(reportId: string) {
+    if (!sendChannelId) {
+      return;
+    }
+    setSending(true);
+    setSendNotice(null);
+    setDetailError(null);
+    try {
+      const result = await sendReportToChannel(sendChannelId, reportId);
+      setSendNotice(`Sent to Telegram (${result.messages} message${result.messages === 1 ? "" : "s"}).`);
+    } catch (caught) {
+      setDetailError(getApiErrorMessage(caught));
+    } finally {
+      setSending(false);
     }
   }
 
@@ -758,6 +789,39 @@ export function ReportsManager() {
                   Delete
                 </button>
               </div>
+
+              {channels.some((channel) => channel.enabled) ? (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-(--border) bg-(--surface-soft) px-3 py-2">
+                  <Send size={13} className="shrink-0 text-(--muted)" />
+                  <select
+                    value={sendChannelId}
+                    onChange={(event) => setSendChannelId(event.target.value)}
+                    aria-label="Telegram channel"
+                    className="min-w-0 flex-1 bg-transparent text-xs font-medium text-(--text) outline-none"
+                  >
+                    {channels
+                      .filter((channel) => channel.enabled)
+                      .map((channel) => (
+                        <option key={channel.id} value={channel.id}>
+                          {channel.label}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleSendToChannel(renderedReport.reportId)}
+                    disabled={sending || !sendChannelId}
+                    className="shrink-0 text-xs font-bold text-(--accent) hover:underline disabled:opacity-50"
+                  >
+                    {sending ? "Sending…" : "Send to Telegram"}
+                  </button>
+                  {sendNotice ? (
+                    <span className="w-full text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                      {sendNotice}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
 
               {shareToken ? (
                 <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-(--border) bg-(--surface-soft) px-3 py-2">

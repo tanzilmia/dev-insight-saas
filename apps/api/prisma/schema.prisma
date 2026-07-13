@@ -73,6 +73,10 @@ enum AwardStatus {
   DISMISSED
 }
 
+enum ChannelType {
+  TELEGRAM
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -115,6 +119,7 @@ model Organization {
   collectionJobs        CollectionJob[]
   leaderboardSnapshots  LeaderboardSnapshot[]
   employeeAwards        EmployeeAward[]
+  notificationChannels  NotificationChannel[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
 }
@@ -518,6 +523,9 @@ model ReportSchedule {
   runMinute      Int             @default(0)
   timeZone       String?
   customPrompt   String?
+  // Optional delivery target (Phase 14c). No FK — a snapshot id, tolerant of a
+  // deleted channel (delivery is skipped if it no longer exists).
+  channelId      String?
   enabled        Boolean         @default(true)
   nextRunAt      DateTime
   lastRunAt      DateTime?
@@ -612,6 +620,31 @@ model EmployeeAward {
 
   @@index([organizationId, scope, periodKey])
   @@index([organizationId, status])
+}
+
+// Phase 14c — an admin-managed delivery destination (e.g. a Telegram group).
+// Everything is stored here (not in env): the bot token is AES-256-GCM encrypted
+// at rest (token-cipher, like a git PAT) and never returned to the frontend.
+model NotificationChannel {
+  id                 String      @id @default(cuid())
+  organizationId     String
+  type               ChannelType @default(TELEGRAM)
+  label              String
+  encryptedToken     String
+  tokenLast4         String?
+  chatId             String
+  chatTitle          String?
+  enabled            Boolean     @default(true)
+  createdById        String?
+  lastDeliveryAt     DateTime?
+  lastDeliveryStatus String?
+  lastDeliveryError  String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }
 
 model RequestLog {

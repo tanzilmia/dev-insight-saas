@@ -7,6 +7,7 @@ import { CalendarClock, Loader2, Pause, Play, Plus, Trash2 } from "lucide-react"
 import {
   type CreateScheduleInput,
   type Employee,
+  type NotificationChannel,
   type Project,
   type ReportSchedule,
   type ReportType,
@@ -16,6 +17,7 @@ import {
   createSchedule,
   deleteSchedule,
   getApiErrorMessage,
+  listChannels,
   listEmployees,
   listProjects,
   listRepositories,
@@ -87,6 +89,8 @@ export function SchedulesManager() {
   const [cadence, setCadence] = useState<ScheduleCadence>("WEEKLY");
   const [timeOfDay, setTimeOfDay] = useState("09:00");
   const [timeZone, setTimeZone] = useState("");
+  const [channels, setChannels] = useState<NotificationChannel[]>([]);
+  const [channelId, setChannelId] = useState("");
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -136,6 +140,9 @@ export function SchedulesManager() {
     listEmployees(organizationId)
       .then(setEmployees)
       .catch(() => setEmployees([]));
+    listChannels(organizationId)
+      .then(setChannels)
+      .catch(() => setChannels([]));
   }, [organizationId]);
 
   const needsEmployees = reportType === "employee" || reportType === "team";
@@ -176,6 +183,7 @@ export function SchedulesManager() {
       runHour: Number.isFinite(runHour) ? runHour : 9,
       runMinute: Number.isFinite(runMinute) ? runMinute : 0,
       ...(timeZone ? { timeZone } : {}),
+      ...(channelId ? { channelId } : {}),
       ...(reportType === "repository" ? { repositoryId } : {}),
       ...(reportType === "project" ? { projectId } : {}),
       ...(needsEmployees ? { employeeIds: [...selectedEmployeeIds] } : {})
@@ -405,6 +413,29 @@ export function SchedulesManager() {
                 />
                 <span className="text-xs font-normal text-(--muted)">
                   Fires around this time{timeZone ? ` · ${timeZone}` : ""}
+                </span>
+              </label>
+
+              <label className="grid gap-1.5 text-sm font-semibold text-(--text)">
+                Deliver to
+                <select
+                  value={channelId}
+                  onChange={(event) => setChannelId(event.target.value)}
+                  className={fieldClass}
+                >
+                  <option value="">Dashboard only (no channel)</option>
+                  {channels
+                    .filter((channel) => channel.enabled)
+                    .map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.label} ({channel.type})
+                      </option>
+                    ))}
+                </select>
+                <span className="text-xs font-normal text-(--muted)">
+                  {channels.length
+                    ? "Send each run to a Telegram channel."
+                    : "Add a Telegram channel on the Channels page to deliver here."}
                 </span>
               </label>
 

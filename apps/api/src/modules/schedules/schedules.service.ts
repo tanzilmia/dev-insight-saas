@@ -14,6 +14,7 @@ import {
   resolveRepository
 } from "../openclaw/openclaw.tools.js";
 import type { GenerateReportInput, Period, ReportType } from "../openclaw/openclaw.schemas.js";
+import { deliverReportForSchedule } from "../channels/channels.service.js";
 import type { CreateScheduleInput, UpdateScheduleInput } from "./schedules.schemas.js";
 
 // Bound how many due schedules a single scheduler tick runs.
@@ -141,6 +142,7 @@ function serialize(schedule: ReportSchedule) {
     runMinute: schedule.runMinute,
     timeZone: schedule.timeZone,
     customPrompt: schedule.customPrompt,
+    channelId: schedule.channelId,
     enabled: schedule.enabled,
     nextRunAt: schedule.nextRunAt,
     lastRunAt: schedule.lastRunAt,
@@ -149,6 +151,41 @@ function serialize(schedule: ReportSchedule) {
     lastError: schedule.lastError,
     createdAt: schedule.createdAt
   };
+}
+
+/** Ensures a delivery channel exists and belongs to this org (404 otherwise). */
+async function requireChannelInOrg(organizationId: string, channelId: string) {
+  const channel = await prisma.notificationChannel.findUnique({
+    where: { id: channelId },
+    select: { organizationId: true }
+  });
+  if (!channel || channel.organizationId !== organizationId) {
+    throw new AppError(404, "Delivery channel was not found", "CHANNEL_NOT_FOUND");
+  }
+}
+
+type ExecutedReport = Awaited<ReturnType<typeof orchestrateReport>>;
+
+/**
+ * Delivers a just-generated report to the schedule's channel, if one is set.
+ * Resilient: never throws — a delivery failure must not fail the report run.
+ * Returns a short status string for logging, or null when no channel is set.
+ */
+async function deliverScheduleReport(
+  schedule: ReportSchedule,
+  report: ExecutedReport
+): Promise<string | null> {
+  if (!schedule.channelId) {
+    return null;
+  }
+  const result = await deliverReportForSchedule(schedule.organizationId, schedule.channelId, {
+    title: report.title,
+    markdown: report.markdown,
+    periodStart: report.period.from,
+    periodEnd: report.period.to,
+    statistics: report.statistics
+  });
+  return result.ok ? "delivered" : `delivery failed: ${result.error ?? "unknown"}`;
 }
 
 export async function createSchedule(actorId: string, input: CreateScheduleInput) {
@@ -165,6 +202,9 @@ export async function createSchedule(actorId: string, input: CreateScheduleInput
   }
   if (input.employeeIds?.length) {
     await resolveEmployees(input.organizationId, input.employeeIds);
+  }
+  if (input.channelId) {
+    await requireChannelInOrg(input.organizationId, input.channelId);
   }
 
   const now = new Date();
@@ -183,6 +223,7 @@ export async function createSchedule(actorId: string, input: CreateScheduleInput
       runMinute: input.runMinute,
       timeZone: input.timeZone ?? null,
       customPrompt: input.customPrompt ?? null,
+      channelId: input.channelId ?? null,
       nextRunAt: computeNextRun(now, {
         cadence: input.cadence,
         runHour: input.runHour,
@@ -219,6 +260,10 @@ export async function updateSchedule(actorId: string, id: string, input: UpdateS
   const existing = await loadOwnedSchedule(actorId, id);
   const now = new Date();
 
+  if (input.channelId) {
+    await requireChannelInOrg(existing.organizationId, input.channelId);
+  }
+
   // Re-anchor the next run when the cadence/time/zone changes, or when
   // re-enabling a schedule whose nextRunAt is already in the past — otherwise a
   // long-paused schedule fires on the very next tick.
@@ -250,6 +295,7 @@ export async function updateSchedule(actorId: string, id: string, input: UpdateS
       runMinute: input.runMinute ?? undefined,
       timeZone: input.timeZone === undefined ? undefined : input.timeZone,
       customPrompt: input.customPrompt === undefined ? undefined : input.customPrompt,
+      channelId: input.channelId === undefined ? undefined : input.channelId,
       enabled: input.enabled ?? undefined,
       nextRunAt
     }
@@ -289,11 +335,12 @@ export async function runScheduleNow(actorId: string, id: string) {
 
   try {
     const report = await executeSchedule(schedule);
+    const delivery = await deliverScheduleReport(schedule, report);
     await prisma.reportSchedule.update({
       where: { id },
       data: { lastRunAt: now, lastReportId: report.reportId, lastStatus: "ok", lastError: null }
     });
-    return { reportId: report.reportId, status: "ok" as const };
+    return { reportId: report.reportId, status: "ok" as const, delivery };
   } catch (error) {
     const message = (error as Error).message.slice(0, 500);
     await prisma.reportSchedule.update({
@@ -337,6 +384,10 @@ export async function runDueSchedules(now: Date = new Date()) {
 
     try {
       const report = await executeSchedule(schedule);
+      const delivery = await deliverScheduleReport(schedule, report);
+      if (delivery && delivery !== "delivered") {
+        console.warn(`[scheduler] schedule ${schedule.id} ${delivery}`);
+      }
       await prisma.reportSchedule.update({
         where: { id: schedule.id },
         data: { lastRunAt: now, lastReportId: report.reportId, lastStatus: "ok", lastError: null }

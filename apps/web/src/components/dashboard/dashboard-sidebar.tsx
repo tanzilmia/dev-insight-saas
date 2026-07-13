@@ -12,6 +12,7 @@ import {
   GitBranch,
   LayoutDashboard,
   LogOut,
+  Send,
   UserCheck,
   Users,
   X
@@ -34,6 +35,8 @@ export const NAV_ITEMS: {
   { href: "/dashboard/contributors", label: "Contributors", icon: UserCheck },
   { href: "/dashboard/reports", label: "Reports", icon: FileText },
   { href: "/dashboard/schedules", label: "Schedules", icon: CalendarClock },
+  // Delivery channels (Telegram) — manager-managed, hidden from EMPLOYEE roles.
+  { href: "/dashboard/channels", label: "Channels", icon: Send, managerOnly: true },
   { href: "/dashboard/git", label: "Git", icon: GitBranch }
 ];
 

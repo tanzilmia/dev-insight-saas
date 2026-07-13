@@ -1185,6 +1185,80 @@ export async function confirmAward(awardId: string) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Notification channels — Telegram delivery (Phase 14c)              */
+/* ------------------------------------------------------------------ */
+
+export type ChannelType = "TELEGRAM";
+
+export type NotificationChannel = {
+  id: string;
+  type: ChannelType;
+  label: string;
+  tokenLast4: string | null;
+  chatId: string;
+  chatTitle: string | null;
+  enabled: boolean;
+  lastDeliveryAt: string | null;
+  lastDeliveryStatus: string | null;
+  lastDeliveryError: string | null;
+  createdAt: string;
+};
+
+export type DetectedChat = { id: string; type: string; title: string };
+
+export async function listChannels(organizationId: string) {
+  const response = await api.get<{ channels: NotificationChannel[] }>("/api/channels", {
+    params: { organizationId }
+  });
+  return response.data.channels;
+}
+
+/** Detect the chats a bot can currently see, from just its token (pre-save). */
+export async function detectChats(organizationId: string, token: string) {
+  const response = await api.post<{ chats: DetectedChat[] }>("/api/channels/detect", {
+    organizationId,
+    token
+  });
+  return response.data.chats;
+}
+
+export async function createChannel(input: {
+  organizationId: string;
+  label: string;
+  token: string;
+  chatId: string;
+  chatTitle?: string;
+}) {
+  const response = await api.post<{ channel: NotificationChannel }>("/api/channels", input);
+  return response.data.channel;
+}
+
+export async function updateChannel(
+  id: string,
+  patch: { label?: string; token?: string; chatId?: string; chatTitle?: string | null; enabled?: boolean }
+) {
+  const response = await api.patch<{ channel: NotificationChannel }>(`/api/channels/${id}`, patch);
+  return response.data.channel;
+}
+
+export async function deleteChannel(id: string) {
+  await api.delete(`/api/channels/${id}`);
+}
+
+export async function testChannel(id: string) {
+  const response = await api.post<{ ok: boolean }>(`/api/channels/${id}/test`, {});
+  return response.data;
+}
+
+export async function sendReportToChannel(channelId: string, reportId: string) {
+  const response = await api.post<{ ok: boolean; messages: number }>("/api/channels/send-report", {
+    channelId,
+    reportId
+  });
+  return response.data;
+}
+
+/* ------------------------------------------------------------------ */
 /* Scheduled reports (Phase 14a)                                      */
 /* ------------------------------------------------------------------ */
 
@@ -1203,6 +1277,7 @@ export type ReportSchedule = {
   runMinute: number;
   timeZone: string | null;
   customPrompt: string | null;
+  channelId: string | null;
   enabled: boolean;
   nextRunAt: string;
   lastRunAt: string | null;
@@ -1225,6 +1300,7 @@ export type CreateScheduleInput = {
   runMinute?: number;
   timeZone?: string;
   customPrompt?: string;
+  channelId?: string | null;
 };
 
 export async function listSchedules(organizationId: string) {
@@ -1247,6 +1323,7 @@ export async function updateSchedule(
     cadence?: ScheduleCadence;
     enabled?: boolean;
     customPrompt?: string | null;
+    channelId?: string | null;
   }
 ) {
   const response = await api.patch<{ schedule: ReportSchedule }>(`/api/schedules/${id}`, patch);

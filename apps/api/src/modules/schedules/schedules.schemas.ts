@@ -46,7 +46,9 @@ export const createScheduleSchema = z
     runHour: z.number().int().min(0).max(23).default(9),
     runMinute: z.number().int().min(0).max(59).default(0),
     timeZone: z.string().trim().min(1).max(64).optional(),
-    customPrompt: z.string().trim().max(2000).optional()
+    customPrompt: z.string().trim().max(2000).optional(),
+    // Optional delivery target (Phase 14c) — a NotificationChannel id.
+    channelId: z.string().min(1).nullable().optional()
   })
   .superRefine(refineTarget);
 
@@ -58,6 +60,7 @@ export const updateScheduleSchema = z.object({
   runMinute: z.number().int().min(0).max(59).optional(),
   timeZone: z.string().trim().min(1).max(64).optional(),
   customPrompt: z.string().trim().max(2000).nullable().optional(),
+  channelId: z.string().min(1).nullable().optional(),
   enabled: z.boolean().optional()
 });
 

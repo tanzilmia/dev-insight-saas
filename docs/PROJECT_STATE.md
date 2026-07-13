@@ -1112,6 +1112,59 @@ Web: self-loading `DailyDigestCard` on the **Overview** (`statistics-dashboard.t
 trend chart UI (endpoint + data shipped, no chart yet); org-wide (`scope="org"`)
 awards UI surface (backend supports it; only project scope is wired in the page).
 
+### 14c — Telegram report delivery (2026-07-13) ✅
+
+Scheduled (and manual) reports now deliver to Telegram. **Product decision:
+everything is admin-panel managed — nothing in `.env`.** The bot token is stored
+**AES-256-GCM encrypted** (token-cipher, like a git PAT), never returned to the
+frontend or logged. Reports are sent as **clean inline text** (no share link),
+auto-split to Telegram's 4096-char limit. **Verified live end-to-end against a
+real bot + group** (message with heading/table/bullets landed correctly).
+
+- **Model `NotificationChannel`** (migration `20260713072718_notification_channels`):
+  org-scoped `{ type (ChannelType enum: TELEGRAM), label, encryptedToken,
+  tokenLast4, chatId, chatTitle, enabled, lastDelivery{At,Status,Error} }`.
+  `ReportSchedule.channelId String?` (no FK — tolerant of a deleted channel;
+  delivery skipped if it no longer exists).
+- **Provider abstraction** (`modules/channels/`, per the mandatory-abstraction
+  rule): `ChannelProvider` interface + `TelegramProvider` (Bot API via global
+  `fetch`; `detectChats` = getUpdates, `sendMessage` = plain text, no parse_mode
+  so it can never fail on escaping). `channel-registry.ts` resolves by type —
+  Discord/Slack later are drop-in. Telegram errors mapped to clean AppErrors
+  (401→TELEGRAM_UNAUTHORIZED, "chat not found"→TELEGRAM_CHAT_NOT_FOUND, 403→…).
+- **Formatter `telegram-format.ts`** (unit-verified): `markdownToPlainText`
+  (headings/bold/italic/code/links stripped, tables → "cell · cell" lines,
+  bullets normalized) + `chunkText` (≤limit, paragraph→line→hard-split) +
+  `buildReportMessages` (compact header 📊title/🗓period/📈stats + body, leading
+  H1 de-duplicated).
+- **`channels.service.ts` + `/api/channels` router** (mounted in app.ts):
+  `GET /` (member list, token never returned — `tokenLast4` only),
+  `POST /` (manager; validates token via detectChats before saving),
+  `POST /detect` (manager; token → chats the bot sees — the admin "Detect chats"),
+  `POST /:id/test` (manager; sends a fixed test message),
+  `PATCH /:id` (manager; relabel / enable-disable / rotate token / change chat),
+  `DELETE /:id` (manager), `POST /send-report` (manager; "Send to Telegram" on a
+  saved report). AuditLog on create/delete. All **verified 401 without JWT**.
+- **Delivery hook** (`schedules.service.ts`): `runScheduleNow` + `runDueSchedules`
+  call `deliverReportForSchedule(orgId, channelId, report)` after a report is
+  generated — **resilient: it never throws**, so a delivery failure can't fail
+  the report run (records `lastDeliveryStatus`/`Error` on the channel; a scheduler
+  warning is logged). `createSchedule`/`updateSchedule` validate the channel
+  belongs to the org.
+- **Web:** new **Channels** page + nav item (`Send` icon, manager-only) —
+  `channels-manager.tsx`: add form (label + token → **Detect chats** → pick from
+  the detected list → Add), a channels table (test / enable-disable / delete,
+  last-delivery status), with the Telegram privacy-mode hint ("send
+  `/start@your_bot` in the group first"). Schedules form gained a **"Deliver to"**
+  channel selector; Reports toolbar gained a **"Send to Telegram"** channel picker.
+  `api.ts` helpers: `listChannels`/`detectChats`/`createChannel`/`updateChannel`/
+  `deleteChannel`/`testChannel`/`sendReportToChannel` + `channelId` on schedules.
+- typecheck + lint + build clean both workspaces. Gotcha again: `prisma migrate
+  dev` then `npx prisma generate`.
+- **Deferred:** the conversational path (Telegram → OpenClaw → reports, mostly
+  OpenClaw config) and Discord/Slack providers; optional `.md` file attachment for
+  very long reports (`sendDocument`).
+
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 
 Goal (from product owner): reports over **any date window** (not just last 90 days) —
