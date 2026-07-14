@@ -64,3 +64,40 @@ export async function resolveRepositoryToken(
     "NO_CREDENTIAL"
   );
 }
+
+/**
+ * Org-level equivalent for GitHub calls not scoped to one repository (e.g.
+ * resolving a username). Uses the org's PAT credential if present, otherwise its
+ * GitHub App installation (short-lived token). Throws NO_CREDENTIAL when neither
+ * exists.
+ */
+export async function resolveOrganizationToken(
+  organizationId: string
+): Promise<RepositoryGitAccess> {
+  const credential = await prisma.gitCredential.findFirst({
+    where: { organizationId, provider: "GITHUB" }
+  });
+  if (credential) {
+    return {
+      token: decryptToken(credential.encryptedToken),
+      provider: getGitProvider(credential.provider)
+    };
+  }
+
+  const installation = await prisma.gitHubAppInstallation.findFirst({
+    where: { organizationId },
+    orderBy: { createdAt: "asc" }
+  });
+  if (installation) {
+    const access = await githubAppClient.createInstallationAccessToken(
+      installation.installationId
+    );
+    return { token: access.token, provider: getGitProvider("GITHUB") };
+  }
+
+  throw new AppError(
+    400,
+    "Connect the GitHub App or a credential first.",
+    "NO_CREDENTIAL"
+  );
+}
