@@ -701,6 +701,12 @@ export function RepositoriesManager() {
                                   {repo.commitCount} commit{repo.commitCount === 1 ? "" : "s"}
                                   {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ""}
                                 </p>
+                                <Link
+                                  href={`/dashboard/repositories/${repo.id}`}
+                                  className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-(--accent) hover:underline"
+                                >
+                                  Manage CI →
+                                </Link>
                                 {shouldShowJob(job) ? (
                                   <div className="mt-2 max-w-sm">
                                     {jobActive ? (

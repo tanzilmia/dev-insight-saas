@@ -445,6 +445,83 @@ export async function disconnectGitHubApp(organizationId: string, appInstallatio
   return response.data;
 }
 
+/* --------------------- CI / GitHub Actions management ---------------------- */
+
+export type CiWorkflowRun = {
+  runId: string;
+  name: string | null;
+  branch: string | null;
+  headSha: string | null;
+  event: string | null;
+  status: string | null;
+  conclusion: string | null;
+  actor: string | null;
+  url: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+};
+
+export type CiStatus = {
+  repositoryId: string;
+  fullName: string;
+  defaultBranch: string | null;
+  status: "NOT_CONFIGURED" | "PENDING" | "ENABLED" | "DISABLED" | string;
+  enabled: boolean;
+  templateId: string | null;
+  templateVersion: string | null;
+  workflowPath: string | null;
+  workflowUrl: string | null;
+  actionsUrl: string;
+  pullRequest: { number: number; url: string | null; state: string | null } | null;
+  lastSyncedAt: string | null;
+  latestRun: CiWorkflowRun | null;
+};
+
+export type CiInspection = {
+  supported: boolean;
+  runtime: string;
+  defaultBranch: string;
+  packageManager: string;
+  isMonorepo: boolean;
+  framework: string | null;
+  nodeVersion: string;
+  scripts: { lint: boolean; typecheck: boolean; test: boolean; build: boolean };
+  reason: string | null;
+};
+
+export async function getCiStatus(repositoryId: string) {
+  const response = await api.get<CiStatus>("/api/ci/status", { params: { repositoryId } });
+  return response.data;
+}
+
+export async function inspectRepositoryCi(repositoryId: string) {
+  const response = await api.get<CiInspection>("/api/ci/inspect", { params: { repositoryId } });
+  return response.data;
+}
+
+export async function listCiRuns(repositoryId: string) {
+  const response = await api.get<{ runs: CiWorkflowRun[] }>("/api/ci/runs", {
+    params: { repositoryId }
+  });
+  return response.data.runs;
+}
+
+export async function enableCi(repositoryId: string) {
+  const response = await api.post<CiStatus>("/api/ci/enable", { repositoryId });
+  return response.data;
+}
+
+export async function disableCi(repositoryId: string) {
+  const response = await api.post<CiStatus>("/api/ci/disable", { repositoryId });
+  return response.data;
+}
+
+export async function syncCi(repositoryId: string) {
+  const response = await api.post<CiStatus>("/api/ci/sync", { repositoryId });
+  return response.data;
+}
+
 /* ------------------------------------------------------------------ */
 /* Repositories                                                       */
 /* ------------------------------------------------------------------ */

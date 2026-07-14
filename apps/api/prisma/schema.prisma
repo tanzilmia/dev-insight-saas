@@ -121,6 +121,8 @@ model Organization {
   employeeAwards        EmployeeAward[]
   notificationChannels  NotificationChannel[]
   githubAppInstallations GitHubAppInstallation[]
+  ciConfigurations      CiConfiguration[]
+  workflowRuns          WorkflowRun[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
 }
@@ -235,6 +237,8 @@ model Repository {
   credential   GitCredential?        @relation(fields: [credentialId], references: [id], onDelete: Cascade)
   appInstallation GitHubAppInstallation? @relation(fields: [appInstallationId], references: [id], onDelete: SetNull)
   access         RepositoryAccess[]
+  ciConfiguration CiConfiguration?
+  workflowRuns    WorkflowRun[]
   contributors   ContributorIdentity[]
   commits        Commit[]
   coverage       RepositoryCoverage[]
@@ -748,4 +752,68 @@ model RepositoryAccess {
 
   @@unique([appInstallationId, repositoryId])
   @@index([repositoryId])
+}
+
+/**
+ * Per-repository CI (GitHub Actions) management state. DevInside installs a
+ * managed workflow via a pull request (never a direct push to the default
+ * branch) and tracks the setup PR + template version here. The workflow file
+ * lives in the customer's repo; this row is DevInside's management record.
+ * Status: PENDING (PR open, awaiting merge) | ENABLED (workflow on default
+ * branch) | DISABLED (management paused).
+ */
+model CiConfiguration {
+  id                String    @id @default(cuid())
+  organizationId    String
+  repositoryId      String    @unique
+  status            String    @default("PENDING")
+  templateId        String?
+  templateVersion   String?
+  workflowPath      String?
+  setupBranch       String?
+  pullRequestNumber Int?
+  pullRequestUrl    String?
+  pullRequestState  String?
+  workflowFileSha   String?
+  enabledById       String?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+/**
+ * A GitHub Actions workflow run synced from GitHub for a managed repository.
+ * Deduped per repository by the provider run id; powers the CI run history in
+ * DevInside. Read-only mirror — DevInside never fabricates runs.
+ */
+model WorkflowRun {
+  id             String    @id @default(cuid())
+  organizationId String
+  repositoryId   String
+  runId          String
+  workflowId     String?
+  name           String?
+  branch         String?
+  headSha        String?
+  event          String?
+  status         String?
+  conclusion     String?
+  actor          String?
+  url            String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  durationMs     Int?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, runId])
+  @@index([repositoryId, startedAt])
 }
