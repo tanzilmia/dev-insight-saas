@@ -5,6 +5,8 @@
 > **Repo state at audit time:** branch `feature/analysis-engine-sonarqube-integration`; backend `apps/api`, frontend `apps/web`, Node ≥ 20.
 > **Audit date:** 2026-07-14.
 > **Purpose:** another senior engineer/architect should be able to continue development from this document without opening the source.
+>
+> **Addendum (2026-07-14, post-audit):** The audit's #1 priority — automated tests — has since been **started**. A **Vitest unit suite** now covers `apps/api`'s pure/deterministic cores (87 tests: `token-cipher`, `coverage` interval math, `commit-classifier`, `plain-language`, `comparison`, `insights`, `themes`, `computeNextRun` incl. DST/month-clamp, `resolvePeriod` incl. custom-range/inclusive-day). Config: `apps/api/vitest.config.ts`; tests in `apps/api/tests/unit/**` (outside `src`, so typecheck/lint/build are unaffected). Run with `npm test`. **Still open:** integration tests (report flow with mocked `GitProvider`/`LLMProvider`), `apps/web` tests, and CI. Sections 13/14/15/17/18 below describe the pre-addendum state; read them with this progress in mind.
 
 ---
 
@@ -56,7 +58,7 @@ A **pragmatic modular monolith** (Express API) + **Next.js dashboard** + two **s
 | **External integrations** | **GitHub** (REST, via PAT) — the only Git provider implemented; **Telegram** (Bot API) for report delivery; **OpenAI-compatible LLM** endpoint | GitLab/Bitbucket/Discord/Slack/SonarQube/Jira = **Not found** (see [§12](#section-12--integrations)) |
 | **CI/CD** | **Not found** — no `.github/workflows`, no GitLab CI, no Jenkins, **no YAML pipelines anywhere** | local `typecheck`/`lint`/`build` only |
 | **Containerization / deploy** | **Not found** in this repo — no Dockerfile, no `docker-compose.yml`, no Vercel/Fly/Railway/Render config | OpenClaw runs in Docker but from its *own* external repo |
-| **Tests** | **Not found** — no test runner, no `*.test.ts`, no `*.spec.ts`, no `__tests__` | verification is manual via mock GitHub/LLM servers |
+| **Tests** | **Unit suite added 2026-07-14** — Vitest in `apps/api` (87 tests across 9 files) covering the pure/deterministic cores (`token-cipher`, `coverage`, `commit-classifier`, `plain-language`, `comparison`, `insights`, `themes`, `computeNextRun`, `resolvePeriod`). **Still missing:** integration tests (report flow with mocked providers), any `apps/web` tests, and CI. See the addendum below. | previously "Not found"; the rest of this audit's snapshot still reflects 2026-07-14 pre-test state where noted |
 
 ### System context diagram
 

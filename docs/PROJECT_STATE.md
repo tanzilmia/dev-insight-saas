@@ -1753,3 +1753,51 @@ professional design and a persistent **sidebar + header + main** shell.
 Note (Phase A follow-up): `collectActivity`'s `DEFAULT_LOOKBACK_DAYS = 90` in
 `activity.service.ts` is still the fallback when a collect call omits a range; Phase C
 drives collection with explicit ranges, so this becomes a fallback-only default.
+
+### Automated tests — Phase 15 kickoff: Vitest unit suite (2026-07-14) ✅
+
+The long-standing "no tests" gap (flagged as the #1 risk in
+`docs/architecture/devinside-system-audit.md`) is now **started**. A **Vitest unit
+suite** covers the backend's pure/deterministic cores — the highest-value, most
+bug-prone logic (date math, coverage intervals, classification, plain-language),
+historically the source of several fixed bugs (see Batches 1/2/7). **87 tests across
+9 files, all green.** typecheck + lint + build still clean (tests are excluded from
+all three — see below).
+
+- **Runner:** Vitest 4 (`apps/api` devDep). Scripts: `test` (`vitest run`),
+  `test:watch` (`vitest`) in `apps/api/package.json`; root `test` fans out via
+  `npm run test --workspaces --if-present`. Run everything with `npm test`.
+- **Config `apps/api/vitest.config.ts`:** Node env; `include: ["tests/**/*.test.ts"]`.
+  Two DevInsight-specific bits: (1) a **pre-resolver plugin** that maps NodeNext
+  `.js` import specifiers → the real `.ts` files (Vite doesn't do this by default,
+  and the codebase writes explicit `.js` extensions); (2) a **hermetic `test.env`**
+  (throwaway `DATABASE_URL`/`JWT_ACCESS_SECRET`/`GIT_TOKEN_ENCRYPTION_KEY`) so
+  importing `config/env.ts` (Zod-validated at load) never depends on a real `.env` —
+  CI-ready. None of these are real; the unit suite opens no DB/network.
+- **Tests live in `apps/api/tests/unit/**` — OUTSIDE `src`**, so `tsc -p
+  tsconfig.json` (`include: ["src"]`) and `eslint src` never touch them → typecheck,
+  lint, and build are unaffected. Trade-off: test files themselves aren't
+  type-checked/linted by the existing scripts (Vitest's esbuild transform still runs
+  them); acceptable for now.
+- **Covered (pure cores):** `token-cipher` (AES-GCM round-trip, tamper/integrity,
+  malformed payload, last4), `activity/coverage.ts` (`mergeIntervals`/
+  `subtractCovered` — overlap/touch/disjoint/clip/fully-covered), `report-engine/
+  commit-classifier` (prefixes, merge→Chore, most-specific-first keyword fallback,
+  Other), `plain-language` (activityLevel thresholds, work-mix "mostly", area
+  humanize+dedup, summary grammar, caveats), `comparison` (deltas, hasBaseline,
+  rank up/down/new/dropped, cap 6), `insights` (all rules + cap 6), `themes`
+  (`parseThemes` fence/preamble tolerance, size default, caps, truncation),
+  `schedules.service.computeNextRun` (**DST spring-forward, MONTHLY Jan-31→Feb-28
+  clamp, non-DST Dhaka**), `openclaw.tools.resolvePeriod` (**custom-range inclusive
+  local-day, inverted→throw, last_month/this_month/relative windows**).
+- **Two initial test-expectation errors were corrected to match ACTUAL behavior**
+  (not source bugs): `decryptToken(encryptToken(""))` throws (empty ciphertext →
+  empty base64 → guard) — pinned as documented behavior; and `"improve error
+  handling"`→`Fix` (the "error" keyword wins over the generic "improve" verb) —
+  pinned as a documented precedence case. The source behaves sensibly; no product
+  code was changed for tests.
+- **Still open (Phase 15 remainder):** integration tests — add **Supertest** and
+  exercise `orchestrateReport` with mocked `GitProvider`/`LLMProvider` (+ a test DB
+  or Prisma mock), then the auth/RBAC and schedule paths; **`apps/web`** has no
+  tests; **CI** (GitHub Actions running test/typecheck/lint/build) is still absent
+  (the audit's Phase 1 pairs tests WITH CI).
