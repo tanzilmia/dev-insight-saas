@@ -1514,6 +1514,20 @@ cases) and the CSV parser (edge cases) unit-verified.
    single-org caveat (the MCP server pins one org via `run.sh`; multi-org needs per-chat
    org resolution — future).
 
+**Award cards — plain-language enrichment (2026-07-14) ✅** (follow-up to item 4, for
+non-technical CEO/management readers). Each "Employee of the month" card now shows
+**which projects** the person's work touched, their **Focus** (plain work-mix, e.g.
+"mostly new features (45%), bug fixes (30%)"), and the **Areas** (Backend/Database/UI…) —
+not just raw commit/line counts. Migration `award_details` adds `EmployeeAward.detailsJson`
+(nullable JSON `{ projects, workType, areas }`); computed **deterministically** at
+shortlist-generation time by `buildAwardDetails` (`awards.service.ts` — one bounded
+commits pass, cap 3000, + a changed-files pass, cap 15000; reuses `classifyCommit` +
+`moduleFromPath` + `isNoisePath` + `humanizeWorkMix`/`humanizeAreas`) and **persisted** so
+confirmed/history cards keep it. Web `AwardDetails` type + `DetailRow`s (project chips /
+Focus / Areas) in `awards-panel.tsx`. Awards created before the migration show no
+enrichment until **Regenerate** (`detailsJson: null` → block hidden). `npx prisma generate`
+after migrate (the usual gotcha). typecheck + lint + build clean.
+
 **Follow-ups still open (documented boundaries):** noise-adjusting the aggregate trend
 totals; a leaderboard-history endpoint that fills gaps for periods with no snapshot yet;
 an org-wide unmapped endpoint that counts distinct people across mapped+unmapped (current
