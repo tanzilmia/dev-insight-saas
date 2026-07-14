@@ -43,7 +43,7 @@ npx prisma migrate dev --name <change>
 npx prisma generate     # ALWAYS run after schema edits — migrate dev has failed to regenerate the client here before, and tsc won't see new models until you do
 ```
 
-**Tests: none exist** (no runner installed). Verification is done by driving the running API — see "How to verify" below. Before committing nontrivial changes run `typecheck`, `lint`, and `build` for both workspaces (all currently pass).
+**Tests: a Vitest unit suite exists for `apps/api`** (added 2026-07-14). Run `npm test` (root, fans out) or `npm run test -w @devinsight/api` (watch: `test:watch`). Config: `apps/api/vitest.config.ts` (Node env, a pre-resolver mapping NodeNext `.js` imports → `.ts`, hermetic `test.env` so `config/env.ts` validates without a real `.env`). Tests live in `apps/api/tests/unit/**` — **outside `src`, so they're excluded from `tsc`/`eslint`** (typecheck/lint/build unaffected). Current coverage is the pure/deterministic cores only: `token-cipher`, `coverage.ts` interval math, `commit-classifier`, `plain-language`, `comparison`, `insights`, `themes`, `computeNextRun` (DST/month-clamp), `resolvePeriod` (custom-range/inclusive-day). **Still no integration tests** (report flow with mocked `GitProvider`/`LLMProvider` is the next step) and **no `apps/web` tests**. Beyond unit tests, verification is still done by driving the running API — see "How to verify" below. Before committing nontrivial changes run `test`, `typecheck`, `lint`, and `build` (all currently pass).
 
 ## Critical conventions (easy to get wrong)
 
@@ -116,4 +116,4 @@ Web reads `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`).
 
 Drive the running API against mock servers so no real credentials/quota are needed: a mock GitHub on :4999 (`GITHUB_API_BASE_URL=http://localhost:4999`; a token containing `goodtoken` is "valid") and a mock LLM on :4998 (`OPENAI_API_KEY=test OPENAI_BASE_URL=http://localhost:4998`). Typical flow: register → connect credential → sync + select repo → collect activity → discover/map contributors → `POST /api/openclaw/reports/generate` → assert real stats and `status: GENERATED` (LLM) or `PARTIAL` (template). Mock scripts aren't committed — recreate as needed (shapes documented in `docs/PROJECT_STATE.md` §9). Kill background `tsx`/mock processes when done.
 
-When adding tests, set up Vitest + Supertest first; prime candidates: `token-cipher`, `coverage.ts` interval math, `commit-classifier`, `computeNextRun`, and the report flow with mocked `GitProvider`/`LLMProvider`.
+Vitest is now installed and the pure-core unit suite is in place (see the Tests note above). The next testing step is **integration coverage**: add Supertest and exercise the report flow (`orchestrateReport`) with mocked `GitProvider`/`LLMProvider` (and a test DB or a Prisma mock), then extend to the auth/RBAC and schedule paths. New pure helpers should get a co-located unit test in `apps/api/tests/unit/`.
