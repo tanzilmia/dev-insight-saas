@@ -145,9 +145,9 @@ export async function collectActivity(actorId: string, repositoryId: string, ran
   const repository = await loadRepository(repositoryId);
   await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
 
-  const credential = await prisma.gitCredential.findUnique({
-    where: { id: repository.credentialId }
-  });
+  const credential = repository.credentialId
+    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+    : null;
 
   if (!credential) {
     throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
@@ -566,9 +566,9 @@ export async function ensureActivityCollected(
 
   for (const repository of repositories) {
     try {
-      const credential = await prisma.gitCredential.findUnique({
-        where: { id: repository.credentialId }
-      });
+      const credential = repository.credentialId
+        ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+        : null;
       if (!credential) {
         warnings.push(`${repository.fullName}: no Git credential, skipped`);
         continue;

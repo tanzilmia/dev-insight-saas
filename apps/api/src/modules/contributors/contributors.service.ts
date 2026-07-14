@@ -200,9 +200,9 @@ export async function discoverContributorsForRepository(
   repository: Repository,
   actorId: string | null
 ): Promise<number> {
-  const credential = await prisma.gitCredential.findUnique({
-    where: { id: repository.credentialId }
-  });
+  const credential = repository.credentialId
+    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+    : null;
 
   if (!credential) {
     throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");

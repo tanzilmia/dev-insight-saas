@@ -96,9 +96,9 @@ export async function startDeepCollection(
   const repository = await loadRepository(repositoryId);
   await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
 
-  const credential = await prisma.gitCredential.findUnique({
-    where: { id: repository.credentialId }
-  });
+  const credential = repository.credentialId
+    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+    : null;
   if (!credential) {
     throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
   }
@@ -276,9 +276,9 @@ export async function runCollectionJob(jobId: string): Promise<void> {
   }
 
   const repository = job.repository;
-  const credential = await prisma.gitCredential.findUnique({
-    where: { id: repository.credentialId }
-  });
+  const credential = repository.credentialId
+    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+    : null;
   if (!credential) {
     await finalizeJob(jobId, "FAILED", "The organization's Git credential was removed");
     return;

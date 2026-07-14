@@ -378,6 +378,73 @@ export async function deleteCredential(credentialId: string) {
   return response.data;
 }
 
+/* -------------------------- GitHub App connection -------------------------- */
+
+export type GitHubAppInstallation = {
+  id: string;
+  installationId: string;
+  accountLogin: string;
+  accountType: string | null;
+  targetType: string | null;
+  repositorySelection: string | null;
+  repositoryCount: number;
+  suspended: boolean;
+  lastSyncedAt: string | null;
+  createdAt: string;
+};
+
+export type GitHubAppStatus = {
+  /** Whether the DevInside owner has registered the App on this server. */
+  configured: boolean;
+  connected: boolean;
+  installations: GitHubAppInstallation[];
+};
+
+export async function getGitHubAppStatus(organizationId: string) {
+  const response = await api.get<GitHubAppStatus>("/api/github-app/status", {
+    params: { organizationId }
+  });
+  return response.data;
+}
+
+export async function getGitHubAppInstallUrl(organizationId: string) {
+  const response = await api.get<{ url: string }>("/api/github-app/install-url", {
+    params: { organizationId }
+  });
+  return response.data.url;
+}
+
+export async function linkGitHubAppInstallation(input: {
+  organizationId: string;
+  installationId: string;
+  setupAction?: string;
+}) {
+  const response = await api.post<GitHubAppStatus>(
+    "/api/github-app/installations/callback",
+    input
+  );
+  return response.data;
+}
+
+export async function syncGitHubAppInstallation(
+  organizationId: string,
+  appInstallationId: string
+) {
+  const response = await api.post<GitHubAppStatus>(
+    `/api/github-app/installations/${appInstallationId}/sync`,
+    { organizationId }
+  );
+  return response.data;
+}
+
+export async function disconnectGitHubApp(organizationId: string, appInstallationId: string) {
+  const response = await api.delete<GitHubAppStatus>(
+    `/api/github-app/installations/${appInstallationId}`,
+    { params: { organizationId } }
+  );
+  return response.data;
+}
+
 /* ------------------------------------------------------------------ */
 /* Repositories                                                       */
 /* ------------------------------------------------------------------ */

@@ -85,9 +85,9 @@ export async function handlePushDelivery(repositoryId: string, payload: PushPayl
       if (!repository) {
         return;
       }
-      const credential = await prisma.gitCredential.findUnique({
-        where: { id: repository.credentialId }
-      });
+      const credential = repository.credentialId
+        ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+        : null;
       if (!credential) {
         return;
       }

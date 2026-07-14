@@ -276,9 +276,9 @@ export async function resyncRepository(actorId: string, repositoryId: string) {
   const repository = await loadRepository(repositoryId);
   await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
 
-  const credential = await prisma.gitCredential.findUnique({
-    where: { id: repository.credentialId }
-  });
+  const credential = repository.credentialId
+    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+    : null;
 
   if (!credential) {
     throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
@@ -327,9 +327,9 @@ async function registerWebhook(repository: Repository) {
     );
   }
 
-  const credential = await prisma.gitCredential.findUnique({
-    where: { id: repository.credentialId }
-  });
+  const credential = repository.credentialId
+    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+    : null;
   if (!credential) {
     throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
   }
@@ -371,9 +371,9 @@ async function removeWebhook(repository: Repository) {
     return;
   }
   try {
-    const credential = await prisma.gitCredential.findUnique({
-      where: { id: repository.credentialId }
-    });
+    const credential = repository.credentialId
+      ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+      : null;
     if (!credential) {
       return;
     }

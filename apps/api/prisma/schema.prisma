@@ -120,6 +120,7 @@ model Organization {
   leaderboardSnapshots  LeaderboardSnapshot[]
   employeeAwards        EmployeeAward[]
   notificationChannels  NotificationChannel[]
+  githubAppInstallations GitHubAppInstallation[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
 }
@@ -204,7 +205,12 @@ model Repository {
   id             String      @id @default(cuid())
   organizationId String
   projectId      String?
-  credentialId   String
+  // A tracked repository is sourced from EITHER a PAT credential (classic path)
+  // OR a GitHub App installation. Both are optional so App-synced repos need no
+  // PAT; the [organizationId, provider, externalId] unique key still prevents
+  // duplicate rows across the two sources.
+  credentialId      String?
+  appInstallationId String?
   provider       GitProvider @default(GITHUB)
   externalId     String
   owner          String
@@ -226,7 +232,9 @@ model Repository {
 
   organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   project      Project?              @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  credential   GitCredential         @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  credential   GitCredential?        @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  appInstallation GitHubAppInstallation? @relation(fields: [appInstallationId], references: [id], onDelete: SetNull)
+  access         RepositoryAccess[]
   contributors   ContributorIdentity[]
   commits        Commit[]
   coverage       RepositoryCoverage[]
@@ -237,6 +245,7 @@ model Repository {
   @@index([organizationId])
   @@index([projectId])
   @@index([credentialId])
+  @@index([appInstallationId])
 }
 
 model ContributorIdentity {
@@ -684,4 +693,59 @@ model AuditLog {
   @@index([actorId])
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+/**
+ * A GitHub App installation, linking a customer's GitHub account/organization to
+ * a DevInside organization (tenant). The DevInside owner registers ONE App;
+ * every customer installs it and approves repositories. No secret is stored
+ * here: the App private key lives in env, and installation access tokens are
+ * short-lived (~1h) and minted on demand — never persisted. `installationId`
+ * (GitHub's numeric id) is globally unique, which is the cross-tenant guard:
+ * one GitHub installation can belong to exactly one DevInside org.
+ */
+model GitHubAppInstallation {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  // GitHub's numeric installation id (stored as a string). Globally unique.
+  installationId      String   @unique
+  accountLogin        String
+  // "User" | "Organization" — the kind of GitHub account the App is installed on.
+  accountType         String?
+  accountId           String?
+  targetType          String?
+  // "all" | "selected" — GitHub's repository_selection for this installation.
+  repositorySelection String?
+  permissions         Json?
+  suspendedAt         DateTime?
+  repositoryCount     Int      @default(0)
+  createdById         String?
+  lastSyncedAt        DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repositories Repository[]
+  access       RepositoryAccess[]
+
+  @@index([organizationId])
+}
+
+/**
+ * Access grant: which repositories a GitHub App installation currently exposes
+ * to DevInside. Distinct from Repository so revoking access (GitHub
+ * `installation_repositories.removed`) deletes only the grant, never the
+ * Repository row or its collected history.
+ */
+model RepositoryAccess {
+  id                String   @id @default(cuid())
+  appInstallationId String
+  repositoryId      String
+  createdAt         DateTime @default(now())
+
+  installation GitHubAppInstallation @relation(fields: [appInstallationId], references: [id], onDelete: Cascade)
+  repository   Repository            @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([appInstallationId, repositoryId])
+  @@index([repositoryId])
 }

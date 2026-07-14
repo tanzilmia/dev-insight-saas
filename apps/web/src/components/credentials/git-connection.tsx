@@ -29,6 +29,7 @@ import {
   DashboardChrome,
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
+import { GitHubAppConnection } from "./github-app-connection";
 
 const fieldClass =
   "field w-full rounded-lg px-3.5 py-2.5 font-mono text-sm text-(--text) placeholder:font-sans placeholder:font-normal";
@@ -252,7 +253,8 @@ export function GitConnection() {
 
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
-      <div className="mx-auto max-w-2xl">
+      <div className="mx-auto grid max-w-2xl gap-6">
+        <GitHubAppConnection />
         <div className="glass animate-rise rounded-xl p-5">
           <p className="mb-2 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.28em] text-(--accent)">
             <GitBranch size={14} />

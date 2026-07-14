@@ -11,6 +11,8 @@ import { channelsRouter } from "./modules/channels/channels.controller.js";
 import { contributorsRouter } from "./modules/contributors/contributors.controller.js";
 import { credentialsRouter } from "./modules/credentials/credentials.controller.js";
 import { employeesRouter } from "./modules/employees/employees.controller.js";
+import { githubAppRouter } from "./modules/github-app/github-app.controller.js";
+import { githubAppWebhookRouter } from "./modules/github-app/github-app.webhook.controller.js";
 import { openclawRouter } from "./modules/openclaw/openclaw.controller.js";
 import { openclawServiceRouter } from "./modules/openclaw/openclaw.service-tools.controller.js";
 import { organizationsRouter } from "./modules/organizations/organizations.controller.js";
@@ -27,9 +29,10 @@ export function createApp() {
 
   app.use(helmet());
   app.use(cors());
-  // Webhook deliveries need the RAW body for HMAC verification, so this router
-  // (with its own raw parser) mounts before the global JSON parser.
+  // Webhook deliveries need the RAW body for HMAC verification, so these routers
+  // (with their own raw parsers) mount before the global JSON parser.
   app.use("/api/webhooks", webhooksRouter);
+  app.use("/api/webhooks/github-app", githubAppWebhookRouter);
   app.use(express.json());
   app.use(pinoHttp());
 
@@ -45,6 +48,7 @@ export function createApp() {
   app.use("/api/projects", projectsRouter);
   app.use("/api/employees", employeesRouter);
   app.use("/api/git-credentials", credentialsRouter);
+  app.use("/api/github-app", githubAppRouter);
   app.use("/api/repositories", repositoriesRouter);
   app.use("/api/repositories", activityRouter);
   app.use("/api/contributors", contributorsRouter);
