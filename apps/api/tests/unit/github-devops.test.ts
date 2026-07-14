@@ -99,4 +99,19 @@ describe("GitHubDevOpsProvider", () => {
       })
     ).rejects.toThrow(/Workflows write permission|write permission/i);
   });
+
+  it("mergePullRequest merges and returns the commit sha", async () => {
+    stubFetch(200, { merged: true, sha: "mergesha123" });
+    expect(await githubDevOpsProvider.mergePullRequest("t", ref, 1)).toEqual({
+      merged: true,
+      sha: "mergesha123"
+    });
+  });
+
+  it("mergePullRequest surfaces a not-mergeable PR (405) clearly", async () => {
+    stubFetch(405, { message: "Pull Request is not mergeable" });
+    await expect(githubDevOpsProvider.mergePullRequest("t", ref, 1)).rejects.toThrow(
+      /couldn't merge/i
+    );
+  });
 });

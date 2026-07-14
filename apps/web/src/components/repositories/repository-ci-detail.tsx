@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   CircleDot,
   ExternalLink,
+  GitMerge,
   Loader2,
   PlugZap,
   RefreshCw,
@@ -25,6 +26,7 @@ import {
   getCiStatus,
   inspectRepositoryCi,
   listCiRuns,
+  mergeCi,
   syncCi
 } from "@/lib/api";
 import { canManage, useSession } from "@/lib/use-session";
@@ -62,7 +64,9 @@ export function RepositoryCiDetail({ repositoryId }: { repositoryId: string }) {
   const [runs, setRuns] = useState<CiWorkflowRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | "enable" | "disable" | "sync" | "inspect">(null);
+  const [busy, setBusy] = useState<null | "enable" | "disable" | "sync" | "inspect" | "merge">(
+    null
+  );
   const [inspection, setInspection] = useState<CiInspection | null>(null);
 
   const refresh = useCallback(() => {
@@ -80,7 +84,7 @@ export function RepositoryCiDetail({ repositoryId }: { repositoryId: string }) {
     void refresh();
   }, [refresh]);
 
-  async function run(action: "enable" | "disable" | "sync") {
+  async function run(action: "enable" | "disable" | "sync" | "merge") {
     setBusy(action);
     setError(null);
     try {
@@ -89,7 +93,9 @@ export function RepositoryCiDetail({ repositoryId }: { repositoryId: string }) {
           ? await enableCi(repositoryId)
           : action === "disable"
             ? await disableCi(repositoryId)
-            : await syncCi(repositoryId);
+            : action === "merge"
+              ? await mergeCi(repositoryId)
+              : await syncCi(repositoryId);
       setStatus(next);
       setRuns(await listCiRuns(repositoryId));
     } catch (err) {
@@ -214,7 +220,31 @@ export function RepositoryCiDetail({ repositoryId }: { repositoryId: string }) {
 
               {manageable ? (
                 <div className="mt-5 flex flex-wrap gap-2">
-                  {status.status !== "ENABLED" ? (
+                  {status.status === "PENDING" && status.pullRequest ? (
+                    <button
+                      type="button"
+                      onClick={() => run("merge")}
+                      disabled={busy !== null}
+                      className="btn-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold"
+                    >
+                      {busy === "merge" ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : (
+                        <GitMerge size={15} />
+                      )}
+                      Merge PR & enable
+                    </button>
+                  ) : null}
+                  {status.status === "ENABLED" ? (
+                    <button
+                      type="button"
+                      onClick={() => run("disable")}
+                      disabled={busy !== null}
+                      className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-500/20 dark:text-red-400"
+                    >
+                      Disable CI
+                    </button>
+                  ) : status.status === "PENDING" && status.pullRequest ? null : (
                     <button
                       type="button"
                       onClick={() => run("enable")}
@@ -227,15 +257,6 @@ export function RepositoryCiDetail({ repositoryId }: { repositoryId: string }) {
                         <PlugZap size={15} />
                       )}
                       Enable CI
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => run("disable")}
-                      disabled={busy !== null}
-                      className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-500/20 dark:text-red-400"
-                    >
-                      Disable CI
                     </button>
                   )}
                   <button

@@ -258,6 +258,49 @@ async function syncWorkflowRuns(
   }
 }
 
+/**
+ * Merges the setup pull request from DevInside (an explicit manager action — not
+ * silent auto-merge). Uses the App's Pull requests write permission; after a
+ * successful merge the managed workflow lands on the default branch and CI is
+ * ENABLED. Not-mergeable PRs (conflicts/required checks) surface a clear error
+ * telling the user to merge on GitHub instead.
+ */
+export async function mergeCi(actorId: string, repositoryId: string) {
+  const repository = await loadRepository(repositoryId);
+  await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
+
+  const config = await prisma.ciConfiguration.findUnique({ where: { repositoryId } });
+  if (!config?.pullRequestNumber) {
+    throw new AppError(400, "There is no setup pull request to merge. Enable CI first.", "NO_SETUP_PR");
+  }
+
+  const { token, devops } = await accessFor(repository);
+  const ref = refOf(repository);
+  const result = await devops.mergePullRequest(token, ref, config.pullRequestNumber);
+
+  const updated = await prisma.ciConfiguration.update({
+    where: { repositoryId },
+    data: {
+      status: "ENABLED",
+      pullRequestState: "merged",
+      workflowPath: MANAGED_WORKFLOW_PATH,
+      lastSyncedAt: new Date()
+    }
+  });
+  await audit(repository, actorId, "ci.merge", {
+    pullRequestNumber: config.pullRequestNumber,
+    merged: result.merged
+  });
+
+  // Best-effort: the push-triggered run may take a moment to appear.
+  await syncWorkflowRuns(repository, token, devops).catch(() => {});
+  const defaultBranch = await devops
+    .getDefaultBranch(token, ref)
+    .catch(() => repository.defaultBranch);
+
+  return statusFor(repository, updated, await latestRun(repositoryId), defaultBranch);
+}
+
 export async function getCiStatus(actorId: string, repositoryId: string) {
   const repository = await loadRepository(repositoryId);
   await requireOrganizationMember(actorId, repository.organizationId);

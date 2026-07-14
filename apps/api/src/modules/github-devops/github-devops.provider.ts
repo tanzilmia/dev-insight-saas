@@ -282,6 +282,33 @@ class GitHubDevOpsProvider implements DevOpsProvider {
     };
   }
 
+  async mergePullRequest(
+    token: string,
+    ref: RepositoryRef,
+    prNumber: number,
+    options: { method?: "merge" | "squash" | "rebase" } = {}
+  ): Promise<{ merged: boolean; sha: string | null }> {
+    const response = await this.request(
+      `/repos/${this.encode(ref)}/pulls/${prNumber}/merge`,
+      token,
+      { method: "PUT", body: { merge_method: options.method ?? "squash" } }
+    );
+    // 405 = not mergeable / method disabled; 409 = merge conflict or head moved.
+    if (response.status === 405 || response.status === 409) {
+      throw new AppError(
+        409,
+        "GitHub couldn't merge the pull request automatically (conflicts, required checks, or the merge method is disabled). Merge it on GitHub, then Sync.",
+        "PR_NOT_MERGEABLE"
+      );
+    }
+    this.assertWritable(response);
+    if (!response.ok) {
+      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+    }
+    const data = (await response.json()) as { merged?: boolean; sha?: string };
+    return { merged: data.merged ?? false, sha: data.sha ?? null };
+  }
+
   async listWorkflowRuns(
     token: string,
     ref: RepositoryRef,

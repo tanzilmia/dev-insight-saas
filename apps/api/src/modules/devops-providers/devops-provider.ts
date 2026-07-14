@@ -81,6 +81,13 @@ export interface DevOpsProvider {
     ref: RepositoryRef,
     input: CreatePullRequestInput
   ): Promise<PullRequestRef>;
+  /** Merges a pull request (used for the "merge from DevInside" convenience). */
+  mergePullRequest(
+    token: string,
+    ref: RepositoryRef,
+    prNumber: number,
+    options?: { method?: "merge" | "squash" | "rebase" }
+  ): Promise<{ merged: boolean; sha: string | null }>;
   listWorkflowRuns(
     token: string,
     ref: RepositoryRef,

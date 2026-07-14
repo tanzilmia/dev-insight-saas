@@ -8,6 +8,7 @@ import {
   getCiStatus,
   inspectRepository,
   listWorkflowRuns,
+  mergeCi,
   syncCi
 } from "./ci.service.js";
 import { repositoryBodySchema, repositoryQuerySchema } from "./ci.schemas.js";
@@ -65,5 +66,13 @@ ciRouter.post(
   asyncHandler(async (req, res) => {
     const { repositoryId } = repositoryBodySchema.parse(req.body);
     res.json(await syncCi(req.authUser!.id, repositoryId));
+  })
+);
+
+ciRouter.post(
+  "/merge",
+  asyncHandler(async (req, res) => {
+    const { repositoryId } = repositoryBodySchema.parse(req.body);
+    res.json(await mergeCi(req.authUser!.id, repositoryId));
   })
 );

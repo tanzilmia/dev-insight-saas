@@ -522,6 +522,11 @@ export async function syncCi(repositoryId: string) {
   return response.data;
 }
 
+export async function mergeCi(repositoryId: string) {
+  const response = await api.post<CiStatus>("/api/ci/merge", { repositoryId });
+  return response.data;
+}
+
 /* ------------------------------------------------------------------ */
 /* Repositories                                                       */
 /* ------------------------------------------------------------------ */
