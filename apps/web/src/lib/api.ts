@@ -1285,6 +1285,13 @@ export async function getLeaderboardHistory(
 
 export type AwardStatus = "SHORTLISTED" | "CONFIRMED" | "DISMISSED";
 
+/** Plain-language "what they worked on" for non-technical readers. */
+export type AwardDetails = {
+  projects: string[];
+  workType: string;
+  areas: string[];
+};
+
 export type EmployeeAward = {
   id: string;
   scope: string;
@@ -1302,6 +1309,7 @@ export type EmployeeAward = {
   activeDays: number;
   filesChanged: number;
   citation: string;
+  detailsJson: AwardDetails | null;
   generatedBy: "llm" | "template" | null;
   status: AwardStatus;
   confirmedById: string | null;

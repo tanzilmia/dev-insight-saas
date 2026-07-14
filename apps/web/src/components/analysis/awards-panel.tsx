@@ -83,7 +83,36 @@ function AwardCard({
 
       <p className="mt-2 text-xs text-(--text)">{award.citation}</p>
 
-      <div className="mt-2 flex items-center gap-2">
+      {award.detailsJson ? (
+        <div className="mt-2.5 grid gap-1.5">
+          {award.detailsJson.projects.length ? (
+            <DetailRow label="Projects">
+              <div className="flex flex-wrap gap-1">
+                {award.detailsJson.projects.map((project) => (
+                  <span
+                    key={project}
+                    className="rounded-full bg-(--surface) px-2 py-0.5 text-[11px] font-semibold text-(--text)"
+                  >
+                    {project}
+                  </span>
+                ))}
+              </div>
+            </DetailRow>
+          ) : null}
+          {award.detailsJson.workType ? (
+            <DetailRow label="Focus">
+              <span className="text-[11px] text-(--text) capitalize">{award.detailsJson.workType}</span>
+            </DetailRow>
+          ) : null}
+          {award.detailsJson.areas.length ? (
+            <DetailRow label="Areas">
+              <span className="text-[11px] text-(--text)">{award.detailsJson.areas.join(", ")}</span>
+            </DetailRow>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mt-2.5 flex items-center gap-2">
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-(--border)">
           <div className="h-full rounded-full bg-(--accent)" style={{ width: `${pct}%` }} />
         </div>
@@ -92,6 +121,17 @@ function AwardCard({
       <p className="mt-1 text-[11px] text-(--muted)">
         {award.commits} commits · {award.lines.toLocaleString()} lines · {award.activeDays} active days
       </p>
+    </div>
+  );
+}
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="mt-0.5 w-14 shrink-0 text-[10px] font-bold uppercase tracking-wide text-(--muted)">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }

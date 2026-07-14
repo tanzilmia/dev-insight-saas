@@ -609,6 +609,8 @@ model EmployeeAward {
   activeDays     Int         @default(0)
   filesChanged   Int         @default(0)
   citation       String
+  // Plain-language enrichment for non-technical readers: { projects, workType, areas }.
+  detailsJson    Json?
   generatedBy    String?
   status         AwardStatus @default(SHORTLISTED)
   confirmedById  String?

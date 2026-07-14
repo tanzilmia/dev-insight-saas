@@ -11,11 +11,31 @@ import {
 } from "../activity/activity.service.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
 import type { ChatMessage } from "../llm/llm-provider.js";
+import {
+  classifyCommit,
+  isNoisePath,
+  moduleFromPath
+} from "../report-engine/commit-classifier.js";
+import { humanizeAreas, humanizeWorkMix } from "../report-engine/plain-language.js";
 import { toLocalDateKey } from "../statistics/statistics.service.js";
 import { monthRange } from "./leaderboard-snapshots.js";
 import type { AwardShortlistInput, AwardsQuery } from "./analysis.schemas.js";
 
 const SHORTLIST_SIZE = 5;
+// Caps for the plain-language enrichment pass (deliberately bounded — this runs
+// only when a manager generates a shortlist).
+const AWARD_DETAIL_COMMIT_CAP = 3000;
+const AWARD_DETAIL_FILE_CAP = 15000;
+
+/** Plain-language "what they worked on" shown on each award card. */
+export type AwardDetails = {
+  /** Project names this person's work touched (org scope). Empty for project scope. */
+  projects: string[];
+  /** e.g. "mostly new features (45%), bug fixes (30%)". Empty when no signal. */
+  workType: string;
+  /** Business-readable areas, e.g. ["Backend", "Database"]. */
+  areas: string[];
+};
 // Balanced, transparent weighting — volume, breadth, and consistency, so a
 // single huge commit can't outrank steady, broad work. Shown in the UI.
 const WEIGHTS = { commits: 0.3, lines: 0.3, activeDays: 0.25, filesChanged: 0.15 };
@@ -126,6 +146,115 @@ function scoreCandidates(
   return scored.slice(0, SHORTLIST_SIZE).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
+/**
+ * Plain-language enrichment per shortlisted employee — which projects they
+ * touched, what kind of work (features/fixes/…), and which business areas — so a
+ * non-technical reader (CEO/PM) understands the recognition, not just raw counts.
+ * Deterministic, bounded, and computed once at shortlist time.
+ */
+async function buildAwardDetails(
+  organizationId: string,
+  projectId: string | undefined,
+  candidates: Candidate[],
+  since: Date,
+  until: Date
+): Promise<Map<string, AwardDetails>> {
+  const result = new Map<string, AwardDetails>();
+  const usernames = [...new Set(candidates.flatMap((c) => c.usernames))];
+  if (!usernames.length) {
+    return result;
+  }
+
+  type Agg = {
+    categories: Map<string, number>;
+    modules: Map<string, number>;
+    projects: Set<string>;
+  };
+  const byUsername = new Map<string, Agg>();
+  const usernameByCommitId = new Map<string, string>();
+  const ensure = (username: string): Agg => {
+    let agg = byUsername.get(username);
+    if (!agg) {
+      agg = { categories: new Map(), modules: new Map(), projects: new Set() };
+      byUsername.set(username, agg);
+    }
+    return agg;
+  };
+
+  const commits = await prisma.commit.findMany({
+    where: {
+      repository: { organizationId, ...(projectId ? { projectId } : {}) },
+      username: { in: usernames },
+      committedAt: { gte: since, lte: until }
+    },
+    orderBy: { committedAt: "desc" },
+    take: AWARD_DETAIL_COMMIT_CAP,
+    select: {
+      id: true,
+      username: true,
+      message: true,
+      repository: { select: { project: { select: { name: true } } } }
+    }
+  });
+
+  for (const commit of commits) {
+    if (!commit.username) continue;
+    const agg = ensure(commit.username);
+    usernameByCommitId.set(commit.id, commit.username);
+    const category = classifyCommit(commit.message);
+    agg.categories.set(category, (agg.categories.get(category) ?? 0) + 1);
+    const projectName = commit.repository.project?.name;
+    if (projectName) agg.projects.add(projectName);
+  }
+
+  const commitIds = [...usernameByCommitId.keys()];
+  if (commitIds.length) {
+    const files = await prisma.changedFile.findMany({
+      where: { commitId: { in: commitIds } },
+      take: AWARD_DETAIL_FILE_CAP,
+      select: { commitId: true, filePath: true }
+    });
+    for (const file of files) {
+      if (isNoisePath(file.filePath)) continue;
+      const username = usernameByCommitId.get(file.commitId);
+      if (!username) continue;
+      const agg = byUsername.get(username);
+      if (!agg) continue;
+      const module = moduleFromPath(file.filePath);
+      agg.modules.set(module, (agg.modules.get(module) ?? 0) + 1);
+    }
+  }
+
+  // Fold a candidate's several usernames into one employee's totals.
+  for (const candidate of candidates) {
+    const categories: Record<string, number> = {};
+    const modules = new Map<string, number>();
+    const projects = new Set<string>();
+    for (const username of candidate.usernames) {
+      const agg = byUsername.get(username);
+      if (!agg) continue;
+      for (const [category, count] of agg.categories) {
+        categories[category] = (categories[category] ?? 0) + count;
+      }
+      for (const [module, count] of agg.modules) {
+        modules.set(module, (modules.get(module) ?? 0) + count);
+      }
+      for (const project of agg.projects) projects.add(project);
+    }
+    const topModules = [...modules.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([module]) => ({ module }));
+    result.set(candidate.userId, {
+      projects: [...projects].sort().slice(0, 6),
+      workType: humanizeWorkMix(categories).text,
+      areas: humanizeAreas(topModules).slice(0, 4)
+    });
+  }
+
+  return result;
+}
+
 function templateCitation(c: Candidate): string {
   const focus = c.sampleMessages[0] ? ` Recent work: “${c.sampleMessages[0]}”.` : "";
   return (
@@ -232,6 +361,13 @@ export async function generateShortlist(actorId: string, input: AwardShortlistIn
   );
   const candidates = scoreCandidates(leaderboard, activeDays);
   const { citations, generatedBy } = await generateCitations(candidates, month.periodKey);
+  const details = await buildAwardDetails(
+    input.organizationId,
+    projectId,
+    candidates,
+    month.rangeStart,
+    month.rangeEnd
+  );
 
   const awards = await prisma.$transaction(async (tx) => {
     await tx.employeeAward.deleteMany({
@@ -265,6 +401,7 @@ export async function generateShortlist(actorId: string, input: AwardShortlistIn
             activeDays: c.activeDays,
             filesChanged: c.filesChanged,
             citation: citations[i]!,
+            detailsJson: details.get(c.userId) ?? undefined,
             generatedBy,
             createdById: actorId
           }
