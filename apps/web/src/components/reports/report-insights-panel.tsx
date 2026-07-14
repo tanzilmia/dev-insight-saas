@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Lightbulb,
   Minus,
+  Rocket,
   TrendingDown,
   TrendingUp,
   UserMinus,
@@ -14,7 +15,8 @@ import type {
   ReportComparison,
   ReportInsight,
   ReportMetricDelta,
-  ReportRankMovement
+  ReportRankMovement,
+  ReportTheme
 } from "@/lib/api";
 
 /**
@@ -69,6 +71,56 @@ const DETAIL_SECTIONS = ["activity", "who did what", "trend vs previous period"]
  */
 export function simplifyReportMarkdown(markdown: string): string {
   return dropSectionsByHeading(markdown, DETAIL_SECTIONS);
+}
+
+const THEME_SECTIONS = ["what shipped"];
+
+/**
+ * Removes the prose "## What shipped" section from report markdown for DISPLAY
+ * only — apply this when a structured {@link ReportThemesPanel} is shown so the
+ * two don't duplicate. The raw markdown still carries it (Telegram / copy / PDF).
+ */
+export function stripThemesSection(markdown: string): string {
+  return dropSectionsByHeading(markdown, THEME_SECTIONS);
+}
+
+const THEME_SIZE_LABEL: Record<ReportTheme["size"], string> = {
+  small: "Small",
+  medium: "Medium",
+  large: "Large"
+};
+
+/** Structured "What shipped" initiatives (Phase 2.5) — the smart clustering. */
+export function ReportThemesPanel({ themes }: { themes?: ReportTheme[] | null }) {
+  if (!themes?.length) {
+    return null;
+  }
+  return (
+    <div className="glass-soft rounded-xl p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Rocket size={15} className="text-(--accent)" />
+        <h3 className="text-sm font-bold text-(--text)">What shipped</h3>
+      </div>
+      <ul className="grid gap-2">
+        {themes.map((theme, index) => (
+          <li
+            key={`${theme.title}-${index}`}
+            className="rounded-lg border border-(--border) bg-(--surface) p-3"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="text-sm font-bold text-(--text)">{theme.title}</span>
+              <span className="shrink-0 rounded-full bg-(--accent-soft) px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-(--accent)">
+                {THEME_SIZE_LABEL[theme.size]}
+              </span>
+            </div>
+            {theme.summary ? (
+              <p className="mt-1 text-xs text-(--muted)">{theme.summary}</p>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function DeltaChip({ delta }: { delta: ReportMetricDelta }) {

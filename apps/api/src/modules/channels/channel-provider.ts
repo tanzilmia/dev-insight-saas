@@ -21,6 +21,19 @@ export interface ChannelProvider {
   /** Send one plain-text message (≤ the channel's per-message limit). */
   sendMessage(token: string, chatId: string, text: string): Promise<void>;
 
+  /**
+   * Send a file attachment (e.g. a long report as a `.md`) with an optional
+   * caption. Optional — providers that can't attach files omit it, and callers
+   * fall back to chunked text messages.
+   */
+  sendDocument?(
+    token: string,
+    chatId: string,
+    filename: string,
+    content: string,
+    caption?: string
+  ): Promise<void>;
+
   /** Max characters per message; callers split longer text into chunks. */
   readonly messageLimit: number;
 }

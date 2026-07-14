@@ -50,7 +50,11 @@ export class TelegramProvider implements ChannelProvider {
     }
 
     const payload = (await response.json().catch(() => null)) as TelegramResponse<T> | null;
+    return this.assertOk(payload);
+  }
 
+  /** Maps Telegram's `{ ok: false, description }` envelope to clean AppErrors. */
+  private assertOk<T>(payload: TelegramResponse<T> | null): T {
     if (!payload) {
       throw new AppError(502, "Telegram returned an unexpected response", "TELEGRAM_BAD_RESPONSE");
     }
@@ -108,5 +112,36 @@ export class TelegramProvider implements ChannelProvider {
       text,
       disable_web_page_preview: true
     });
+  }
+
+  /** Uploads text content as a file via multipart/form-data (`sendDocument`). */
+  async sendDocument(
+    token: string,
+    chatId: string,
+    filename: string,
+    content: string,
+    caption?: string
+  ): Promise<void> {
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    if (caption) {
+      // Telegram caption hard limit is 1024 characters.
+      form.append("caption", caption.slice(0, 1024));
+    }
+    form.append("document", new Blob([content], { type: "text/markdown" }), filename);
+
+    let response: Response;
+    try {
+      // No Content-Type header — fetch sets the multipart boundary itself.
+      response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendDocument`, {
+        method: "POST",
+        body: form
+      });
+    } catch {
+      throw new AppError(502, "Could not reach Telegram", "TELEGRAM_UNREACHABLE");
+    }
+
+    const payload = (await response.json().catch(() => null)) as TelegramResponse<unknown> | null;
+    this.assertOk(payload);
   }
 }

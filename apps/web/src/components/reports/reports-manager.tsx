@@ -51,8 +51,10 @@ import {
 } from "@/components/dashboard/dashboard-chrome";
 import {
   ReportInsightsPanel,
+  ReportThemesPanel,
   simplifyReportMarkdown,
-  stripStructuredSections
+  stripStructuredSections,
+  stripThemesSection
 } from "./report-insights-panel";
 
 const REPORT_TYPES: { value: ReportType; label: string }[] = [
@@ -433,6 +435,7 @@ export function ReportsManager() {
         statistics: selectedReport.statistics ?? emptyStats,
         comparison: selectedReport.comparison ?? null,
         insights: selectedReport.insights ?? null,
+        themes: selectedReport.themes ?? null,
         pending: [] as string[],
         warnings: [] as string[],
         cached: false,
@@ -447,6 +450,7 @@ export function ReportsManager() {
           statistics: result.statistics,
           comparison: result.comparison ?? null,
           insights: result.insights ?? null,
+          themes: result.themes ?? null,
           pending: result.pending,
           warnings: result.warnings ?? [],
           cached: result.cached ?? false,
@@ -459,10 +463,13 @@ export function ReportsManager() {
   // sections, leaving the plain narrative.
   const displayMarkdown = renderedReport
     ? (() => {
-        const stripped =
+        let stripped =
           renderedReport.comparison || renderedReport.insights
             ? stripStructuredSections(renderedReport.markdown)
             : renderedReport.markdown;
+        if (renderedReport.themes?.length) {
+          stripped = stripThemesSection(stripped);
+        }
         return readingMode === "simple" ? simplifyReportMarkdown(stripped) : stripped;
       })()
     : "";
@@ -796,6 +803,12 @@ export function ReportsManager() {
                   showTrend={readingMode === "detailed"}
                 />
               </div>
+
+              {renderedReport.themes?.length ? (
+                <div className="mb-4">
+                  <ReportThemesPanel themes={renderedReport.themes} />
+                </div>
+              ) : null}
 
               {renderedReport.warnings.length ? (
                 <div className="mb-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-bold text-amber-700 dark:text-amber-400">

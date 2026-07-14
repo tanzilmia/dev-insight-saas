@@ -141,13 +141,8 @@ function dateLabel(value: Date | string): string {
   return new Date(value).toISOString().slice(0, 10);
 }
 
-/**
- * Builds the ordered list of Telegram messages for a report: a compact header
- * (title, period, headline stats) followed by the converted body, split to fit
- * the per-message limit. The Markdown's own leading H1 is dropped to avoid
- * duplicating the title.
- */
-export function buildReportMessages(report: ReportLike, limit: number): string[] {
+/** The compact header for a report — title, period, and headline stats. */
+export function buildReportHeader(report: ReportLike): string {
   const stats = report.statistics ?? {};
   const headerLines = [
     `📊 ${report.title}`,
@@ -158,10 +153,19 @@ export function buildReportMessages(report: ReportLike, limit: number): string[]
       `📈 ${stats.commits} commits · +${stats.additions ?? 0}/−${stats.deletions ?? 0} · ${stats.filesChanged ?? 0} files`
     );
   }
+  return headerLines.join("\n");
+}
 
+/**
+ * Builds the ordered list of Telegram messages for a report: a compact header
+ * (title, period, headline stats) followed by the converted body, split to fit
+ * the per-message limit. The Markdown's own leading H1 is dropped to avoid
+ * duplicating the title.
+ */
+export function buildReportMessages(report: ReportLike, limit: number): string[] {
   // Drop a leading H1 (the title) so it isn't shown twice.
   const body = markdownToPlainText(report.markdown.replace(/^\s*#\s+.*(?:\n|$)/, ""));
 
-  const full = `${headerLines.join("\n")}\n\n${body}`.trim();
+  const full = `${buildReportHeader(report)}\n\n${body}`.trim();
   return chunkText(full, limit);
 }

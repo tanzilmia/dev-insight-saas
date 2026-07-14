@@ -25,13 +25,16 @@ import {
   getApiErrorMessage,
   getStatisticsOverview
 } from "@/lib/api";
-import { useSession } from "@/lib/use-session";
+import { canManage, useSession } from "@/lib/use-session";
 import {
   DashboardChrome,
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
+import { AwardsPanel } from "@/components/analysis/awards-panel";
 import { AreaChart, BarList, StatTile } from "./charts";
 import { DailyDigestCard } from "./daily-digest-card";
+import { LeaderboardHistoryPanel } from "./leaderboard-history-panel";
+import { UnmappedNudge } from "./unmapped-nudge";
 
 const PERIODS: { value: StatPeriod; label: string }[] = [
   { value: "yesterday", label: "Yesterday" },
@@ -56,6 +59,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 export function StatisticsDashboard() {
   const { session, status, activeOrganization, logout } = useSession();
   const organizationId = activeOrganization?.id;
+  const manageable = canManage(activeOrganization?.role);
 
   const [period, setPeriod] = useState<StatPeriod>("last_30_days");
   const [overview, setOverview] = useState<StatisticsOverview | null>(null);
@@ -221,7 +225,20 @@ export function StatisticsDashboard() {
           </div>
         ) : null}
 
+        <UnmappedNudge organizationId={organizationId} />
+
         <DailyDigestCard organizationId={organizationId} />
+
+        <LeaderboardHistoryPanel organizationId={organizationId} scope="org" />
+
+        {organizationId ? (
+          <AwardsPanel
+            organizationId={organizationId}
+            scope="org"
+            projectName={null}
+            canManage={manageable}
+          />
+        ) : null}
 
         {error ? (
           <div className="glass rounded-xl p-5 text-sm font-medium text-red-600 dark:text-red-400">

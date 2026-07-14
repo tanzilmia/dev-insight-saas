@@ -276,6 +276,63 @@ export async function addEmployee(actorId: string, input: CreateEmployeeInput) {
   return toEmployee(membership, aliases);
 }
 
+type BulkEmployeeRow = {
+  name: string;
+  email: string;
+  role?: "EMPLOYEE" | "MANAGER" | "ADMIN";
+  gitUsernames?: string[];
+};
+
+type BulkCreateInput = {
+  organizationId: string;
+  employees: BulkEmployeeRow[];
+};
+
+export type BulkEmployeeResult = {
+  email: string;
+  status: "created" | "skipped" | "failed";
+  message?: string;
+};
+
+/**
+ * Bulk-adds employees from a parsed CSV. Each row is created independently with
+ * per-row error capture, so a duplicate or a bad row never aborts the whole
+ * import — an already-a-member row is reported as "skipped", a genuinely bad row
+ * as "failed" (with the reason). Reuses {@link addEmployee} per row so alias
+ * auto-linking, audit logging, and validation all apply exactly as for a single add.
+ */
+export async function addEmployeesBulk(actorId: string, input: BulkCreateInput) {
+  await requireOrganizationRole(actorId, input.organizationId, MANAGER_ROLES);
+
+  const results: BulkEmployeeResult[] = [];
+  let created = 0;
+
+  for (const row of input.employees) {
+    try {
+      await addEmployee(actorId, {
+        organizationId: input.organizationId,
+        name: row.name,
+        email: row.email,
+        role: row.role ?? "EMPLOYEE",
+        gitUsernames: row.gitUsernames
+      });
+      created += 1;
+      results.push({ email: row.email, status: "created" });
+    } catch (error) {
+      const isAppError = error instanceof AppError;
+      const status: BulkEmployeeResult["status"] =
+        isAppError && error.code === "EMPLOYEE_EXISTS" ? "skipped" : "failed";
+      results.push({
+        email: row.email,
+        status,
+        message: isAppError ? error.message : "Could not add this employee"
+      });
+    }
+  }
+
+  return { created, total: input.employees.length, results };
+}
+
 export async function addEmployeeGitAlias(
   actorId: string,
   userId: string,

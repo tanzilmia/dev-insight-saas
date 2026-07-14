@@ -117,6 +117,34 @@ export async function createEmployee(input: {
   return response.data.employee;
 }
 
+export type BulkEmployeeRow = {
+  name: string;
+  email: string;
+  role?: AssignableRole;
+  gitUsernames?: string[];
+};
+
+export type BulkEmployeeResult = {
+  email: string;
+  status: "created" | "skipped" | "failed";
+  message?: string;
+};
+
+export type BulkImportSummary = {
+  created: number;
+  total: number;
+  results: BulkEmployeeResult[];
+};
+
+/** Bulk-add employees parsed from a CSV; each row succeeds/fails independently. */
+export async function bulkCreateEmployees(input: {
+  organizationId: string;
+  employees: BulkEmployeeRow[];
+}) {
+  const response = await api.post<{ result: BulkImportSummary }>("/api/employees/bulk", input);
+  return response.data.result;
+}
+
 export async function addEmployeeGitAlias(
   userId: string,
   input: { organizationId: string; username: string; isPrimary?: boolean }
@@ -561,6 +589,28 @@ export async function listRepositoryContributors(repositoryId: string) {
   return response.data.contributors;
 }
 
+export type UnmappedContributorSample = {
+  username: string | null;
+  avatarUrl: string | null;
+  contributions: number;
+  repositoryCount: number;
+};
+
+export type UnmappedSummary = {
+  count: number;
+  sample: UnmappedContributorSample[];
+};
+
+/** Org-wide count of contributor identities not yet linked to an employee. */
+export async function getUnmappedSummary(organizationId: string) {
+  const response = await api.get<{ summary: UnmappedSummary }>(
+    "/api/contributors/unmapped-summary",
+    { params: { organizationId } }
+  );
+
+  return response.data.summary;
+}
+
 export type ContributorSuggestionMatch = {
   userId: string;
   name: string;
@@ -697,6 +747,12 @@ export type ReportComparison = {
 
 export type ReportInsight = { kind: string; severity: "info" | "warn"; text: string };
 
+export type ReportTheme = {
+  title: string;
+  summary: string;
+  size: "small" | "medium" | "large";
+};
+
 export type GeneratedReport = {
   reportId: string;
   reportType: ReportType;
@@ -715,6 +771,7 @@ export type GeneratedReport = {
   leaderboard?: EmployeeLeaderboardRow[];
   comparison?: ReportComparison | null;
   insights?: ReportInsight[] | null;
+  themes?: ReportTheme[] | null;
   status: ReportStatus;
   pending: string[];
   /** Non-fatal collection notes, e.g. a repo skipped for a missing credential. */
@@ -752,6 +809,7 @@ export type ReportDetail = ReportSummary & {
   shareToken: string | null;
   comparison?: ReportComparison | null;
   insights?: ReportInsight[] | null;
+  themes?: ReportTheme[] | null;
   contributors: ReportContributor[];
 };
 
@@ -800,6 +858,7 @@ export type PublicReport = {
   statistics: ReportStatistics | null;
   comparison?: ReportComparison | null;
   insights?: ReportInsight[] | null;
+  themes?: ReportTheme[] | null;
   createdAt: string;
 };
 

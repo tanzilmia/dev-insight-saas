@@ -7,10 +7,12 @@ import {
   discoverSchema,
   ignoreContributorSchema,
   mapContributorSchema,
+  orgQuerySchema,
   repoQuerySchema
 } from "./contributors.schemas.js";
 import {
   discoverContributors,
+  getUnmappedSummary,
   listContributors,
   listUnmappedContributors,
   mapContributor,
@@ -40,6 +42,16 @@ contributorsRouter.get(
     const contributors = await listUnmappedContributors(req.authUser!.id, repositoryId);
 
     res.status(200).json({ contributors });
+  })
+);
+
+contributorsRouter.get(
+  "/unmapped-summary",
+  asyncHandler(async (req, res) => {
+    const { organizationId } = orgQuerySchema.parse(req.query);
+    const summary = await getUnmappedSummary(req.authUser!.id, organizationId);
+
+    res.status(200).json({ summary });
   })
 );
 

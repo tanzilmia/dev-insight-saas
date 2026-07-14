@@ -6,7 +6,13 @@ import remarkGfm from "remark-gfm";
 import { AlertTriangle, Loader2, Printer, Sparkles } from "lucide-react";
 
 import { type PublicReport, getApiErrorMessage, getPublicReport } from "@/lib/api";
-import { ReportInsightsPanel, stripStructuredSections } from "./report-insights-panel";
+import {
+  ReportInsightsPanel,
+  ReportThemesPanel,
+  simplifyReportMarkdown,
+  stripStructuredSections,
+  stripThemesSection
+} from "./report-insights-panel";
 
 const markdownPlugins = [remarkGfm];
 
@@ -18,6 +24,7 @@ export function SharedReport({ token }: { token: string }) {
   const [report, setReport] = useState<PublicReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [readingMode, setReadingMode] = useState<"simple" | "detailed">("detailed");
 
   // State is set only inside .then/.catch/.finally (deferred), so calling from
   // the effect is safe under react-hooks/set-state-in-effect.
@@ -30,6 +37,19 @@ export function SharedReport({ token }: { token: string }) {
       .catch((caught) => setError(getApiErrorMessage(caught)))
       .finally(() => setLoading(false));
   }, [token]);
+
+  const displayMarkdown = report
+    ? (() => {
+        let stripped =
+          report.comparison || report.insights
+            ? stripStructuredSections(report.markdown)
+            : report.markdown;
+        if (report.themes?.length) {
+          stripped = stripThemesSection(stripped);
+        }
+        return readingMode === "simple" ? simplifyReportMarkdown(stripped) : stripped;
+      })()
+    : "";
 
   return (
     <main className="mx-auto grid min-h-screen max-w-3xl gap-6 px-5 py-10">
@@ -68,7 +88,29 @@ export function SharedReport({ token }: { token: string }) {
             {formatDate(report.period.to)}
           </p>
 
-          {report.statistics ? (
+          <div className="mt-4 flex items-center justify-between gap-2 print:hidden">
+            <div className="inline-flex rounded-lg border border-(--border) bg-(--surface-soft) p-0.5 text-xs font-bold">
+              {(["simple", "detailed"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setReadingMode(mode)}
+                  className={`rounded-md px-2.5 py-1 capitalize transition ${
+                    readingMode === mode
+                      ? "bg-(--accent) text-white"
+                      : "text-(--muted) hover:text-(--text)"
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <span className="text-[10px] font-medium text-(--muted)">
+              {readingMode === "simple" ? "Plain summary — no numbers" : "Full report with metrics"}
+            </span>
+          </div>
+
+          {readingMode === "detailed" && report.statistics ? (
             <div className="my-5 grid grid-cols-4 gap-2 text-center">
               {[
                 ["Commits", report.statistics.commits],
@@ -87,15 +129,21 @@ export function SharedReport({ token }: { token: string }) {
           ) : null}
 
           <div className="my-5">
-            <ReportInsightsPanel comparison={report.comparison} insights={report.insights} />
+            <ReportInsightsPanel
+              comparison={report.comparison}
+              insights={report.insights}
+              showTrend={readingMode === "detailed"}
+            />
           </div>
 
+          {report.themes?.length ? (
+            <div className="my-5">
+              <ReportThemesPanel themes={report.themes} />
+            </div>
+          ) : null}
+
           <div className="report-md">
-            <ReactMarkdown remarkPlugins={markdownPlugins}>
-              {report.comparison || report.insights
-                ? stripStructuredSections(report.markdown)
-                : report.markdown}
-            </ReactMarkdown>
+            <ReactMarkdown remarkPlugins={markdownPlugins}>{displayMarkdown}</ReactMarkdown>
           </div>
         </article>
       ) : null}

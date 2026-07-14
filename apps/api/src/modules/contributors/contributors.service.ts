@@ -131,6 +131,64 @@ export async function listUnmappedContributors(actorId: string, repositoryId: st
 }
 
 /**
+ * Org-wide count of unmapped, non-ignored contributor identities, deduped by
+ * GitHub username (an unmapped person appears once even if they contribute to
+ * several repos). Powers the Overview "unlinked contributors" nudge — an
+ * unmapped author is exactly the person who would be invisible in reports.
+ */
+export async function getUnmappedSummary(actorId: string, organizationId: string) {
+  await requireOrganizationMember(actorId, organizationId);
+
+  const identities = await prisma.contributorIdentity.findMany({
+    where: {
+      repository: { organizationId },
+      ignored: false,
+      mapping: null
+    },
+    orderBy: { contributions: "desc" },
+    select: {
+      externalId: true,
+      username: true,
+      avatarUrl: true,
+      contributions: true,
+      repositoryId: true
+    }
+  });
+
+  // Dedupe by username (lowercased); fall back to externalId for null usernames.
+  const byKey = new Map<
+    string,
+    { username: string | null; avatarUrl: string | null; contributions: number; repositories: Set<string> }
+  >();
+  for (const identity of identities) {
+    const key = identity.username ? `u:${identity.username.toLowerCase()}` : `x:${identity.externalId}`;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.contributions += identity.contributions;
+      existing.repositories.add(identity.repositoryId);
+    } else {
+      byKey.set(key, {
+        username: identity.username,
+        avatarUrl: identity.avatarUrl,
+        contributions: identity.contributions,
+        repositories: new Set([identity.repositoryId])
+      });
+    }
+  }
+
+  const people = [...byKey.values()].sort((a, b) => b.contributions - a.contributions);
+  return {
+    count: people.length,
+    sample: people.slice(0, 6).map((person) => ({
+      username: person.username,
+      avatarUrl: person.avatarUrl,
+      contributions: person.contributions,
+      repositoryCount: person.repositories.size
+    }))
+  };
+}
+
+/**
  * Core discovery for a single repository: fetches contributors + collaborators,
  * upserts them as identities (auto-ignoring bot accounts on first insert), and
  * auto-links any that match a declared employee alias. Assumes the caller has

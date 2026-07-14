@@ -10,6 +10,10 @@ export const repoQuerySchema = z.object({
   repositoryId
 });
 
+export const orgQuerySchema = z.object({
+  organizationId: z.string().min(1)
+});
+
 export const contributorParamsSchema = z.object({
   id: z.string().min(1)
 });

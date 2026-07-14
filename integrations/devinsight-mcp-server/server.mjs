@@ -42,7 +42,7 @@ function buildServer() {
 
   server.tool(
     "devinsight_generate_report",
-    "Generate a developer work report (repository/project/employee/team) over a period from real Git activity. Returns Markdown. Resolve ids via devinsight_context first if the user gave names. For an arbitrary window (e.g. 'Jan 1 to Mar 31', 'the first 3 months of 2025'), pass period='custom' with customRange {from, to} as ISO dates (YYYY-MM-DD). Named windows: today, yesterday, last_7_days, last_30_days, last_90_days, this_month, last_month.",
+    "Generate a developer work report (repository/project/employee/team) over a period from real Git activity. Returns Markdown. Resolve ids via devinsight_context first if the user gave names. For an arbitrary window (e.g. 'Jan 1 to Mar 31', 'the first 3 months of 2025'), pass period='custom' with customRange {from, to} as ISO dates (YYYY-MM-DD). Named windows: today, yesterday, last_7_days, last_30_days, last_90_days, this_month, last_month. To scope the report to a single branch, pass branch with an exact branch name (valid names are listed per repository in devinsight_context); omit it to read across all branches.",
     {
       reportType: z.enum(["repository", "project", "employee", "team"]),
       repositoryId: z.string().optional(),
@@ -60,7 +60,8 @@ function buildServer() {
           "custom"
         ])
         .optional(),
-      customRange: z.object({ from: z.string(), to: z.string() }).optional()
+      customRange: z.object({ from: z.string(), to: z.string() }).optional(),
+      branch: z.string().optional()
     },
     async (args) => {
       const data = await callDevInsight("/api/openclaw/tools/generate-report", {
@@ -73,7 +74,8 @@ function buildServer() {
           reportType: args.reportType,
           repositoryId: args.repositoryId,
           projectId: args.projectId,
-          employeeIds: args.employeeIds
+          employeeIds: args.employeeIds,
+          branch: args.branch
         }
       });
       return { content: [{ type: "text", text: data.report?.markdown ?? "No report produced." }] };

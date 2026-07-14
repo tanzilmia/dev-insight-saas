@@ -9,7 +9,7 @@ import {
 } from "../../common/access/organization-access.js";
 import { decryptToken, encryptToken, tokenLast4 } from "../../common/crypto/token-cipher.js";
 import { getChannelProvider } from "./channel-registry.js";
-import { buildReportMessages } from "./telegram-format.js";
+import { buildReportHeader, buildReportMessages } from "./telegram-format.js";
 import type {
   CreateChannelInput,
   DetectChatsInput,
@@ -179,6 +179,69 @@ type ReportLike = {
   } | null;
 };
 
+// A report longer than this is delivered as a single `.md` attachment (with a
+// compact header message) instead of many fragmented text chunks.
+const LONG_REPORT_CHARS = 3600;
+
+function reportFilename(report: ReportLike): string {
+  const slug =
+    report.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "report";
+  const period = `${new Date(report.periodStart).toISOString().slice(0, 10)}_${new Date(
+    report.periodEnd
+  )
+    .toISOString()
+    .slice(0, 10)}`;
+  return `${slug}_${period}.md`;
+}
+
+/**
+ * Delivers a report to a channel, choosing the format: a long report goes out as
+ * one compact header message + the full Markdown as a `.md` attachment (when the
+ * provider supports files), so managers get the whole thing un-fragmented. Short
+ * reports go as plain chunked text. Decrypts the token once and records delivery.
+ */
+async function deliverReport(channel: NotificationChannel, report: ReportLike) {
+  const provider = getChannelProvider(channel.type);
+  const token = decryptToken(channel.encryptedToken);
+  try {
+    let mode: "messages" | "document" = "messages";
+    let count = 1;
+    if (provider.sendDocument && report.markdown.length > LONG_REPORT_CHARS) {
+      await provider.sendMessage(token, channel.chatId, buildReportHeader(report));
+      await provider.sendDocument(
+        token,
+        channel.chatId,
+        reportFilename(report),
+        report.markdown,
+        "Full report attached as Markdown."
+      );
+      mode = "document";
+    } else {
+      const messages = buildReportMessages(report, provider.messageLimit);
+      for (const message of messages) {
+        await provider.sendMessage(token, channel.chatId, message);
+      }
+      count = messages.length;
+    }
+    await prisma.notificationChannel.update({
+      where: { id: channel.id },
+      data: { lastDeliveryAt: new Date(), lastDeliveryStatus: "ok", lastDeliveryError: null }
+    });
+    return { mode, count };
+  } catch (error) {
+    const message = (error as Error).message.slice(0, 500);
+    await prisma.notificationChannel.update({
+      where: { id: channel.id },
+      data: { lastDeliveryAt: new Date(), lastDeliveryStatus: "error", lastDeliveryError: message }
+    });
+    throw error;
+  }
+}
+
 /** Sends a saved report to a channel — the "Send to Telegram" button. */
 export async function sendReportToChannel(actorId: string, input: SendReportInput) {
   const channel = await loadOwnedChannel(actorId, input.channelId);
@@ -191,20 +254,15 @@ export async function sendReportToChannel(actorId: string, input: SendReportInpu
   }
 
   const stats = (report.statisticsJson as ReportLike["statistics"]) ?? null;
-  const provider = getChannelProvider(channel.type);
-  const messages = buildReportMessages(
-    {
-      title: report.title,
-      markdown: report.markdownContent,
-      periodStart: report.periodStart,
-      periodEnd: report.periodEnd,
-      statistics: stats
-    },
-    provider.messageLimit
-  );
+  const result = await deliverReport(channel, {
+    title: report.title,
+    markdown: report.markdownContent,
+    periodStart: report.periodStart,
+    periodEnd: report.periodEnd,
+    statistics: stats
+  });
 
-  await sendMessages(channel, messages);
-  return { ok: true as const, messages: messages.length };
+  return { ok: true as const, mode: result.mode, messages: result.count };
 }
 
 /**
@@ -225,9 +283,7 @@ export async function deliverReportForSchedule(
     if (!channel.enabled) {
       return { ok: false, error: "channel disabled" };
     }
-    const provider = getChannelProvider(channel.type);
-    const messages = buildReportMessages(report, provider.messageLimit);
-    await sendMessages(channel, messages);
+    await deliverReport(channel, report);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: (error as Error).message.slice(0, 300) };

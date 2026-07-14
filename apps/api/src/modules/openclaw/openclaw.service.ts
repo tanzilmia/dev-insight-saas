@@ -10,6 +10,7 @@ import { buildProjectEmployeeSignals } from "../analysis/analysis.service.js";
 import { buildComparison } from "../report-engine/comparison.js";
 import { buildInsights } from "../report-engine/insights.js";
 import { buildCaveats } from "../report-engine/plain-language.js";
+import { type ReportTheme, buildThemesPrompt, parseThemes } from "../report-engine/themes.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
 import { createReport, findCachedReport } from "../reports/reports.service.js";
 import type { GenerateReportInput } from "./openclaw.schemas.js";
@@ -223,6 +224,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
         leaderboard,
         comparison,
         insights,
+        themes: cached.themes ?? [],
         caveats,
         status: "GENERATED" as const,
         pending: [] as string[],
@@ -292,6 +294,19 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     }
   }
 
+  // Phase 2.5 — a dedicated structured clustering pass so "What shipped" can render
+  // as a panel (not only prose). Reuses the already-fetched commit sample (no extra
+  // DB/Git call) and only runs on a successful LLM report. Best-effort: a failure
+  // here just yields no structured themes; the prose "## What shipped" still renders.
+  let themes: ReportTheme[] = [];
+  if (llm.available && !input.customPrompt && status === "GENERATED" && commits.length >= 3) {
+    try {
+      themes = parseThemes(await llm.complete(buildThemesPrompt(commits)));
+    } catch (error) {
+      console.warn("Theme clustering failed; skipping structured themes.", error);
+    }
+  }
+
   // Bake the deterministic caveats into the persisted markdown so they show in
   // every channel (dashboard, history, share link, Telegram) regardless of generator.
   markdown = appendCaveats(markdown, caveats);
@@ -310,6 +325,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     statistics,
     comparison,
     insights,
+    themes,
     status,
     generatedBy: status === "GENERATED" ? "llm" : "template",
     // Only fingerprint LLM reports — the cache reuses those, never the template.
@@ -354,6 +370,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     leaderboard,
     comparison,
     insights,
+    themes,
     caveats,
     status,
     pending,

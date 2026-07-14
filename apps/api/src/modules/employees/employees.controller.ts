@@ -4,6 +4,7 @@ import { asyncHandler } from "../../common/http/async-handler.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import {
   addGitAliasSchema,
+  bulkCreateEmployeesSchema,
   createEmployeeSchema,
   employeeParamsSchema,
   gitAliasParamsSchema,
@@ -14,6 +15,7 @@ import {
 import {
   addEmployee,
   addEmployeeGitAlias,
+  addEmployeesBulk,
   getEmployee,
   listEmployees,
   removeEmployeeGitAlias,
@@ -41,6 +43,16 @@ employeesRouter.post(
     const employee = await addEmployee(req.authUser!.id, payload);
 
     res.status(201).json({ employee });
+  })
+);
+
+employeesRouter.post(
+  "/bulk",
+  asyncHandler(async (req, res) => {
+    const payload = bulkCreateEmployeesSchema.parse(req.body);
+    const result = await addEmployeesBulk(req.authUser!.id, payload);
+
+    res.status(200).json({ result });
   })
 );
 

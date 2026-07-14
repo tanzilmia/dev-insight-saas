@@ -42,7 +42,9 @@ import { ComparePanel } from "./compare-panel";
 import { AwardsPanel } from "./awards-panel";
 import {
   ReportInsightsPanel,
-  stripStructuredSections
+  ReportThemesPanel,
+  stripStructuredSections,
+  stripThemesSection
 } from "@/components/reports/report-insights-panel";
 
 const PERIODS: { value: AnalysisPeriod; label: string }[] = [
@@ -448,11 +450,23 @@ export function AnalysisManager({
             <div className="mb-3">
               <ReportInsightsPanel comparison={aiReport.comparison} insights={aiReport.insights} />
             </div>
+            {aiReport.themes?.length ? (
+              <div className="mb-3">
+                <ReportThemesPanel themes={aiReport.themes} />
+              </div>
+            ) : null}
             <div className="report-md glass-soft max-h-128 overflow-y-auto rounded-lg px-4 py-3 text-sm">
               <ReactMarkdown remarkPlugins={markdownPlugins}>
-                {aiReport.comparison || aiReport.insights
-                  ? stripStructuredSections(aiReport.markdown)
-                  : aiReport.markdown}
+                {(() => {
+                  let md =
+                    aiReport.comparison || aiReport.insights
+                      ? stripStructuredSections(aiReport.markdown)
+                      : aiReport.markdown;
+                  if (aiReport.themes?.length) {
+                    md = stripThemesSection(md);
+                  }
+                  return md;
+                })()}
               </ReactMarkdown>
             </div>
           </div>

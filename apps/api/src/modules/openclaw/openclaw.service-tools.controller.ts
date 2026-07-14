@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { asyncHandler } from "../../common/http/async-handler.js";
+import { listBranchNamesForRepositories } from "../activity/activity.service.js";
 import { listEmployees } from "../employees/employees.service.js";
 import { listProjects } from "../projects/projects.service.js";
 import { listRepositories } from "../repositories/repositories.service.js";
@@ -49,11 +50,14 @@ openclawServiceRouter.get(
       listEmployees(requesterId, organizationId)
     ]);
 
+    const branchesByRepo = await listBranchNamesForRepositories(repositories.map((repo) => repo.id));
+
     res.status(200).json({
       context: {
         repositories: repositories.map((repo) => ({
           id: repo.id,
-          fullName: repo.fullName
+          fullName: repo.fullName,
+          branches: branchesByRepo.get(repo.id) ?? []
         })),
         projects: projects.map((project) => ({ id: project.id, name: project.name })),
         employees: employees.map((employee) => ({

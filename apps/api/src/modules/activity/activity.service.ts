@@ -665,6 +665,31 @@ export async function getRepositoryBranches(actorId: string, repositoryId: strin
   }));
 }
 
+/**
+ * Distinct branch names for a set of repositories, grouped by repository.
+ * Used by the OpenClaw context tool so the chat agent can resolve valid branch
+ * names. No per-repo auth check — the caller has already authorized the repos.
+ */
+export async function listBranchNamesForRepositories(
+  repositoryIds: string[]
+): Promise<Map<string, string[]>> {
+  const grouped = new Map<string, string[]>();
+  if (!repositoryIds.length) return grouped;
+
+  const branches = await prisma.branch.findMany({
+    where: { repositoryId: { in: repositoryIds } },
+    orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    select: { repositoryId: true, name: true }
+  });
+
+  for (const branch of branches) {
+    const existing = grouped.get(branch.repositoryId);
+    if (existing) existing.push(branch.name);
+    else grouped.set(branch.repositoryId, [branch.name]);
+  }
+  return grouped;
+}
+
 export type ActivityQuery = {
   organizationId: string;
   repositoryId?: string;

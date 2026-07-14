@@ -30,6 +30,7 @@ import {
   DashboardChrome,
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
+import { EmployeeBulkImport } from "./employee-bulk-import";
 
 const ROLE_OPTIONS: AssignableRole[] = ["EMPLOYEE", "MANAGER", "ADMIN"];
 
@@ -460,11 +461,19 @@ export function EmployeesManager() {
                 {submitting ? "Adding..." : "Add employee"}
               </button>
             </form>
-          ) : (
+          ) : null}
+
+          {manageable && organizationId ? (
+            <div className="mt-4 border-t border-(--border) pt-4">
+              <EmployeeBulkImport organizationId={organizationId} onImported={refresh} />
+            </div>
+          ) : null}
+
+          {!manageable ? (
             <p className="mt-5 rounded-lg border border-(--border) bg-(--surface-soft) px-3.5 py-2.5 text-sm font-medium text-(--muted)">
               You have read-only access. Ask an owner or manager to add employees.
             </p>
-          )}
+          ) : null}
         </section>
 
         <section className="animate-rise min-w-0 [animation-delay:80ms]">

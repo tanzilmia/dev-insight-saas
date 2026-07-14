@@ -29,6 +29,24 @@ export const createEmployeeSchema = z.object({
   gitUsernames: z.array(gitUsername).max(20).optional()
 });
 
+/** A single row of the bulk CSV import. `role` defaults to EMPLOYEE downstream. */
+const bulkEmployeeRowSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  email: z
+    .string()
+    .trim()
+    .email()
+    .max(120)
+    .transform((email) => email.toLowerCase()),
+  role: assignableRoleSchema.optional(),
+  gitUsernames: z.array(gitUsername).max(20).optional()
+});
+
+export const bulkCreateEmployeesSchema = z.object({
+  organizationId,
+  employees: z.array(bulkEmployeeRowSchema).min(1).max(500)
+});
+
 export const gitAliasParamsSchema = z.object({
   userId: z.string().min(1),
   aliasId: z.string().min(1)

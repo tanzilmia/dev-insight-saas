@@ -5,7 +5,7 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-13.
+> Last updated: 2026-07-14.
 
 ---
 
@@ -1440,6 +1440,85 @@ build clean; pure helpers unit-verified (8 cases).
 - **Deferred (v1 boundary):** an optional LLM "what they shipped" narrative button
   (reuse the employee report); active-days-based team rank; export beyond print;
   a per-employee trend across multiple appraisal windows.
+
+### Deferred-polish batch — all 9 small items cleared (2026-07-14) ✅
+
+The remaining "small deferred polish" list (share-page reading mode, chat/MCP
+branch, leaderboard-history chart, org-wide awards UI, unmapped nudge, structured
+theme panel, bulk CSV import, Telegram `.md` attachment, conversational Telegram)
+— all done. typecheck + lint + build clean both workspaces; `parseThemes` (11
+cases) and the CSV parser (edge cases) unit-verified.
+
+1. **Share-page reading mode.** `shared-report.tsx` gained the same Simple/Detailed
+   segmented toggle as `reports-manager` (default Detailed): imports
+   `simplifyReportMarkdown`, gates the stat tiles + trend tiles to Detailed, and
+   composes `simplifyReportMarkdown(stripStructuredSections(...))` for Simple. Toggle
+   is `print:hidden` so the PDF prints whatever mode is on screen.
+2. **chat/MCP branch param.** `integrations/devinsight-mcp-server/server.mjs`
+   `devinsight_generate_report` now takes optional `branch` (schema + POST body);
+   the backend already threaded `branch` end-to-end, so no API change was needed
+   there. For discovery, the context endpoint (`/api/openclaw/tools/context`) now
+   returns each repo's branch names via a new `listBranchNamesForRepositories`
+   (`activity.service.ts`, no per-repo auth — the repo list is already authorized),
+   and `devinsight_context` surfaces them so the agent can resolve valid branches.
+3. **Leaderboard-history trend chart.** New `components/statistics/leaderboard-history-panel.tsx`
+   (self-loading, `scope` "org"/projectId, Commits/Lines + Daily/Weekly/Monthly
+   toggles) renders an `AreaChart` of the snapshot totals (reversed to oldest→newest)
+   + a `BarList` of the latest period's leaders. Uses the existing
+   `getLeaderboardHistory` helper. Rendered org-scoped on the Overview. Loading is
+   toggled in the granularity button handler (not the effect) per the Next 16 rule.
+4. **Org-wide awards UI.** `AwardsPanel` was already scope-agnostic; now also rendered
+   on the **Overview** with `scope="org"` (`statistics-dashboard.tsx`, guarded on
+   `organizationId`, `canManage` imported from `use-session`). Backend already
+   supported `scope="org"` on all three award endpoints.
+5. **Unmapped-contributor nudge.** New org-wide summary: `getUnmappedSummary`
+   (`contributors.service.ts`, deduped by username) + `GET /api/contributors/unmapped-summary`
+   + web `getUnmappedSummary`. New `components/statistics/unmapped-nudge.tsx` — a quiet
+   amber Overview card ("N contributors not linked… → Map contributors") that returns
+   `null` when everyone is mapped or it can't load.
+6. **Structured theme panel (Phase 2.5).** New pure `report-engine/themes.ts`
+   (`buildThemesPrompt` + robust `parseThemes` — tolerant of fences/preamble, caps 6,
+   truncates, size-defaults to medium). `orchestrateReport` does a dedicated best-effort
+   clustering call (`buildThemesPrompt(commits)` reusing the already-fetched 60-commit
+   sample — **no extra DB/Git call**) only on a successful LLM report with ≥3 commits;
+   the result is **persisted in `statisticsJson`** alongside comparison/insights (so
+   history + shared reports carry it) and returned on both cache-hit and fresh paths.
+   Web: `ReportTheme` type on `GeneratedReport`/`ReportDetail`/`PublicReport`; new
+   `ReportThemesPanel` + `stripThemesSection` in `report-insights-panel.tsx`; the panel
+   renders (and the prose "## What shipped" is stripped from on-screen markdown only —
+   raw markdown keeps it for copy/download/Telegram) in **reports-manager**,
+   **shared-report**, and the **Analysis AI-report**. Note: this is a **second** (cheap,
+   cached) LLM call per fresh report — intentional per the 2.5 plan; template reports get
+   no themes (semantic clustering needs an LLM).
+7. **Bulk CSV employee import.** Backend `addEmployeesBulk` (`employees.service.ts`,
+   loops `addEmployee` per row with per-row capture: `created`/`skipped`(already a
+   member)/`failed`+reason) + `bulkCreateEmployeesSchema` (≤500 rows) +
+   `POST /api/employees/bulk`. Web `bulkCreateEmployees` helper + new
+   `components/employees/employee-bulk-import.tsx` — collapsible panel with paste/upload,
+   a client CSV parser (`name,email,role,github-handles`; header skipped; handles split
+   on space/`;`/`|`; malformed rows reported not dropped), a preview, and a
+   created/skipped/failed summary. Rendered in the Employees left column (manager-only).
+8. **Long Telegram report → `.md` attachment.** `ChannelProvider` gained optional
+   `sendDocument?`; `TelegramProvider.sendDocument` uploads via multipart `FormData`
+   (`Blob`, no JSON Content-Type) reusing a refactored `assertOk` error mapping.
+   `channels.service.ts` new shared `deliverReport(channel, report)`: a report >3600
+   chars goes out as a compact **header message + full `.md` attachment** (un-fragmented);
+   shorter ones stay chunked text. Both `sendReportToChannel` and
+   `deliverReportForSchedule` (scheduler) now route through it. `telegram-format.ts`
+   exposes `buildReportHeader` (extracted from `buildReportMessages`).
+9. **Conversational Telegram → OpenClaw.** No DevInsight code needed (confirmed): the
+   same agent + DevInsight MCP tools that power the web chat answer Telegram messages via
+   an OpenClaw **channel registration** (long-polling; no inbound webhook). Documented
+   step-by-step in `docs/OPENCLAW_SETUP.md` (new "Conversational Telegram" section) incl.
+   the two-Telegram-features distinction (outbound delivery vs inbound chat) and the
+   single-org caveat (the MCP server pins one org via `run.sh`; multi-org needs per-chat
+   org resolution — future).
+
+**Follow-ups still open (documented boundaries):** noise-adjusting the aggregate trend
+totals; a leaderboard-history endpoint that fills gaps for periods with no snapshot yet;
+an org-wide unmapped endpoint that counts distinct people across mapped+unmapped (current
+one counts unmapped identities deduped by username); making the conversational Telegram
+path multi-org.
 
 ### 11.6 Smart Data & Reporting Engine (agreed plan, in progress)
 

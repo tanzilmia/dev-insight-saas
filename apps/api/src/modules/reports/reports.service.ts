@@ -11,6 +11,7 @@ import { AppError } from "../../common/errors/app-error.js";
 import { prisma } from "../../config/database.js";
 import type { ReportComparison } from "../report-engine/comparison.js";
 import type { Insight } from "../report-engine/insights.js";
+import type { ReportTheme } from "../report-engine/themes.js";
 import type { ReportType } from "../openclaw/openclaw.schemas.js";
 
 type ReportStatistics = {
@@ -30,6 +31,7 @@ function splitStatistics(json: unknown): {
   statistics: ReportStatistics | null;
   comparison: ReportComparison | null;
   insights: Insight[] | null;
+  themes: ReportTheme[] | null;
 } {
   const j = (json ?? {}) as Record<string, unknown>;
   const statistics =
@@ -44,7 +46,8 @@ function splitStatistics(json: unknown): {
   return {
     statistics,
     comparison: (j.comparison as ReportComparison | undefined) ?? null,
-    insights: (j.insights as Insight[] | undefined) ?? null
+    insights: (j.insights as Insight[] | undefined) ?? null,
+    themes: (j.themes as ReportTheme[] | undefined) ?? null
   };
 }
 
@@ -69,6 +72,7 @@ type CreateReportInput = {
   statistics: ReportStatistics;
   comparison?: ReportComparison | null;
   insights?: Insight[] | null;
+  themes?: ReportTheme[] | null;
   status: "GENERATED" | "PARTIAL";
   generatedBy: "llm" | "template";
   dataFingerprint?: string;
@@ -106,7 +110,7 @@ function toContributor(contributor: ReportContributor) {
 }
 
 function toDetail(report: ReportWithContributors) {
-  const { comparison, insights } = splitStatistics(report.statisticsJson);
+  const { comparison, insights, themes } = splitStatistics(report.statisticsJson);
   return {
     ...toSummary(report),
     markdown: report.markdownContent,
@@ -116,6 +120,7 @@ function toDetail(report: ReportWithContributors) {
     shareToken: report.shareToken,
     comparison,
     insights,
+    themes,
     contributors: report.contributors.map(toContributor)
   };
 }
@@ -126,7 +131,8 @@ export async function createReport(input: CreateReportInput) {
   const statisticsJson = {
     ...input.statistics,
     ...(input.comparison ? { comparison: input.comparison } : {}),
-    ...(input.insights?.length ? { insights: input.insights } : {})
+    ...(input.insights?.length ? { insights: input.insights } : {}),
+    ...(input.themes?.length ? { themes: input.themes } : {})
   } as unknown as Prisma.InputJsonObject;
 
   const report = await prisma.$transaction(async (tx) => {
@@ -330,7 +336,7 @@ export async function getPublicReport(token: string) {
   if (!report) {
     throw new AppError(404, "This shared report is no longer available", "SHARED_REPORT_NOT_FOUND");
   }
-  const { statistics, comparison, insights } = splitStatistics(report.statisticsJson);
+  const { statistics, comparison, insights, themes } = splitStatistics(report.statisticsJson);
   return {
     title: report.title,
     markdown: report.markdownContent,
@@ -341,6 +347,7 @@ export async function getPublicReport(token: string) {
     statistics,
     comparison,
     insights,
+    themes,
     createdAt: report.createdAt
   };
 }
