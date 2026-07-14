@@ -7,7 +7,7 @@ import {
   requireOrganizationMember,
   requireOrganizationRole
 } from "../../common/access/organization-access.js";
-import { decryptToken } from "../../common/crypto/token-cipher.js";
+import { resolveRepositoryToken } from "../github-app/repository-token.js";
 import {
   classifyCommit,
   hasRiskKeyword,
@@ -145,17 +145,9 @@ export async function collectActivity(actorId: string, repositoryId: string, ran
   const repository = await loadRepository(repositoryId);
   await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
 
-  const credential = repository.credentialId
-    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
-    : null;
-
-  if (!credential) {
-    throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
-  }
+  const { token, provider } = await resolveRepositoryToken(repository);
 
   const { since, until } = resolveRange(range);
-  const token = decryptToken(credential.encryptedToken);
-  const provider = getGitProvider(credential.provider);
 
   // Manual Collect means "make the DB match GitHub for this window": re-list
   // everything (dedup keeps it cheap) so commits pushed after an earlier
@@ -566,16 +558,14 @@ export async function ensureActivityCollected(
 
   for (const repository of repositories) {
     try {
-      const credential = repository.credentialId
-        ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
-        : null;
-      if (!credential) {
-        warnings.push(`${repository.fullName}: no Git credential, skipped`);
+      let access: Awaited<ReturnType<typeof resolveRepositoryToken>>;
+      try {
+        access = await resolveRepositoryToken(repository);
+      } catch {
+        warnings.push(`${repository.fullName}: no Git access, skipped`);
         continue;
       }
-
-      const token = decryptToken(credential.encryptedToken);
-      const provider = getGitProvider(credential.provider);
+      const { token, provider } = access;
       const result = await ingestRepository(repository, token, provider, from, until, {
         relistTailFrom
       });

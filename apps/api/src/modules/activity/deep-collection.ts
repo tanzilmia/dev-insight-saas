@@ -7,9 +7,8 @@ import {
   requireOrganizationMember,
   requireOrganizationRole
 } from "../../common/access/organization-access.js";
-import { decryptToken } from "../../common/crypto/token-cipher.js";
-import { getGitProvider } from "../git-providers/provider-registry.js";
 import { GitRateLimitError } from "../git-providers/git-provider.js";
+import { hasGitAccess, resolveRepositoryToken } from "../github-app/repository-token.js";
 import type { Interval } from "./coverage.js";
 import { getMissingRanges, ingestBranchRange, syncBranches } from "./activity.service.js";
 
@@ -96,11 +95,12 @@ export async function startDeepCollection(
   const repository = await loadRepository(repositoryId);
   await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
 
-  const credential = repository.credentialId
-    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
-    : null;
-  if (!credential) {
-    throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
+  if (!hasGitAccess(repository)) {
+    throw new AppError(
+      400,
+      "This repository has no GitHub access. Connect the GitHub App or a credential.",
+      "NO_CREDENTIAL"
+    );
   }
 
   const active = await prisma.collectionJob.findFirst({
@@ -276,17 +276,16 @@ export async function runCollectionJob(jobId: string): Promise<void> {
   }
 
   const repository = job.repository;
-  const credential = repository.credentialId
-    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
-    : null;
-  if (!credential) {
-    await finalizeJob(jobId, "FAILED", "The organization's Git credential was removed");
+  let access: Awaited<ReturnType<typeof resolveRepositoryToken>>;
+  try {
+    access = await resolveRepositoryToken(repository);
+  } catch {
+    await finalizeJob(jobId, "FAILED", "The repository's GitHub access was removed");
     return;
   }
 
   try {
-    const token = decryptToken(credential.encryptedToken);
-    const provider = getGitProvider(credential.provider);
+    const { token, provider } = access;
 
     await setJob(jobId, { currentPhase: "syncing-branches", heartbeatAt: new Date() });
     const branches = await syncBranches(repository, token, provider);

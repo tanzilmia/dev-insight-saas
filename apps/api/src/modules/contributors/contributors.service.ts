@@ -12,9 +12,8 @@ import {
   requireOrganizationMember,
   requireOrganizationRole
 } from "../../common/access/organization-access.js";
-import { decryptToken } from "../../common/crypto/token-cipher.js";
 import type { GitContributor } from "../git-providers/git-provider.js";
-import { getGitProvider } from "../git-providers/provider-registry.js";
+import { resolveRepositoryToken } from "../github-app/repository-token.js";
 import { autoLinkRepositoryContributors, normalizeHandle } from "./auto-link.js";
 
 type IdentityWithMapping = ContributorIdentity & {
@@ -200,16 +199,7 @@ export async function discoverContributorsForRepository(
   repository: Repository,
   actorId: string | null
 ): Promise<number> {
-  const credential = repository.credentialId
-    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
-    : null;
-
-  if (!credential) {
-    throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
-  }
-
-  const token = decryptToken(credential.encryptedToken);
-  const provider = getGitProvider(credential.provider);
+  const { token, provider } = await resolveRepositoryToken(repository);
 
   const contributors = await provider.listContributors(
     token,
@@ -258,7 +248,7 @@ export async function discoverContributorsForRepository(
         create: {
           organizationId: repository.organizationId,
           repositoryId: repository.id,
-          provider: credential.provider,
+          provider: repository.provider,
           externalId: contributor.externalId,
           username: contributor.username,
           avatarUrl: contributor.avatarUrl,
