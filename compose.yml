@@ -1,0 +1,12 @@
+# Unified local Docker project for DevInsight.
+#
+# OpenClaw keeps its source, state, and secrets in the sibling repository. Compose's
+# include support lets DevInsight own the container lifecycle without copying that
+# upstream configuration here.
+name: devinsight
+
+include:
+  - path: ./docker-compose.sonar.yml
+  - path: ../openclaw/docker-compose.yml
+    project_directory: ../openclaw
+    env_file: ../openclaw/.env

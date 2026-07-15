@@ -5,7 +5,7 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-14.
+> Last updated: 2026-07-15.
 
 ---
 
@@ -433,6 +433,12 @@ How it was wired (this machine):
   gateway on 18789. LLM = **Z.ai GLM-5.2** on the **Coding Plan endpoint** (see
   `docs/OPENCLAW_SETUP.md`). OpenAI-compat HTTP endpoint enabled
   (`gateway.http.endpoints.chatCompletions`). Chat model alias = `openclaw/default`.
+- **Unified Docker project:** root `compose.yml` includes both
+  `docker-compose.sonar.yml` and `../openclaw/docker-compose.yml` under the explicit
+  project name `devinsight`. OpenClaw's `.env`, source, and host-mounted state remain in
+  the sibling repository. `npm run docker:up` starts SonarDB, SonarQube, and only the
+  long-running gateway; `npm run docker:down` stops them without deleting data;
+  `npm run docker:openclaw:cli -- <args>` runs the helper CLI as a one-off container.
 - **Report tools via an MCP server, NOT the TS plugin.** `integrations/devinsight-mcp-server/`
   (streamable-HTTP, host-run on :4100) exposes `devinsight_context` +
   `devinsight_generate_report` calling `/api/openclaw/tools/*`. Registered with
@@ -440,8 +446,9 @@ How it was wired (this machine):
   the ignored OpenClaw `.env` supplies `DEVINSIGHT_MCP_TOKEN`.
   The `../devinsight-openclaw-plugin/` (TS plugin) was superseded by this — kept for reference.
 
-**To run the whole thing** (see `docs/OPENCLAW_SETUP.md` §"Run everything"): OpenClaw
-(Docker, persistent) + DevInsight `npm run dev` (web+api) + `integrations/devinsight-mcp-server/run.sh`.
+**To run the whole thing** (see `docs/OPENCLAW_SETUP.md` §"Run everything"):
+`npm run docker:up` (SonarQube + OpenClaw, persistent) + DevInsight `npm run dev`
+(web+api) + `integrations/devinsight-mcp-server/run.sh`.
 MCP tenant identity is now **per website-chat request** via a ten-minute API-signed
 context token. The bridge has no fixed organization/requester fallback.
 
@@ -1828,7 +1835,9 @@ with a **config-only path to SonarCloud** later.
 ### 12.1 What is built (verified end-to-end on real data)
 
 - **Local SonarQube stack** — `docker-compose.sonar.yml` (SonarQube CE + its own Postgres;
-  NOT the app's Neon DB). Root `sonar-project.properties` scopes the monorepo
+  NOT the app's Neon DB), included with the sibling OpenClaw Compose model by root
+  `compose.yml` under the `devinsight` Docker project. Root `sonar-project.properties`
+  scopes the monorepo
   (`apps/api/src`, `apps/web/src`, `packages/shared/src`), excludes generated/build/test
   paths, and points coverage at `apps/api/coverage/lcov.info`.
 - **Coverage wiring** — `@vitest/coverage-v8` + `coverage` block in `apps/api/vitest.config.ts`

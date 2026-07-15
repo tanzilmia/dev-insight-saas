@@ -33,14 +33,28 @@ The onboarding wizard runs interactively. When it asks about the **model provide
 you can skip/accept defaults and set Groq in the next step. Onboarding generates a
 **gateway token** and writes it to OpenClaw's `.env` as `OPENCLAW_GATEWAY_TOKEN`.
 
-Run **all `docker compose` commands from the `openclaw` repo root** (where
-`docker-compose.yml` lives).
+Initial onboarding still runs from the `openclaw` repository. After onboarding,
+DevInsight's root `compose.yml` includes that upstream file while preserving its own
+`.env`, paths, state, and secrets. Run normal lifecycle and CLI commands from the
+**DevInsight repository root** so Docker Desktop groups the gateway with the other
+`devinsight` services.
+
+The setup script initially starts the gateway under an `openclaw` Compose project. Adopt
+it into DevInsight once, from the DevInsight repository root:
+
+```bash
+docker compose -f ../openclaw/docker-compose.yml down  # keeps host-mounted OpenClaw state
+npm run docker:up
+```
+
+This recreates only the container ownership; agent configuration, workspace data, and
+credentials remain in their existing host mounts.
 
 ## 2. Point OpenClaw's LLM at Groq (OpenAI-compatible)
 ```bash
-docker compose run --rm openclaw-cli config set models.openaiCompatible.baseUrl "https://api.groq.com/openai/v1"
-docker compose run --rm openclaw-cli config set models.openaiCompatible.apiKey  "gsk_…your-groq-key…"
-docker compose run --rm openclaw-cli config set models.openaiCompatible.model   "llama-3.3-70b-versatile"
+npm run docker:openclaw:cli -- config set models.openaiCompatible.baseUrl "https://api.groq.com/openai/v1"
+npm run docker:openclaw:cli -- config set models.openaiCompatible.apiKey  "gsk_…your-groq-key…"
+npm run docker:openclaw:cli -- config set models.openaiCompatible.model   "llama-3.3-70b-versatile"
 ```
 (You can also do this in the Control UI → Settings → Models. Note: the docs' example
 model `mixtral-8x7b-32768` is deprecated on Groq — use `llama-3.3-70b-versatile`.)
@@ -98,8 +112,10 @@ URLs above change (env), no code changes — see PROJECT_STATE.md §11.4 / deplo
 
 Chat → reports needs these running (ports: web 3000, api 4000, MCP 4100, OpenClaw 18789):
 
-1. **OpenClaw** (Docker, persistent — already up): from the cloned `openclaw` repo,
-   `docker compose up -d` (stop with `docker compose down`).
+1. **SonarQube + OpenClaw** (Docker, persistent): from the DevInsight repository root,
+   `npm run docker:up` (stop with `npm run docker:down`, inspect with
+   `npm run docker:status`). The command starts only long-running services; the
+   interactive `openclaw-cli` helper remains a one-off container.
 2. **DevInsight web + api**: from the DevInsight repo root, `npm run dev`.
 3. **DevInsight MCP server**: `cd integrations/devinsight-mcp-server && ./run.sh`.
 
@@ -129,12 +145,12 @@ fail-closed security boundary, not a runtime error.
    copy the bot **token**. (This can be the *same* bot you use for report delivery, or a
    separate one — a separate bot is cleaner so delivery and conversation don't collide.)
 2. **Register the Telegram channel in OpenClaw** so inbound messages route to the default
-   agent. From the `openclaw` repo root (verify exact keys against
+   agent. From the DevInsight repo root (verify exact keys against
    `docs.openclaw.ai/channels/telegram` — OpenClaw's channel schema is authoritative):
    ```bash
-   docker compose run --rm openclaw-cli config set channels.telegram.enabled true
-   docker compose run --rm openclaw-cli config set channels.telegram.token   "<botfather token>"
-   docker compose run --rm openclaw-cli config set channels.telegram.agent   "default"   # the same agent the web chat uses
+   npm run docker:openclaw:cli -- config set channels.telegram.enabled true
+   npm run docker:openclaw:cli -- config set channels.telegram.token   "<botfather token>"
+   npm run docker:openclaw:cli -- config set channels.telegram.agent   "default"   # the same agent the web chat uses
    docker compose restart openclaw-gateway
    ```
    (Equivalently, the Control UI → **Channels → Add Telegram**.)
@@ -161,10 +177,10 @@ several built-in plugins/skills), so the LLM provider must allow that per reques
 **Z.ai GLM-5.2 on the Coding Plan endpoint**, which works (verified end-to-end,
 ~13s/call with prompt caching). The exact runtime config:
 ```bash
-# from the openclaw repo root
-docker compose run --rm openclaw-cli config set models.providers.zai.apiKey  "<z.ai key>"
-docker compose run --rm openclaw-cli config set models.providers.zai.baseUrl "https://api.z.ai/api/coding/paas/v4"   # Coding Plan endpoint (GLM-5.2 lives here)
-docker compose run --rm openclaw-cli config set agents.defaults.model        "zai/glm-5.2"
+# from the DevInsight repo root
+npm run docker:openclaw:cli -- config set models.providers.zai.apiKey  "<z.ai key>"
+npm run docker:openclaw:cli -- config set models.providers.zai.baseUrl "https://api.z.ai/api/coding/paas/v4"   # Coding Plan endpoint (GLM-5.2 lives here)
+npm run docker:openclaw:cli -- config set agents.defaults.model        "zai/glm-5.2"
 docker compose restart openclaw-gateway
 ```
 Notes: GLM-5.2 is served by the **Coding Plan** endpoint (`api/coding/paas/v4`), not
