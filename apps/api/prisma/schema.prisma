@@ -147,6 +147,51 @@ model CodeQualityConnection {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
 
+/// A pull request, for collaboration/review metrics (who opens, who merges, who
+/// reviews — work that never shows up in commit counts). Fetched from the git
+/// provider and de-duplicated by [repositoryId, number].
+model PullRequest {
+  id           String   @id @default(cuid())
+  repositoryId String
+  number       Int
+  title        String
+  authorLogin  String?
+  state        String // "open" | "closed"
+  merged       Boolean  @default(false)
+  additions    Int?
+  deletions    Int?
+  changedFiles Int?
+  openedAt     DateTime
+  mergedAt     DateTime?
+  closedAt     DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  repository Repository          @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  reviews    PullRequestReview[]
+
+  @@unique([repositoryId, number])
+  @@index([repositoryId])
+  @@index([repositoryId, authorLogin])
+}
+
+/// A single review left on a pull request (the reviewer's contribution).
+model PullRequestReview {
+  id            String   @id @default(cuid())
+  pullRequestId String
+  externalId    String // provider review id
+  reviewerLogin String?
+  state         String // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED
+  submittedAt   DateTime?
+  createdAt     DateTime @default(now())
+
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@unique([pullRequestId, externalId])
+  @@index([pullRequestId])
+  @@index([reviewerLogin])
+}
+
 /// One-per-day code-quality measurement for a SonarQube project, so trends
 /// (coverage/bugs over time) can be shown. Idempotent via [org, projectKey, dayKey]
 /// — the day's row is upserted to the latest capture.
@@ -298,6 +343,7 @@ model Repository {
   coverage       RepositoryCoverage[]
   branches       Branch[]
   collectionJobs CollectionJob[]
+  pullRequests   PullRequest[]
 
   @@unique([organizationId, provider, externalId])
   @@index([organizationId])

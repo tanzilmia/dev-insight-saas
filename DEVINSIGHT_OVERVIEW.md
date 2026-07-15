@@ -210,6 +210,9 @@ LLM report (Markdown) → dashboard / share link / Telegram / chat
 
 ---
 
+### Collaboration / code-review metrics (in progress)
+- Fetches **pull requests + reviews** from GitHub (`PullRequest` / `PullRequestReview` models) and computes per-developer collaboration metrics — PRs opened/merged and **reviews given** (approvals / changes-requested), joined to employees by git login. This surfaces review/mentoring work that commit counts miss — the "quiet contributor" the product exists to protect. Backend + metrics done; UI surfacing (Analysis/Appraisal cards) is the next increment.
+
 ## 5. What is NOT yet built
 
 - **Automated tests** — no runner installed yet (verification is done by driving the running API against mock GitHub/LLM servers). Prime candidates when added: `token-cipher`, coverage interval math, commit-classifier, `computeNextRun`, the report flow with mocked providers

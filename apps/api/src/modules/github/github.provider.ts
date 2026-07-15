@@ -8,9 +8,12 @@ import type {
   GitCommitDetail,
   GitContributor,
   GitProvider,
+  GitPullRequest,
+  GitPullRequestReview,
   GitRepository,
   GitUser,
   ListCommitsOptions,
+  ListPullRequestsOptions,
   ListRepositoriesOptions
 } from "../git-providers/git-provider.js";
 
@@ -570,4 +573,105 @@ export class GitHubProvider implements GitProvider {
       throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
     }
   }
+
+  async listPullRequests(
+    token: string,
+    owner: string,
+    repo: string,
+    options: ListPullRequestsOptions = {}
+  ): Promise<GitPullRequest[]> {
+    const max = options.max ?? 300;
+    const pulls: GitPullRequest[] = [];
+
+    for (let page = 1; page <= MAX_PAGES && pulls.length < max; page += 1) {
+      const response = await this.request(
+        `/repos/${owner}/${repo}/pulls?state=all&sort=created&direction=desc&per_page=${PER_PAGE}&page=${page}`,
+        token
+      );
+
+      if (response.status === 401 || response.status === 403) {
+        throw new AppError(400, "GitHub rejected the stored token. Reconnect the credential.", "INVALID_CREDENTIAL");
+      }
+      if (response.status === 404) {
+        throw new AppError(404, "Repository not found on GitHub", "REPO_NOT_ON_PROVIDER");
+      }
+      if (!response.ok) {
+        throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+      }
+
+      const items = (await response.json()) as GitHubPull[];
+      for (const item of items) {
+        pulls.push({
+          number: item.number,
+          title: item.title ?? "",
+          authorLogin: item.user?.login ?? null,
+          state: item.state ?? "open",
+          merged: Boolean(item.merged_at),
+          openedAt: item.created_at,
+          mergedAt: item.merged_at ?? null,
+          closedAt: item.closed_at ?? null
+        });
+      }
+
+      if (items.length < PER_PAGE) break;
+    }
+
+    return pulls.slice(0, max);
+  }
+
+  async listPullRequestReviews(
+    token: string,
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<GitPullRequestReview[]> {
+    const reviews: GitPullRequestReview[] = [];
+
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const response = await this.request(
+        `/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=${PER_PAGE}&page=${page}`,
+        token
+      );
+
+      // A missing/inaccessible PR shouldn't fail the whole collection.
+      if (response.status === 404) break;
+      if (response.status === 401 || response.status === 403) {
+        throw new AppError(400, "GitHub rejected the stored token. Reconnect the credential.", "INVALID_CREDENTIAL");
+      }
+      if (!response.ok) {
+        throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+      }
+
+      const items = (await response.json()) as GitHubReview[];
+      for (const item of items) {
+        reviews.push({
+          externalId: String(item.id),
+          reviewerLogin: item.user?.login ?? null,
+          state: item.state ?? "COMMENTED",
+          submittedAt: item.submitted_at ?? null
+        });
+      }
+
+      if (items.length < PER_PAGE) break;
+    }
+
+    return reviews;
+  }
 }
+
+type GitHubPull = {
+  number: number;
+  title?: string;
+  user?: { login?: string } | null;
+  state?: string;
+  merged_at?: string | null;
+  created_at: string;
+  closed_at?: string | null;
+};
+
+type GitHubReview = {
+  id: number;
+  user?: { login?: string } | null;
+  state?: string;
+  submitted_at?: string | null;
+};

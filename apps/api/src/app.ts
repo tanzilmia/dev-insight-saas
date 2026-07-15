@@ -19,6 +19,7 @@ import { openclawRouter } from "./modules/openclaw/openclaw.controller.js";
 import { openclawServiceRouter } from "./modules/openclaw/openclaw.service-tools.controller.js";
 import { organizationsRouter } from "./modules/organizations/organizations.controller.js";
 import { projectsRouter } from "./modules/projects/projects.controller.js";
+import { pullRequestsRouter } from "./modules/pull-requests/pull-requests.controller.js";
 import { reportsRouter } from "./modules/reports/reports.controller.js";
 import { publicReportsRouter } from "./modules/reports/reports.public.controller.js";
 import { repositoriesRouter } from "./modules/repositories/repositories.controller.js";
@@ -64,6 +65,7 @@ export function createApp() {
   app.use("/api/reports", reportsRouter);
   app.use("/api/statistics", statisticsRouter);
   app.use("/api/code-quality", codeQualityRouter);
+  app.use("/api/pull-requests", pullRequestsRouter);
   app.use("/api/analysis", analysisRouter);
   app.use("/api/schedules", schedulesRouter);
   app.use("/api/channels", channelsRouter);

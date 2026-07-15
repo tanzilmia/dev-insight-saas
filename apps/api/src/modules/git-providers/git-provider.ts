@@ -90,6 +90,29 @@ export type ListCommitsOptions = {
   branch?: string;
 };
 
+export type GitPullRequest = {
+  number: number;
+  title: string;
+  authorLogin: string | null;
+  state: string; // "open" | "closed"
+  merged: boolean;
+  openedAt: string; // ISO
+  mergedAt: string | null;
+  closedAt: string | null;
+};
+
+export type GitPullRequestReview = {
+  externalId: string;
+  reviewerLogin: string | null;
+  state: string; // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED
+  submittedAt: string | null;
+};
+
+export type ListPullRequestsOptions = {
+  /** Newest-first cap on how many PRs to walk back. */
+  max?: number;
+};
+
 /**
  * Which relationships between the token's account and a repository make it
  * appear in listRepositories. Mirrors GitHub's `affiliation` values.
@@ -155,4 +178,18 @@ export interface GitProvider {
   ): Promise<{ externalId: string }>;
   /** Removes a previously registered webhook. Tolerates already-deleted hooks. */
   deleteWebhook(token: string, owner: string, repo: string, externalId: string): Promise<void>;
+  /** Pull requests (all states), newest first, for collaboration metrics. */
+  listPullRequests(
+    token: string,
+    owner: string,
+    repo: string,
+    options?: ListPullRequestsOptions
+  ): Promise<GitPullRequest[]>;
+  /** Reviews left on one pull request (who reviewed, and how). */
+  listPullRequestReviews(
+    token: string,
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<GitPullRequestReview[]>;
 }

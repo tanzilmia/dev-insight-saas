@@ -2012,3 +2012,28 @@ Both workspaces typecheck/lint, api 129 tests + build pass. **Workstream E compl
 integration arc (setup → page → gate → Overview/project/Analysis → appraisal + per-KLOC → trends →
 report) is now feature-complete for the self-hosted, single-org phase.** Remaining big items: multi-tenant
 (§12.3) + VPS deploy.
+
+## 13. PR / code-review metrics (collaboration) — Increment 1 (backend), 2026-07-15
+
+Fills the product's biggest fairness blind spot: it measured code volume + code quality but not
+**review/collaboration** work (the "quiet reviewer/mentor" the appraisal caveat itself calls out).
+
+**Increment 1 — backend foundation (done + verified):**
+- **Models** `PullRequest` + `PullRequestReview` (migration `pull_requests_reviews`), deduped by
+  `[repositoryId, number]` and `[pullRequestId, externalId]`.
+- **Provider** — `GitProvider.listPullRequests` (all states, newest-first, capped) + `listPullRequestReviews`
+  (per PR), implemented in `GitHubProvider` (`/pulls?state=all`, `/pulls/{n}/reviews`; `merged` derived
+  from `merged_at`).
+- **Collection** — `collectPullRequests(actorId, repositoryId)` (manager-gated, uses the repo's stored
+  credential / App installation via `resolveRepositoryToken`): upserts PRs + reviews for the newest 150
+  PRs; `POST /api/pull-requests/collect`.
+- **Metrics** — `getReviewMetrics(actorId, {organizationId, projectId?, from?, to?})`: per-developer
+  PRs opened/merged and reviews given (approvals / changes-requested), each **joined to an employee** via
+  the git-login → alias/mapping tables; `GET /api/pull-requests/review-metrics`.
+- **Verified on real data**: collected 1 PR from `tanzilmia/dev-insight-saas`, author mapped to the
+  employee; a seeded review aggregated correctly (reviewsGiven/approvals, reviewer mapped). api
+  typecheck/lint/129 tests/build pass.
+
+**Increment 2 (next, NOT built):** surface it in the UI — a "Collect PRs" trigger, and a "Collaboration &
+review" card on the Analysis (team) + Appraisal (per-employee) pages, so review/mentoring work is finally
+visible alongside commits. Consider folding a per-employee collaboration block into `getEmployeeAppraisal`.
