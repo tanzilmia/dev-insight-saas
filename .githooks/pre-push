@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# DevInsight — auto SonarQube scan on push (local dev convenience).
+#
+# Git has no client-side "post-push", so this runs on `pre-push` but launches the
+# scan in the BACKGROUND and returns immediately: your push is NEVER blocked or
+# slowed. Progress is written to .sonar-scan.log at the repo root.
+#
+# It quietly skips (never fails the push) when it can't scan:
+#   - SONAR_TOKEN missing (looked up from apps/api/.env), or
+#   - the local SonarQube (localhost:9000) isn't reachable, or
+#   - Docker isn't running (the scan itself logs this).
+#
+# Enabled via:  git config core.hooksPath .githooks   (see scripts/install-hooks.sh)
+# Disable with: git config --unset core.hooksPath
+set -u
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOG="$ROOT/.sonar-scan.log"
+
+# Token from the environment, else from apps/api/.env (same source the API uses).
+TOKEN="${SONAR_TOKEN:-}"
+if [ -z "$TOKEN" ] && [ -f "$ROOT/apps/api/.env" ]; then
+  TOKEN="$(grep -E '^SONAR_TOKEN=' "$ROOT/apps/api/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")"
+fi
+
+if [ -z "$TOKEN" ]; then
+  echo "[devinsight] SONAR_TOKEN not set (env or apps/api/.env) — skipping SonarQube scan." >&2
+  exit 0
+fi
+
+# Don't spin up coverage + Docker if the server can't receive the report.
+if ! curl -sf -o /dev/null "http://localhost:9000/api/system/status"; then
+  echo "[devinsight] SonarQube (localhost:9000) not reachable — skipping scan." >&2
+  echo "[devinsight]   start it with: docker compose -f docker-compose.sonar.yml up -d" >&2
+  exit 0
+fi
+
+echo "[devinsight] SonarQube scan started in the background → .sonar-scan.log (push not blocked)"
+SONAR_TOKEN="$TOKEN" nohup "$ROOT/scripts/sonar-scan.sh" > "$LOG" 2>&1 </dev/null &
+
+# Detach so git does not wait for the scan to finish.
+exit 0

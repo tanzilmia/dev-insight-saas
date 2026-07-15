@@ -11,6 +11,7 @@ import { buildComparison } from "../report-engine/comparison.js";
 import { buildInsights } from "../report-engine/insights.js";
 import { buildCaveats } from "../report-engine/plain-language.js";
 import { type ReportTheme, buildThemesPrompt, parseThemes } from "../report-engine/themes.js";
+import { buildCodeHealthMarkdown } from "../code-quality/snapshots.service.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
 import { createReport, findCachedReport } from "../reports/reports.service.js";
 import type { GenerateReportInput } from "./openclaw.schemas.js";
@@ -310,6 +311,19 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
   // Bake the deterministic caveats into the persisted markdown so they show in
   // every channel (dashboard, history, share link, Telegram) regardless of generator.
   markdown = appendCaveats(markdown, caveats);
+
+  // Window-accurate "## Code health" (from SonarQube snapshots), baked in the same
+  // way. Empty string when no code-quality is mapped/captured, so most reports are
+  // unaffected.
+  const codeHealth = await buildCodeHealthMarkdown(
+    input.organizationId,
+    { projectId: project?.id, repositoryId: repository?.id },
+    range.from,
+    range.to
+  );
+  if (codeHealth) {
+    markdown = `${markdown}\n\n---\n\n${codeHealth}`;
+  }
 
   const savedReport = await createReport({
     organizationId: input.organizationId,

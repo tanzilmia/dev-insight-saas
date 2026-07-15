@@ -7,6 +7,7 @@ import {
   orgQuerySchema,
   repositoryParamsSchema,
   selectRepositoriesSchema,
+  setSonarProjectKeySchema,
   syncRepositoriesSchema
 } from "./repositories.schemas.js";
 import {
@@ -16,6 +17,7 @@ import {
   listRepositories,
   resyncRepository,
   selectRepositories,
+  setRepositorySonarProjectKey,
   syncRepositories,
   untrackRepository
 } from "./repositories.service.js";
@@ -60,6 +62,18 @@ repositoriesRouter.patch(
     const { id } = repositoryParamsSchema.parse(req.params);
     const { projectId } = assignRepositoryProjectSchema.parse(req.body);
     const repository = await assignRepositoryProject(req.authUser!.id, id, projectId);
+
+    res.status(200).json({ repository });
+  })
+);
+
+// PATCH /api/repositories/:id/sonar-project — set/clear the SonarQube project key.
+repositoriesRouter.patch(
+  "/:id/sonar-project",
+  asyncHandler(async (req, res) => {
+    const { id } = repositoryParamsSchema.parse(req.params);
+    const { sonarProjectKey } = setSonarProjectKeySchema.parse(req.body);
+    const repository = await setRepositorySonarProjectKey(req.authUser!.id, id, sonarProjectKey);
 
     res.status(200).json({ repository });
   })

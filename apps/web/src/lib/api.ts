@@ -378,6 +378,155 @@ export async function deleteCredential(credentialId: string) {
   return response.data;
 }
 
+/* -------------------------- GitHub App connection -------------------------- */
+
+export type GitHubAppInstallation = {
+  id: string;
+  installationId: string;
+  accountLogin: string;
+  accountType: string | null;
+  targetType: string | null;
+  repositorySelection: string | null;
+  repositoryCount: number;
+  suspended: boolean;
+  lastSyncedAt: string | null;
+  createdAt: string;
+};
+
+export type GitHubAppStatus = {
+  /** Whether the DevInside owner has registered the App on this server. */
+  configured: boolean;
+  connected: boolean;
+  installations: GitHubAppInstallation[];
+};
+
+export async function getGitHubAppStatus(organizationId: string) {
+  const response = await api.get<GitHubAppStatus>("/api/github-app/status", {
+    params: { organizationId }
+  });
+  return response.data;
+}
+
+export async function getGitHubAppInstallUrl(organizationId: string) {
+  const response = await api.get<{ url: string }>("/api/github-app/install-url", {
+    params: { organizationId }
+  });
+  return response.data.url;
+}
+
+export async function linkGitHubAppInstallation(input: {
+  organizationId: string;
+  installationId: string;
+  setupAction?: string;
+}) {
+  const response = await api.post<GitHubAppStatus>(
+    "/api/github-app/installations/callback",
+    input
+  );
+  return response.data;
+}
+
+export async function syncGitHubAppInstallation(
+  organizationId: string,
+  appInstallationId: string
+) {
+  const response = await api.post<GitHubAppStatus>(
+    `/api/github-app/installations/${appInstallationId}/sync`,
+    { organizationId }
+  );
+  return response.data;
+}
+
+export async function disconnectGitHubApp(organizationId: string, appInstallationId: string) {
+  const response = await api.delete<GitHubAppStatus>(
+    `/api/github-app/installations/${appInstallationId}`,
+    { params: { organizationId } }
+  );
+  return response.data;
+}
+
+/* --------------------- CI / GitHub Actions management ---------------------- */
+
+export type CiWorkflowRun = {
+  runId: string;
+  name: string | null;
+  branch: string | null;
+  headSha: string | null;
+  event: string | null;
+  status: string | null;
+  conclusion: string | null;
+  actor: string | null;
+  url: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+};
+
+export type CiStatus = {
+  repositoryId: string;
+  fullName: string;
+  defaultBranch: string | null;
+  status: "NOT_CONFIGURED" | "PENDING" | "ENABLED" | "DISABLED" | string;
+  enabled: boolean;
+  templateId: string | null;
+  templateVersion: string | null;
+  workflowPath: string | null;
+  workflowUrl: string | null;
+  actionsUrl: string;
+  pullRequest: { number: number; url: string | null; state: string | null } | null;
+  lastSyncedAt: string | null;
+  latestRun: CiWorkflowRun | null;
+};
+
+export type CiInspection = {
+  supported: boolean;
+  runtime: string;
+  defaultBranch: string;
+  packageManager: string;
+  isMonorepo: boolean;
+  framework: string | null;
+  nodeVersion: string;
+  scripts: { lint: boolean; typecheck: boolean; test: boolean; build: boolean };
+  reason: string | null;
+};
+
+export async function getCiStatus(repositoryId: string) {
+  const response = await api.get<CiStatus>("/api/ci/status", { params: { repositoryId } });
+  return response.data;
+}
+
+export async function inspectRepositoryCi(repositoryId: string) {
+  const response = await api.get<CiInspection>("/api/ci/inspect", { params: { repositoryId } });
+  return response.data;
+}
+
+export async function listCiRuns(repositoryId: string) {
+  const response = await api.get<{ runs: CiWorkflowRun[] }>("/api/ci/runs", {
+    params: { repositoryId }
+  });
+  return response.data.runs;
+}
+
+export async function enableCi(repositoryId: string) {
+  const response = await api.post<CiStatus>("/api/ci/enable", { repositoryId });
+  return response.data;
+}
+
+export async function disableCi(repositoryId: string) {
+  const response = await api.post<CiStatus>("/api/ci/disable", { repositoryId });
+  return response.data;
+}
+
+export async function syncCi(repositoryId: string) {
+  const response = await api.post<CiStatus>("/api/ci/sync", { repositoryId });
+  return response.data;
+}
+
+export async function mergeCi(repositoryId: string) {
+  const response = await api.post<CiStatus>("/api/ci/merge", { repositoryId });
+  return response.data;
+}
+
 /* ------------------------------------------------------------------ */
 /* Repositories                                                       */
 /* ------------------------------------------------------------------ */
@@ -400,6 +549,8 @@ export type TrackedRepository = RepositoryInput & {
   id: string;
   provider: "GITHUB";
   project: { id: string; name: string } | null;
+  /** SonarQube/SonarCloud project key this repo is analyzed under (null = unset). */
+  sonarProjectKey: string | null;
   commitCount: number;
   lastSyncedAt: string | null;
   /** Live sync (GitHub webhook) state. null status = off. */
@@ -538,6 +689,18 @@ export async function assignRepositoryProject(
   const response = await api.patch<{ repository: TrackedRepository }>(
     `/api/repositories/${repositoryId}`,
     { projectId }
+  );
+
+  return response.data.repository;
+}
+
+export async function setRepositorySonarProjectKey(
+  repositoryId: string,
+  sonarProjectKey: string | null
+) {
+  const response = await api.patch<{ repository: TrackedRepository }>(
+    `/api/repositories/${repositoryId}/sonar-project`,
+    { sonarProjectKey }
   );
 
   return response.data.repository;
@@ -1006,6 +1169,195 @@ export async function getStatisticsOverview(
 }
 
 /* ------------------------------------------------------------------ */
+/* Code quality (SonarQube measures + per-developer issues)           */
+/* ------------------------------------------------------------------ */
+
+export type QualityRating = "A" | "B" | "C" | "D" | "E" | null;
+
+export type CodeQualityMeasures = {
+  linesOfCode: number | null;
+  bugs: number | null;
+  vulnerabilities: number | null;
+  securityHotspots: number | null;
+  codeSmells: number | null;
+  coverage: number | null;
+  duplicatedLinesDensity: number | null;
+  techDebtMinutes: number | null;
+  reliabilityRating: QualityRating;
+  securityRating: QualityRating;
+  maintainabilityRating: QualityRating;
+};
+
+export type CodeQualityDeveloper = {
+  author: string;
+  total: number;
+  bugs: number;
+  vulnerabilities: number;
+  codeSmells: number;
+  bySeverity: Record<string, number>;
+  /** Matched employee, or null when the git author isn't mapped to anyone. */
+  employee: { userId: string; name: string; email: string } | null;
+};
+
+export type QualityGateStatus = {
+  status: "OK" | "ERROR" | "WARN" | "NONE";
+  conditions: { metric: string; status: string; actual: string | null; threshold: string | null }[];
+};
+
+export type CodeQualityOverview = {
+  projectKey: string;
+  available: boolean;
+  capabilities: { branchAnalysis: boolean; pullRequestAnalysis: boolean };
+  measures: CodeQualityMeasures | null;
+  qualityGate: QualityGateStatus | null;
+  developers: CodeQualityDeveloper[];
+};
+
+export async function getCodeQualityOverview(organizationId: string, projectKey: string) {
+  const response = await api.get<{ overview: CodeQualityOverview }>("/api/code-quality/overview", {
+    params: { organizationId, projectKey }
+  });
+
+  return response.data.overview;
+}
+
+/* --- SonarQube connection (per-org, manager-managed) --- */
+
+export type CodeQualityConnection =
+  | {
+      connected: true;
+      provider: string;
+      baseUrl: string;
+      organizationKey: string | null;
+      status: string | null;
+      lastCheckedAt: string | null;
+    }
+  | { connected: false; envFallback?: boolean };
+
+export type SonarProjectSummary = { key: string; name: string };
+
+export type CodeQualityConnectionInput = {
+  organizationId: string;
+  provider?: "sonarqube" | "sonarcloud";
+  baseUrl: string;
+  token: string;
+  organizationKey?: string;
+};
+
+export async function getCodeQualityConnection(organizationId: string) {
+  const response = await api.get<{ connection: CodeQualityConnection }>(
+    "/api/code-quality/connection",
+    { params: { organizationId } }
+  );
+  return response.data.connection;
+}
+
+export async function testCodeQualityConnection(input: CodeQualityConnectionInput) {
+  const response = await api.post<{ result: { valid: boolean; status: string } }>(
+    "/api/code-quality/connection/test",
+    input
+  );
+  return response.data.result;
+}
+
+export async function saveCodeQualityConnection(input: CodeQualityConnectionInput) {
+  const response = await api.put<{ connection: CodeQualityConnection }>(
+    "/api/code-quality/connection",
+    input
+  );
+  return response.data.connection;
+}
+
+export async function deleteCodeQualityConnection(organizationId: string) {
+  const response = await api.delete<{ connection: CodeQualityConnection }>(
+    "/api/code-quality/connection",
+    { params: { organizationId } }
+  );
+  return response.data.connection;
+}
+
+export async function listSonarProjects(organizationId: string) {
+  const response = await api.get<{ available: boolean; projects: SonarProjectSummary[] }>(
+    "/api/code-quality/projects",
+    { params: { organizationId } }
+  );
+  return response.data;
+}
+
+export type CodeQualitySummary =
+  | { available: false; reason: "not_configured" | "no_project_mapped" | "unreachable" }
+  | {
+      available: true;
+      projectCount: number;
+      totals: { bugs: number; vulnerabilities: number; codeSmells: number; securityHotspots: number };
+      coverage: number | null;
+      worstGate: "OK" | "ERROR" | "WARN" | "NONE";
+      projects: { key: string; bugs: number; vulnerabilities: number; coverage: number | null; gate: string }[];
+    };
+
+export async function getCodeQualitySummary(organizationId: string, projectId?: string) {
+  const response = await api.get<{ summary: CodeQualitySummary }>("/api/code-quality/summary", {
+    params: { organizationId, ...(projectId ? { projectId } : {}) }
+  });
+  return response.data.summary;
+}
+
+export type CodeQualityTrendPoint = {
+  dayKey: string;
+  capturedAt: string;
+  bugs: number;
+  vulnerabilities: number;
+  codeSmells: number;
+  coverage: number | null;
+  gateStatus: string;
+};
+
+export async function getCodeQualityTrend(organizationId: string, projectKey: string, limit = 30) {
+  const response = await api.get<{ trend: CodeQualityTrendPoint[] }>("/api/code-quality/trend", {
+    params: { organizationId, projectKey, limit }
+  });
+  return response.data.trend;
+}
+
+/* ------------------------------------------------------------------ */
+/* Collaboration / code-review metrics (pull requests + reviews)      */
+/* ------------------------------------------------------------------ */
+
+export type ReviewMetricsDeveloper = {
+  login: string;
+  employee: { userId: string; name: string } | null;
+  prsOpened: number;
+  prsMerged: number;
+  reviewsGiven: number;
+  approvals: number;
+  changesRequested: number;
+};
+
+export type ReviewMetrics = {
+  period: { from: string; to: string };
+  totals: { prsOpened: number; prsMerged: number; reviewsGiven: number };
+  developers: ReviewMetricsDeveloper[];
+};
+
+export async function getReviewMetrics(
+  organizationId: string,
+  options: { projectId?: string; from?: string; to?: string } = {}
+) {
+  const response = await api.get<{ metrics: ReviewMetrics }>("/api/pull-requests/review-metrics", {
+    params: { organizationId, ...options }
+  });
+  return response.data.metrics;
+}
+
+export async function collectPullRequests(repositoryId: string) {
+  const response = await api.post<{ result: { prCount: number; reviewCount: number } }>(
+    "/api/pull-requests/collect",
+    { repositoryId }
+  );
+  return response.data.result;
+}
+
+/* ------------------------------------------------------------------ */
 /* Project analysis (manager-only per-employee activity cards)        */
 /* ------------------------------------------------------------------ */
 
@@ -1136,6 +1488,23 @@ export type EmployeeAppraisal = {
     byRealWork: { rank: number; of: number };
     byCommits: { rank: number; of: number };
   } | null;
+  codeQuality: {
+    available: boolean;
+    reason?: "not_configured" | "no_project_mapped" | "unreachable";
+    projectKeys: string[];
+    totals: { bugs: number; vulnerabilities: number; codeSmells: number; total: number };
+    bySeverity: Record<string, number>;
+    linesAuthored: number | null;
+    perKLoc: number | null;
+  };
+  collaboration: {
+    hasData: boolean;
+    prsOpened: number;
+    prsMerged: number;
+    reviewsGiven: number;
+    approvals: number;
+    changesRequested: number;
+  };
   evidence: AppraisalEvidence[];
   dataBlindSpots: string[];
 };

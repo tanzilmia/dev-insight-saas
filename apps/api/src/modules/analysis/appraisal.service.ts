@@ -12,6 +12,7 @@ import {
   moduleFromPath
 } from "../report-engine/commit-classifier.js";
 import { humanizeAreas, humanizeWorkMix } from "../report-engine/plain-language.js";
+import { getCodeQualityProvider } from "../code-quality/code-quality-registry.js";
 import { buildEmployeeLeaderboard } from "../activity/activity.service.js";
 import { resolvePeriod } from "../openclaw/openclaw.tools.js";
 import { toLocalDateKey } from "../statistics/statistics.service.js";
@@ -105,7 +106,7 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
 
   const mappings = await prisma.employeeGitMapping.findMany({
     where: { organizationId: query.organizationId, userId: query.userId },
-    include: { contributorIdentity: { select: { username: true } } }
+    include: { contributorIdentity: { select: { username: true, authorEmail: true } } }
   });
   const usernames = [
     ...new Set(
@@ -114,6 +115,38 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
         .filter((username): username is string => Boolean(username))
     )
   ];
+
+  // The employee's git emails (for SonarQube author attribution): the account
+  // email, declared aliases, and discovered contributor emails.
+  const aliasEmails = await prisma.employeeGitAlias.findMany({
+    where: { organizationId: query.organizationId, userId: query.userId, email: { not: null } },
+    select: { email: true }
+  });
+  // The employee's REAL commit author emails from stored commits. This is the
+  // reliable link to SonarQube (which attributes issues by git-blame email): the
+  // actual commit email is often neither the account nor a declared alias email,
+  // because the GitHub contributors API never exposes email.
+  const commitEmailRows = usernames.length
+    ? await prisma.commit.findMany({
+        where: {
+          repository: { organizationId: query.organizationId },
+          username: { in: usernames, mode: "insensitive" },
+          authorEmail: { not: null }
+        },
+        select: { authorEmail: true },
+        distinct: ["authorEmail"]
+      })
+    : [];
+  const employeeEmails = new Set<string>(
+    [
+      membership.user.email,
+      ...aliasEmails.map((alias) => alias.email),
+      ...mappings.map((mapping) => mapping.contributorIdentity.authorEmail),
+      ...commitEmailRows.map((row) => row.authorEmail)
+    ]
+      .filter((email): email is string => Boolean(email))
+      .map((email) => email.toLowerCase())
+  );
 
   const employee = {
     userId: membership.user.id,
@@ -148,6 +181,22 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
       ownership: { sensitiveAreaCommits: 0, moduleBreadth: 0, criticalAreas: [] as string[] },
       quality: { features: 0, bugFixes: 0, refactors: 0, largeCommits: 0, riskyCommits: 0 },
       teamComparison: null,
+      codeQuality: {
+        available: false,
+        projectKeys: [],
+        totals: { bugs: 0, vulnerabilities: 0, codeSmells: 0, total: 0 },
+        bySeverity: {},
+        linesAuthored: null,
+        perKLoc: null
+      } as AppraisalCodeQuality,
+      collaboration: {
+        hasData: false,
+        prsOpened: 0,
+        prsMerged: 0,
+        reviewsGiven: 0,
+        approvals: 0,
+        changesRequested: 0
+      } as AppraisalCollaboration,
       evidence: [] as EvidenceItem[],
       dataBlindSpots: [
         `${employee.name} has no linked Git identity yet, so no work can be attributed. Link their GitHub username on the Contributors page — otherwise their contribution is invisible here.`
@@ -324,9 +373,30 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
         }
       : null;
 
+  // Best-effort SonarQube code-quality signal (never fails the appraisal).
+  const codeQuality = await computeEmployeeCodeQuality(
+    query.organizationId,
+    project?.id,
+    employeeEmails,
+    usernames
+  );
+  const collaboration = await computeEmployeeCollaboration(
+    query.organizationId,
+    project?.id,
+    usernames,
+    range.from,
+    range.to
+  );
+
   const dataBlindSpots = [
     "Line and commit counts reflect activity, not difficulty or quality — a hard bug fixed in a few lines can outweigh a large routine change.",
     "Code review, mentoring, pairing, planning, incident response, and helping teammates don't show up in Git — weigh them alongside this.",
+    ...(codeQuality.available
+      ? [
+          "Code-quality issues are attributed by git blame (whoever last touched a line) and reflect the current state of the main branch — treat them as a signal, not exact fault, and not a within-window measure.",
+          "Raw counts favour whoever writes more, so we also show issues per 1,000 lines authored as a fairer lens — but even that is rough: blame isn't authorship, and issue counts are all-time while lines are what this person added."
+        ]
+      : []),
     ...(truncated
       ? [`Only the ${APPRAISAL_COMMIT_CAP} most recent updates were analyzed; totals for a very long, busy window may be partial.`]
       : [])
@@ -367,6 +437,8 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
     },
     quality: { features, bugFixes, refactors, largeCommits, riskyCommits },
     teamComparison,
+    codeQuality,
+    collaboration,
     evidence,
     dataBlindSpots
   };
@@ -381,3 +453,157 @@ export type EvidenceItem = {
   sensitive: boolean;
   url: string;
 };
+
+export type AppraisalCodeQuality = {
+  available: boolean;
+  /** Why it's unavailable, when it is. */
+  reason?: "not_configured" | "no_project_mapped" | "unreachable";
+  /** SonarQube project keys that were read (from in-scope repos' mappings). */
+  projectKeys: string[];
+  totals: { bugs: number; vulnerabilities: number; codeSmells: number; total: number };
+  bySeverity: Record<string, number>;
+  /** Lines this person has authored (all-time additions) — the fair denominator. */
+  linesAuthored: number | null;
+  /** Issues per 1,000 lines authored — a fairer lens than the raw count. */
+  perKLoc: number | null;
+};
+
+export type AppraisalCollaboration = {
+  /** True when any PRs have been collected for the scope (else "not collected"). */
+  hasData: boolean;
+  prsOpened: number;
+  prsMerged: number;
+  reviewsGiven: number;
+  approvals: number;
+  changesRequested: number;
+};
+
+/**
+ * Per-employee collaboration signal from collected pull requests: PRs they
+ * opened/merged and reviews they gave, within the appraisal window. This is the
+ * review/mentoring work that commit counts miss — the quiet contributor the
+ * product exists to protect. Read-only; matches by git login (case-insensitive).
+ */
+async function computeEmployeeCollaboration(
+  organizationId: string,
+  projectId: string | undefined,
+  usernames: string[],
+  from: Date,
+  to: Date
+): Promise<AppraisalCollaboration> {
+  const scope = { organizationId, ...(projectId ? { projectId } : {}) };
+  const set = new Set(usernames.map((u) => u.toLowerCase()));
+
+  const [prs, reviews, anyPr] = await Promise.all([
+    prisma.pullRequest.findMany({
+      where: { repository: scope, openedAt: { gte: from, lte: to } },
+      select: { authorLogin: true, merged: true }
+    }),
+    prisma.pullRequestReview.findMany({
+      where: { pullRequest: { repository: scope }, submittedAt: { gte: from, lte: to } },
+      select: { reviewerLogin: true, state: true }
+    }),
+    prisma.pullRequest.count({ where: { repository: scope } })
+  ]);
+
+  const result = { hasData: anyPr > 0, prsOpened: 0, prsMerged: 0, reviewsGiven: 0, approvals: 0, changesRequested: 0 };
+  for (const pr of prs) {
+    if (pr.authorLogin && set.has(pr.authorLogin.toLowerCase())) {
+      result.prsOpened += 1;
+      if (pr.merged) result.prsMerged += 1;
+    }
+  }
+  for (const review of reviews) {
+    if (review.reviewerLogin && set.has(review.reviewerLogin.toLowerCase())) {
+      result.reviewsGiven += 1;
+      if (review.state === "APPROVED") result.approvals += 1;
+      else if (review.state === "CHANGES_REQUESTED") result.changesRequested += 1;
+    }
+  }
+  return result;
+}
+
+/**
+ * Best-effort per-employee code-quality signal from SonarQube. Attributes open
+ * issues (by git-blame author email) to this employee across the SonarQube
+ * projects mapped to the in-scope repos, and normalizes by the lines they've
+ * authored (issues per 1,000 lines) so someone who simply writes more code isn't
+ * unfairly penalized. NEVER throws — a missing/unreachable SonarQube degrades to
+ * `available:false` so the appraisal always renders. Still evidence, not a score;
+ * the UI shows the fairness caveats alongside.
+ */
+async function computeEmployeeCodeQuality(
+  organizationId: string,
+  projectId: string | undefined,
+  emails: Set<string>,
+  usernames: string[]
+): Promise<AppraisalCodeQuality> {
+  const empty = { bugs: 0, vulnerabilities: 0, codeSmells: 0, total: 0 };
+  const base = { linesAuthored: null, perKLoc: null };
+  const provider = await getCodeQualityProvider(organizationId);
+  if (!provider.available) {
+    return { available: false, reason: "not_configured", projectKeys: [], totals: empty, bySeverity: {}, ...base };
+  }
+
+  const repos = await prisma.repository.findMany({
+    where: {
+      organizationId,
+      ...(projectId ? { projectId } : {}),
+      sonarProjectKey: { not: null }
+    },
+    select: { sonarProjectKey: true }
+  });
+  const projectKeys = [
+    ...new Set(repos.map((repo) => repo.sonarProjectKey).filter((key): key is string => Boolean(key)))
+  ];
+  if (projectKeys.length === 0) {
+    return { available: false, reason: "no_project_mapped", projectKeys: [], totals: empty, bySeverity: {}, ...base };
+  }
+
+  const totals = { bugs: 0, vulnerabilities: 0, codeSmells: 0, total: 0 };
+  const bySeverity: Record<string, number> = {};
+  let anySucceeded = false;
+
+  for (const key of projectKeys) {
+    let rows;
+    try {
+      rows = await provider.getIssuesByAuthor(key);
+    } catch {
+      // This project's server is down / project missing — skip, don't fail.
+      continue;
+    }
+    anySucceeded = true;
+    for (const row of rows) {
+      if (!emails.has(row.author.toLowerCase())) continue;
+      totals.bugs += row.bugs;
+      totals.vulnerabilities += row.vulnerabilities;
+      totals.codeSmells += row.codeSmells;
+      totals.total += row.total;
+      for (const [severity, count] of Object.entries(row.bySeverity)) {
+        bySeverity[severity] = (bySeverity[severity] ?? 0) + count;
+      }
+    }
+  }
+
+  if (!anySucceeded) {
+    return { available: false, reason: "unreachable", projectKeys, totals: empty, bySeverity: {}, ...base };
+  }
+
+  // Fair denominator: total lines this person has authored (all-time additions),
+  // so issue counts are comparable across people who write different amounts.
+  let linesAuthored: number | null = null;
+  let perKLoc: number | null = null;
+  if (usernames.length) {
+    const agg = await prisma.commit.aggregate({
+      where: { repository: { organizationId }, username: { in: usernames, mode: "insensitive" } },
+      _sum: { additions: true }
+    });
+    linesAuthored = agg._sum.additions ?? 0;
+    if (linesAuthored >= 500) {
+      // Below ~500 lines the ratio is too noisy to be fair; leave it null.
+      perKLoc = Math.round((totals.total / (linesAuthored / 1000)) * 10) / 10;
+    }
+  }
+
+  return { available: true, projectKeys, totals, bySeverity, linesAuthored, perKLoc };
+}

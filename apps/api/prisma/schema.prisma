@@ -120,8 +120,106 @@ model Organization {
   leaderboardSnapshots  LeaderboardSnapshot[]
   employeeAwards        EmployeeAward[]
   notificationChannels  NotificationChannel[]
+  githubAppInstallations GitHubAppInstallation[]
+  ciConfigurations      CiConfiguration[]
+  workflowRuns          WorkflowRun[]
+  codeQualityConnection CodeQualityConnection?
+  codeQualitySnapshots  CodeQualitySnapshot[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
+}
+
+/// Per-org SonarQube/SonarCloud connection. The analysis token is AES-256-GCM
+/// encrypted at rest (token-cipher, like PATs) and never returned to the client.
+/// One per organization; absent → the env fallback (local dev) applies.
+model CodeQualityConnection {
+  id              String   @id @default(cuid())
+  organizationId  String   @unique
+  provider        String   @default("sonarqube") // "sonarqube" | "sonarcloud"
+  baseUrl         String
+  tokenCipher     String
+  organizationKey String? // set for SonarCloud (enables branch/PR capabilities)
+  status          String? // last test result: "OK" | "INVALID" | "UNREACHABLE"
+  lastCheckedAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// A pull request, for collaboration/review metrics (who opens, who merges, who
+/// reviews — work that never shows up in commit counts). Fetched from the git
+/// provider and de-duplicated by [repositoryId, number].
+model PullRequest {
+  id           String   @id @default(cuid())
+  repositoryId String
+  number       Int
+  title        String
+  authorLogin  String?
+  state        String // "open" | "closed"
+  merged       Boolean  @default(false)
+  additions    Int?
+  deletions    Int?
+  changedFiles Int?
+  openedAt     DateTime
+  mergedAt     DateTime?
+  closedAt     DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  repository Repository          @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  reviews    PullRequestReview[]
+
+  @@unique([repositoryId, number])
+  @@index([repositoryId])
+  @@index([repositoryId, authorLogin])
+}
+
+/// A single review left on a pull request (the reviewer's contribution).
+model PullRequestReview {
+  id            String   @id @default(cuid())
+  pullRequestId String
+  externalId    String // provider review id
+  reviewerLogin String?
+  state         String // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED
+  submittedAt   DateTime?
+  createdAt     DateTime @default(now())
+
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@unique([pullRequestId, externalId])
+  @@index([pullRequestId])
+  @@index([reviewerLogin])
+}
+
+/// One-per-day code-quality measurement for a SonarQube project, so trends
+/// (coverage/bugs over time) can be shown. Idempotent via [org, projectKey, dayKey]
+/// — the day's row is upserted to the latest capture.
+model CodeQualitySnapshot {
+  id                    String   @id @default(cuid())
+  organizationId        String
+  projectKey            String
+  dayKey                String // local YYYY-MM-DD
+  capturedAt            DateTime @default(now())
+  bugs                  Int
+  vulnerabilities       Int
+  codeSmells            Int
+  securityHotspots      Int
+  coverage              Float?
+  duplicatedLinesDensity Float?
+  techDebtMinutes       Int?
+  linesOfCode           Int?
+  gateStatus            String // OK | ERROR | WARN | NONE
+  reliabilityRating     String?
+  securityRating        String?
+  maintainabilityRating String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, projectKey, dayKey])
+  @@index([organizationId, projectKey])
 }
 
 model OrganizationMember {
@@ -204,7 +302,12 @@ model Repository {
   id             String      @id @default(cuid())
   organizationId String
   projectId      String?
-  credentialId   String
+  // A tracked repository is sourced from EITHER a PAT credential (classic path)
+  // OR a GitHub App installation. Both are optional so App-synced repos need no
+  // PAT; the [organizationId, provider, externalId] unique key still prevents
+  // duplicate rows across the two sources.
+  credentialId      String?
+  appInstallationId String?
   provider       GitProvider @default(GITHUB)
   externalId     String
   owner          String
@@ -214,6 +317,10 @@ model Repository {
   isPrivate      Boolean     @default(false)
   defaultBranch  String?
   lastSyncedAt   DateTime?
+  // The SonarQube/SonarCloud project key this repo is analyzed under (nullable —
+  // set once code-quality scanning is wired for the repo). Lets appraisals/reports
+  // map a repo to its static-analysis results.
+  sonarProjectKey String?
   // Live sync (GitHub webhook): hook id on the provider, the HMAC secret
   // (encrypted at rest, never returned by any API), status (ACTIVE/ERROR,
   // null = off) and the last delivery time.
@@ -226,17 +333,23 @@ model Repository {
 
   organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   project      Project?              @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  credential   GitCredential         @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  credential   GitCredential?        @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  appInstallation GitHubAppInstallation? @relation(fields: [appInstallationId], references: [id], onDelete: SetNull)
+  access         RepositoryAccess[]
+  ciConfiguration CiConfiguration?
+  workflowRuns    WorkflowRun[]
   contributors   ContributorIdentity[]
   commits        Commit[]
   coverage       RepositoryCoverage[]
   branches       Branch[]
   collectionJobs CollectionJob[]
+  pullRequests   PullRequest[]
 
   @@unique([organizationId, provider, externalId])
   @@index([organizationId])
   @@index([projectId])
   @@index([credentialId])
+  @@index([appInstallationId])
 }
 
 model ContributorIdentity {
@@ -684,4 +797,123 @@ model AuditLog {
   @@index([actorId])
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+/**
+ * A GitHub App installation, linking a customer's GitHub account/organization to
+ * a DevInside organization (tenant). The DevInside owner registers ONE App;
+ * every customer installs it and approves repositories. No secret is stored
+ * here: the App private key lives in env, and installation access tokens are
+ * short-lived (~1h) and minted on demand — never persisted. `installationId`
+ * (GitHub's numeric id) is globally unique, which is the cross-tenant guard:
+ * one GitHub installation can belong to exactly one DevInside org.
+ */
+model GitHubAppInstallation {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  // GitHub's numeric installation id (stored as a string). Globally unique.
+  installationId      String   @unique
+  accountLogin        String
+  // "User" | "Organization" — the kind of GitHub account the App is installed on.
+  accountType         String?
+  accountId           String?
+  targetType          String?
+  // "all" | "selected" — GitHub's repository_selection for this installation.
+  repositorySelection String?
+  permissions         Json?
+  suspendedAt         DateTime?
+  repositoryCount     Int      @default(0)
+  createdById         String?
+  lastSyncedAt        DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repositories Repository[]
+  access       RepositoryAccess[]
+
+  @@index([organizationId])
+}
+
+/**
+ * Access grant: which repositories a GitHub App installation currently exposes
+ * to DevInside. Distinct from Repository so revoking access (GitHub
+ * `installation_repositories.removed`) deletes only the grant, never the
+ * Repository row or its collected history.
+ */
+model RepositoryAccess {
+  id                String   @id @default(cuid())
+  appInstallationId String
+  repositoryId      String
+  createdAt         DateTime @default(now())
+
+  installation GitHubAppInstallation @relation(fields: [appInstallationId], references: [id], onDelete: Cascade)
+  repository   Repository            @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([appInstallationId, repositoryId])
+  @@index([repositoryId])
+}
+
+/**
+ * Per-repository CI (GitHub Actions) management state. DevInside installs a
+ * managed workflow via a pull request (never a direct push to the default
+ * branch) and tracks the setup PR + template version here. The workflow file
+ * lives in the customer's repo; this row is DevInside's management record.
+ * Status: PENDING (PR open, awaiting merge) | ENABLED (workflow on default
+ * branch) | DISABLED (management paused).
+ */
+model CiConfiguration {
+  id                String    @id @default(cuid())
+  organizationId    String
+  repositoryId      String    @unique
+  status            String    @default("PENDING")
+  templateId        String?
+  templateVersion   String?
+  workflowPath      String?
+  setupBranch       String?
+  pullRequestNumber Int?
+  pullRequestUrl    String?
+  pullRequestState  String?
+  workflowFileSha   String?
+  enabledById       String?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+/**
+ * A GitHub Actions workflow run synced from GitHub for a managed repository.
+ * Deduped per repository by the provider run id; powers the CI run history in
+ * DevInside. Read-only mirror — DevInside never fabricates runs.
+ */
+model WorkflowRun {
+  id             String    @id @default(cuid())
+  organizationId String
+  repositoryId   String
+  runId          String
+  workflowId     String?
+  name           String?
+  branch         String?
+  headSha        String?
+  event          String?
+  status         String?
+  conclusion     String?
+  actor          String?
+  url            String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  durationMs     Int?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, runId])
+  @@index([repositoryId, startedAt])
 }

@@ -41,6 +41,7 @@ function toRepository(repository: RepositoryWithProject) {
     remoteUrl: repository.remoteUrl,
     isPrivate: repository.isPrivate,
     defaultBranch: repository.defaultBranch,
+    sonarProjectKey: repository.sonarProjectKey,
     project: repository.project,
     commitCount: repository._count.commits,
     lastSyncedAt: repository.lastSyncedAt,
@@ -272,13 +273,43 @@ export async function assignRepositoryProject(
   return toRepository(updated);
 }
 
+/** Sets (or clears) the SonarQube/SonarCloud project key a repo maps to. */
+export async function setRepositorySonarProjectKey(
+  actorId: string,
+  repositoryId: string,
+  sonarProjectKey: string | null
+) {
+  const repository = await loadRepository(repositoryId);
+  await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
+
+  const value = sonarProjectKey?.trim() || null;
+  const updated = await prisma.repository.update({
+    where: { id: repositoryId },
+    data: { sonarProjectKey: value },
+    include: projectSelect
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      organizationId: repository.organizationId,
+      actorId,
+      action: "repository.set_sonar_project",
+      entityType: "Repository",
+      entityId: repositoryId,
+      metadataJson: { sonarProjectKey: value }
+    }
+  });
+
+  return toRepository(updated);
+}
+
 export async function resyncRepository(actorId: string, repositoryId: string) {
   const repository = await loadRepository(repositoryId);
   await requireOrganizationRole(actorId, repository.organizationId, MANAGER_ROLES);
 
-  const credential = await prisma.gitCredential.findUnique({
-    where: { id: repository.credentialId }
-  });
+  const credential = repository.credentialId
+    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+    : null;
 
   if (!credential) {
     throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
@@ -327,9 +358,9 @@ async function registerWebhook(repository: Repository) {
     );
   }
 
-  const credential = await prisma.gitCredential.findUnique({
-    where: { id: repository.credentialId }
-  });
+  const credential = repository.credentialId
+    ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+    : null;
   if (!credential) {
     throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
   }
@@ -371,9 +402,9 @@ async function removeWebhook(repository: Repository) {
     return;
   }
   try {
-    const credential = await prisma.gitCredential.findUnique({
-      where: { id: repository.credentialId }
-    });
+    const credential = repository.credentialId
+      ? await prisma.gitCredential.findUnique({ where: { id: repository.credentialId } })
+      : null;
     if (!credential) {
       return;
     }

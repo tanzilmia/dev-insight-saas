@@ -32,3 +32,7 @@ export const selectRepositoriesSchema = z.object({
 export const assignRepositoryProjectSchema = z.object({
   projectId: z.string().min(1).nullable()
 });
+
+export const setSonarProjectKeySchema = z.object({
+  sonarProjectKey: z.string().trim().max(400).nullable()
+});

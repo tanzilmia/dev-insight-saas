@@ -38,6 +38,8 @@ import {
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
 import { BarList, StatTile } from "@/components/statistics/charts";
+import { CodeHealthCard } from "@/components/statistics/code-health-card";
+import { CollaborationPanel } from "./collaboration-panel";
 import { ComparePanel } from "./compare-panel";
 import { AwardsPanel } from "./awards-panel";
 import {
@@ -509,6 +511,17 @@ export function AnalysisManager({
                 icon={CalendarDays}
               />
             </div>
+
+            {/* Team-level codebase health (per-project, not per-person) — reduces
+                the "blame one person" risk. Skipped when embedded, since the
+                project-detail page already shows this card. */}
+            {!embedded && organizationId && projectId ? (
+              <CodeHealthCard organizationId={organizationId} projectId={projectId} />
+            ) : null}
+
+            {!embedded ? (
+              <CollaborationPanel organizationId={organizationId} projectId={projectId} />
+            ) : null}
 
             {organizationId && projectId ? (
               <AwardsPanel

@@ -13,6 +13,7 @@ import {
   tokenLast4
 } from "../../common/crypto/token-cipher.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
+import { resolveOrganizationToken } from "../github-app/repository-token.js";
 
 type ConnectCredentialInput = {
   organizationId: string;
@@ -74,18 +75,9 @@ export async function resolveGitUser(
 ) {
   await requireOrganizationRole(actorId, organizationId, MANAGER_ROLES);
 
-  const credential = await prisma.gitCredential.findFirst({
-    where: { organizationId, provider: "GITHUB" }
-  });
-
-  if (!credential) {
-    throw new AppError(400, "Connect a GitHub credential first", "NO_CREDENTIAL");
-  }
-
-  return getGitProvider(credential.provider).getUser(
-    decryptToken(credential.encryptedToken),
-    username
-  );
+  // PAT credential if present, otherwise the org's GitHub App installation token.
+  const { token, provider } = await resolveOrganizationToken(organizationId);
+  return provider.getUser(token, username);
 }
 
 /**

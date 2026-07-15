@@ -30,7 +30,26 @@ const envSchema = z.object({
   // for the website chat proxy (kept server-side; never exposed to the browser).
   OPENCLAW_SERVICE_KEY: z.string().optional(),
   OPENCLAW_GATEWAY_URL: z.string().url().optional(),
-  OPENCLAW_GATEWAY_TOKEN: z.string().optional()
+  OPENCLAW_GATEWAY_TOKEN: z.string().optional(),
+  // GitHub App (customer repository connection). All optional: App features stay
+  // unavailable (with a clear UI hint) until the DevInside owner registers the
+  // App and sets these — see docs/architecture/github-app-foundation.md.
+  GITHUB_APP_ID: z.string().optional(),
+  // The App's URL slug, used to build the install URL github.com/apps/<slug>/…
+  GITHUB_APP_SLUG: z.string().optional(),
+  GITHUB_APP_CLIENT_ID: z.string().optional(),
+  // The App's RSA private key (PEM). Accepts a base64-encoded PEM (recommended —
+  // avoids newline issues in env) or a raw PEM with literal newlines.
+  GITHUB_APP_PRIVATE_KEY: z.string().optional(),
+  GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
+  // Code-quality provider (SonarQube self-hosted, or SonarCloud with the same
+  // Web API). All optional — code-quality features stay unavailable (with a UI
+  // hint) until SONAR_TOKEN is set. SONAR_ORGANIZATION is empty for self-hosted
+  // and set for SonarCloud; supplying it also enables branch/PR capabilities.
+  CODE_QUALITY_PROVIDER: z.enum(["sonarqube"]).default("sonarqube"),
+  SONAR_BASE_URL: z.string().url().default("http://localhost:9000"),
+  SONAR_TOKEN: z.string().optional(),
+  SONAR_ORGANIZATION: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);

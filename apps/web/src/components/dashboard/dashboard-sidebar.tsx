@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   LogOut,
   Send,
+  ShieldCheck,
   UserCheck,
   Users,
   X
@@ -30,6 +31,8 @@ export const NAV_ITEMS: {
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   // Analysis compares employees — management-only, hidden from EMPLOYEE roles.
   { href: "/dashboard/analysis", label: "Analysis", icon: BarChart3, managerOnly: true },
+  // Static-analysis quality (SonarQube) + per-developer issues — management-only.
+  { href: "/dashboard/code-quality", label: "Code Quality", icon: ShieldCheck, managerOnly: true },
   // Per-employee, evidence-backed appraisal for increment time — management-only.
   { href: "/dashboard/appraisal", label: "Appraisal", icon: Award, managerOnly: true },
   { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },

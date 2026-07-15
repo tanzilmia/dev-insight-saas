@@ -64,6 +64,12 @@ DevInsight tool plugin + channels.**
 **NOT yet built:** the OpenClaw runtime/plugin/channels (§11.4), and
 Phase 12–16 (statistics dashboard, sharing, tests, deployment).
 
+**Code Quality (SonarQube) — DONE (local dogfood), multi-tenant NEXT:** self-hosted
+SonarQube Community Edition (Docker) is wired end-to-end — a `CodeQualityProvider`
+abstraction (SonarCloud-swap-ready) feeds a per-developer **Code Quality** dashboard
+page, plus a pre-push git hook that auto-scans in the background. Full details and
+the remaining client-repo provisioning plan in **§12**.
+
 ---
 
 ## 3. Monorepo layout & how to run
@@ -110,6 +116,10 @@ Added for provider integration (all have safe defaults / are optional):
 | `OPENCLAW_SERVICE_KEY` | *(unset)* | shared secret the OpenClaw plugin uses to call our tool endpoints (`x-openclaw-key` header) |
 | `OPENCLAW_GATEWAY_URL` | *(unset)* | OpenClaw runtime base URL for the website chat proxy (e.g. `http://localhost:18789`) |
 | `OPENCLAW_GATEWAY_TOKEN` | *(unset)* | bearer token for the gateway (server-side only) |
+| `CODE_QUALITY_PROVIDER` | `sonarqube` | code-quality provider selector (SonarCloud slots in behind the same interface) |
+| `SONAR_BASE_URL` | `http://localhost:9000` | SonarQube (or SonarCloud) base URL |
+| `SONAR_TOKEN` | *(unset)* | server-side token to read the SonarQube Web API. **Unset → Code Quality page shows "not connected"** (graceful, like the LLM fallback) |
+| `SONAR_ORGANIZATION` | *(unset)* | empty for self-hosted; set for SonarCloud (also flips on branch/PR capabilities) |
 
 **Currently configured LLM:** Groq (OpenAI-compatible, free tier). The `.env` has:
 `OPENAI_BASE_URL="https://api.groq.com/openai/v1"`,
@@ -1801,3 +1811,243 @@ all three — see below).
   or Prisma mock), then the auth/RBAC and schedule paths; **`apps/web`** has no
   tests; **CI** (GitHub Actions running test/typecheck/lint/build) is still absent
   (the audit's Phase 1 pairs tests WITH CI).
+
+---
+
+## 12. Code Quality (SonarQube) integration
+
+**Goal:** add an objective, quantitative **code-quality** signal (bugs, vulnerabilities,
+coverage, per-developer issues) alongside DevInsight's activity data — serving the same
+fairness mission (evidence, not verdict). Built to run **self-hosted (SonarQube CE) now**,
+with a **config-only path to SonarCloud** later.
+
+### 12.1 What is built (verified end-to-end on real data)
+
+- **Local SonarQube stack** — `docker-compose.sonar.yml` (SonarQube CE + its own Postgres;
+  NOT the app's Neon DB). Root `sonar-project.properties` scopes the monorepo
+  (`apps/api/src`, `apps/web/src`, `packages/shared/src`), excludes generated/build/test
+  paths, and points coverage at `apps/api/coverage/lcov.info`.
+- **Coverage wiring** — `@vitest/coverage-v8` + `coverage` block in `apps/api/vitest.config.ts`
+  (v8, `lcov` reporter) + `test:coverage` script.
+- **`scripts/sonar-scan.sh`** — one command: regenerates coverage, then runs the Dockerized
+  `sonar-scanner-cli` against the local server (macOS uses `host.docker.internal`). Reads
+  `SONAR_TOKEN` from env.
+- **`CodeQualityProvider` abstraction** (`apps/api/src/modules/code-quality/`) — mirrors the
+  mandatory provider pattern (`llm-provider.ts` shape): `code-quality-provider.ts` (interface
+  + `capabilities`), `code-quality-registry.ts` (env-selected factory), `sonarqube.provider.ts`
+  (impl: `getMeasures`, `getIssuesByAuthor`). **Reads the SonarQube Web API** (Basic auth,
+  `token:`); appends `organization` when `SONAR_ORGANIZATION` is set, so the SAME class works
+  against SonarCloud. `capabilities.branchAnalysis / pullRequestAnalysis` are `false` for CE,
+  auto-`true` when an organization is set.
+- **`code-quality.service.ts`** — joins SonarQube's per-git-author issues to employees via the
+  existing `EmployeeGitAlias.email` + `ContributorIdentity.authorEmail`→`EmployeeGitMapping`
+  tables (case-insensitive). Degrades gracefully (`available:false`) when `SONAR_TOKEN` is
+  unset — same "never hard-fail" philosophy as reports.
+- **Endpoint** — `GET /api/code-quality/overview?organizationId=&projectKey=` (`requireAuth` +
+  `requireOrganizationMember`), mounted at `/api/code-quality`.
+- **UI** — `/dashboard/code-quality` (manager-only nav, 🛡️): 3 rating badges
+  (Reliability/Security/Maintainability, A–E colored), measure tiles (bugs, vulns, smells,
+  coverage %, duplication %, hotspots, tech-debt, LOC), and a **By developer** table (git author
+  → employee where mapped, bug/vuln/smell counts + severity chips). `lib/api.ts` helper
+  `getCodeQualityOverview`.
+- **Auto-scan on push** — `.githooks/pre-push` launches `scripts/sonar-scan.sh` in the
+  **background** (push is never blocked), reading `SONAR_TOKEN` from `apps/api/.env`; skips
+  gracefully if token missing / server down. Enabled via `git config core.hooksPath .githooks`
+  (`scripts/install-hooks.sh`). Log at `.sonar-scan.log` (gitignored).
+
+**Verified:** provider returns correct measures + author breakdown against the real local
+server; the HTTP endpoint returns populated data (temp instance with `SONAR_TOKEN`) and
+`available:false` without it; api `typecheck`/`lint`/`test` (129)/`build` and web
+`typecheck`/`lint` all pass; the pre-push hook returns instantly and completes a scan
+(`ANALYSIS SUCCESSFUL`).
+
+### 12.2 Important constraints (SonarQube Community Edition)
+
+- **Main branch only** — no branch/PR analysis or PR decoration (that's Developer Edition /
+  SonarCloud). Every scan lands on the project's single "main" view; scanning feature branches
+  pollutes it. Clean CE pattern = **scan on push to main (post-merge)**.
+- **Attribution is blame-based** (git author of the last change to a line) — fair *evidence*,
+  not exact fault. Raw counts should be **normalized** (per-KLOC / new-issues) before any
+  per-developer judgement, or it becomes the favoritism tool the product exists to counter.
+- **Per-developer coverage / ratings do NOT exist** in SonarQube (those are file/project-level);
+  the "how much" per person still comes from DevInsight's own commit data.
+
+### 12.3 Next: multi-tenant (client repos via the existing GitHub App / CI)
+
+The client-repo path plugs into the **existing** GitHub App + CI pipeline (`modules/github-app`,
+`modules/ci` — `ci.service.ts` already does detect-stack → generate-workflow → PR → merge, and
+`devops-provider.ts` already stubs SonarQube extension points). Four pieces:
+
+1. **Workflow step** — add SonarQube steps to `ci/workflow-templates.ts` (bump `node@v1`→`v2`);
+   the existing "update via PR" mechanism ships it to onboarded repos. The generated workflow
+   already triggers `on: push: branches:["main"]`, so merge-time analysis is one step away.
+2. **Repo secret injection** — the one genuinely missing capability: add `putRepoSecret` to
+   `DevOpsProvider` (libsodium-encrypt → `PUT /repos/{o}/{r}/actions/secrets/{name}`) to set
+   `SONAR_TOKEN` / `SONAR_HOST_URL` in the client repo.
+3. **Provisioning** — extend the provider with `ensureProject` + `generateToken` per repo; store
+   a per-repo `SonarProject { repositoryId, projectKey, tokenCipher }` (reuse `token-cipher.ts`).
+4. **Read results** — already done (§12.1); just resolve `projectKey` from the repo mapping.
+
+**SonarCloud migration = config, not code:** set `SONAR_ORGANIZATION` + `SONAR_BASE_URL`, add a
+`sonarcloud.provider.ts` (same interface), swap the workflow action name. Controllers/services/UI
+unchanged; `capabilities` flip on and the PR-analysis UI lights up.
+
+### 12.4 Per-developer code quality in the Appraisal (2026-07-15)
+
+The code-quality signal is now woven into the **Appraisal** (the product's fairness core),
+not just the standalone page.
+
+- **`Repository.sonarProjectKey`** (nullable, migration `repository_sonar_project_key`) maps a
+  tracked repo to its SonarQube project. Set/clear via `PATCH /api/repositories/:id/sonar-project`
+  (manager-gated) — a small "+ Sonar key" control per repo on the Repositories page.
+- **`getEmployeeAppraisal`** now returns a `codeQuality` block: it resolves the employee's git
+  emails (account email + `EmployeeGitAlias.email` + mapped `ContributorIdentity.authorEmail`
+  **+ the `authorEmail` of their stored commits, matched by username** — this last source is the
+  reliable link, since SonarQube attributes by git-blame email and the real commit email is often
+  neither the account nor a declared alias email, as the GitHub contributors API never exposes it),
+  reads SonarQube issues-by-author for the SonarQube projects mapped to the in-scope repos, and
+  sums the ones attributed to this employee (bugs / vulns / smells + severity). **Best-effort:**
+  a missing/unconfigured/unreachable SonarQube degrades to `available:false` and NEVER fails the
+  appraisal (same philosophy as the LLM fallback). When present, two **fairness caveats** are
+  added to `dataBlindSpots` (blame-based/all-time; raw counts favour those who write more).
+- **UI:** a "Code quality (SonarQube)" card on the Appraisal page (issue tiles + severity chips +
+  the source project keys), or an actionable hint to map a Sonar key when none is set.
+- **Verified end-to-end on real data:** a seeded employee whose git email == the SonarQube author
+  got the correct attributed totals (2 bugs / 1 vuln / smells, with severities) through the real
+  service + real SonarQube; api typecheck/lint/129 tests/build + web typecheck/lint all pass.
+
+**Deliberately NOT a normalized score yet** — raw attributed counts + caveats. A future
+improvement is per-KLOC / new-code-period normalization once windowed issue attribution exists
+(CE only gives the current main-branch snapshot).
+
+### 12.5 Friendly setup + Quality Gate (A+B, 2026-07-15)
+
+Made the integration self-serve instead of env/CLI-driven.
+
+- **Per-org connection** — `CodeQualityConnection` model (migration `code_quality_connection`):
+  baseUrl + AES-256-GCM-encrypted token (token-cipher, never returned) + optional `organizationKey`
+  (SonarCloud). Endpoints (all manager-gated): `GET/PUT/DELETE /api/code-quality/connection`,
+  `POST /api/code-quality/connection/test`, `GET /api/code-quality/projects`.
+- **Provider is now config-driven** — `SonarQubeProvider` takes `{baseUrl, token, organizationKey}`;
+  `getCodeQualityProvider(organizationId)` is **async**, resolving the org's saved connection
+  (token decrypted) and **falling back to env** (`SONAR_*`) so the local dogfood path is unchanged.
+  New provider methods: `getQualityGate`, `listProjects`, `validate`. Callers (`code-quality.service`,
+  `appraisal.service`) now `await getCodeQualityProvider(orgId)`.
+- **Quality gate** — the overview now returns `qualityGate` (OK/ERROR/WARN/NONE + failed conditions);
+  a pass/fail badge shows on the Code Quality page.
+- **UI (Code Quality page)** — a connection panel (Connect/Test/Save/Reconfigure/Disconnect,
+  shows "using env default" when unconnected), a **project dropdown** (from `listProjects`, replacing
+  the free-text key; manual entry only when nothing is listed), the gate badge, and **direct links**
+  into SonarQube.
+- **UI (Repositories page)** — the per-repo "+ Sonar key" prompt is now a **dropdown** of the org's
+  SonarQube projects, plus a header **"Auto-map Sonar"** that name-matches repos → projects in bulk.
+- **Verified end-to-end** (temp instance, real token): connection false→test(valid)→save(connected,
+  token never returned)→overview(gate:ERROR, bugs:2)→delete; env fallback lists `devinsight`; both
+  workspaces typecheck/lint, api 129 tests + build pass.
+
+**SonarCloud migration stays config-only** and is now even closer: a connection with an
+`organizationKey` flips capabilities on. Multi-tenant (§12.3) reuses this same per-org connection
+as its foundation.
+
+### 12.6 Code health on the Overview (C1, 2026-07-15)
+
+First slice of "surface quality in context" (workstream C):
+
+- **Org-wide rollup** — `getCodeQualitySummary` + `GET /api/code-quality/summary`: across every repo
+  with a `sonarProjectKey`, sums bugs/vulns/smells/hotspots, computes ncloc-weighted coverage, and the
+  **worst quality gate**. Best-effort (a failing project is skipped); `available:false` when nothing is
+  connected/mapped.
+- **Overview "Code health" card** (`components/statistics/code-health-card.tsx`) — self-contained,
+  manager-only, **stays silent** when unavailable (same quiet philosophy as the other Overview cards).
+  Shows bugs / vulnerabilities / coverage / code smells + a gate chip + a link to the Code Quality page.
+- Verified on real org data (1 project, gate ERROR, coverage 10.4%); both workspaces typecheck/lint,
+  api build pass.
+
+**C2 done (2026-07-15):** the SAME summary now takes an optional `projectId`
+(`GET /api/code-quality/summary?...&projectId=`), and the SAME `CodeHealthCard` (with a `projectId`
+prop) renders on the **project detail page** (before the embedded analysis), scoped to that project's
+repos. Verified: project with a mapped repo → available (gate ERROR, bugs 2); a project with none →
+silent (`no_project_mapped`).
+
+**Still in workstream C:** C3 report code-health section — needs a design call on snapshot-vs-window
+(SonarQube gives a current snapshot; reports cover a period) before building.
+
+### 12.7 Trends (D) + report code-health (C3) — 2026-07-15
+
+**D — trend over time.** `CodeQualitySnapshot` model (migration `code_quality_snapshot`): one row per
+`[organizationId, projectKey, dayKey]` (local day), **upserted** to the latest capture. Recorded two
+ways: (1) **capture-on-load** — `getCodeQualityOverview` records today's snapshot best-effort (never
+fails the overview); (2) **scheduler sweep** — `captureCodeQualitySnapshots` on an hourly throttle in
+the scheduler tick (mirrors the leaderboard-snapshot sweep). `GET /api/code-quality/trend?...&projectKey=`
+returns the series oldest→newest. UI: a **Trend over time** chart on the Code Quality page (reuses
+`AreaChart`) with a Coverage / Bugs / Code-smells toggle; shows a "collecting" note until ≥2 points.
+Verified: capture-on-load records today; multi-point series returns in order (coverage 8→9.5→10.1).
+
+**C3 — report code-health (now window-accurate via D).** `buildCodeHealthMarkdown(orgId, {projectId?,
+repositoryId?}, from, to)` builds a deterministic `## Code health` section from snapshots: current
+gate/bugs/vulns/smells/coverage **plus "(was N)" deltas** vs the state at the period start (falls back
+to the earliest snapshot when history began mid-period). It is appended to the persisted report markdown
+right after the caveats footer (both LLM and template paths, so every channel + the cache carry it), and
+returns "" when nothing is mapped/captured so most reports are unaffected. Verified on real data: delta
+block ("Bugs 2 (was 6)", "Coverage 10.1% (was 5%)") for a mapped project; "" for an unmapped one.
+
+Both workspaces typecheck/lint, api 129 tests + build pass. **Workstream C + D complete.**
+
+### 12.8 Fairness normalize (E) — 2026-07-15
+
+Sharpens the fairness mission on the code-quality signal.
+
+- **E1 — per-KLOC normalization (appraisal).** `computeEmployeeCodeQuality` now also returns
+  `linesAuthored` (all-time sum of the employee's commit additions, by username) and `perKLoc`
+  (issues per 1,000 lines authored; left null under ~500 lines where the ratio is too noisy). The
+  appraisal Code Quality card shows "≈ N issues per 1,000 lines authored", and the fairness caveat
+  is reworded to point at it (still honest: blame ≠ authorship, issues are all-time vs lines added).
+  Verified real data: 377 issues / 147,576 lines → 2.6 per KLOC.
+- **E2 — team-level codebase health (Analysis).** The project-scoped `CodeHealthCard` now also renders
+  on the standalone Analysis page (`!embedded` only, to avoid duplicating the project-detail card),
+  framing quality as the **team's** codebase health rather than one person's — reducing the
+  "blame one person" risk.
+
+Both workspaces typecheck/lint, api 129 tests + build pass. **Workstream E complete — the code-quality
+integration arc (setup → page → gate → Overview/project/Analysis → appraisal + per-KLOC → trends →
+report) is now feature-complete for the self-hosted, single-org phase.** Remaining big items: multi-tenant
+(§12.3) + VPS deploy.
+
+## 13. PR / code-review metrics (collaboration) — Increment 1 (backend), 2026-07-15
+
+Fills the product's biggest fairness blind spot: it measured code volume + code quality but not
+**review/collaboration** work (the "quiet reviewer/mentor" the appraisal caveat itself calls out).
+
+**Increment 1 — backend foundation (done + verified):**
+- **Models** `PullRequest` + `PullRequestReview` (migration `pull_requests_reviews`), deduped by
+  `[repositoryId, number]` and `[pullRequestId, externalId]`.
+- **Provider** — `GitProvider.listPullRequests` (all states, newest-first, capped) + `listPullRequestReviews`
+  (per PR), implemented in `GitHubProvider` (`/pulls?state=all`, `/pulls/{n}/reviews`; `merged` derived
+  from `merged_at`).
+- **Collection** — `collectPullRequests(actorId, repositoryId)` (manager-gated, uses the repo's stored
+  credential / App installation via `resolveRepositoryToken`): upserts PRs + reviews for the newest 150
+  PRs; `POST /api/pull-requests/collect`.
+- **Metrics** — `getReviewMetrics(actorId, {organizationId, projectId?, from?, to?})`: per-developer
+  PRs opened/merged and reviews given (approvals / changes-requested), each **joined to an employee** via
+  the git-login → alias/mapping tables; `GET /api/pull-requests/review-metrics`.
+- **Verified on real data**: collected 1 PR from `tanzilmia/dev-insight-saas`, author mapped to the
+  employee; a seeded review aggregated correctly (reviewsGiven/approvals, reviewer mapped). api
+  typecheck/lint/129 tests/build pass.
+
+**Increment 2 (next, NOT built):** surface it in the UI — a "Collect PRs" trigger, and a "Collaboration &
+review" card on the Analysis (team) + Appraisal (per-employee) pages, so review/mentoring work is finally
+visible alongside commits. Consider folding a per-employee collaboration block into `getEmployeeAppraisal`.
+
+**Increment 2 — surfaced in the UI (done + verified):**
+- **Appraisal** — `getEmployeeAppraisal` now returns a `collaboration` block (PRs opened/merged +
+  reviews given / approvals / changes-requested for the employee's git logins, within the window;
+  `hasData` false when no PRs are collected). A "Collaboration & review" card renders it, or a hint to
+  collect. Verified real data (Tanzil: 1 PR opened/merged).
+- **Repositories page** — a per-repo **"PRs"** button (`collectPullRequests`) triggers collection.
+- **Analysis page** — a self-contained **`CollaborationPanel`** (team, per-project): per-developer PRs
+  opened/merged + reviews given (from `getReviewMetrics`), stays silent until PRs are collected.
+- Both workspaces typecheck/lint, api 129 tests + build pass.
+
+**PR/review metrics complete for the single-org phase.** Possible follow-ups: review latency / time-to-merge,
+reviewer↔author matrix (who reviews whom), scheduled PR collection in the tick, and folding collaboration
+into the LLM report narrative.

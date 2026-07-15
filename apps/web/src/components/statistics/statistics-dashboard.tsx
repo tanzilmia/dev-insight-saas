@@ -32,6 +32,7 @@ import {
 } from "@/components/dashboard/dashboard-chrome";
 import { AwardsPanel } from "@/components/analysis/awards-panel";
 import { AreaChart, BarList, StatTile } from "./charts";
+import { CodeHealthCard } from "./code-health-card";
 import { DailyDigestCard } from "./daily-digest-card";
 import { LeaderboardHistoryPanel } from "./leaderboard-history-panel";
 import { UnmappedNudge } from "./unmapped-nudge";
@@ -226,6 +227,8 @@ export function StatisticsDashboard() {
         ) : null}
 
         <UnmappedNudge organizationId={organizationId} />
+
+        {manageable ? <CodeHealthCard organizationId={organizationId} /> : null}
 
         <DailyDigestCard organizationId={organizationId} />
 
