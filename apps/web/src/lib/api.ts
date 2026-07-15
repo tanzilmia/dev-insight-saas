@@ -1456,6 +1456,8 @@ export type EmployeeAppraisal = {
     projectKeys: string[];
     totals: { bugs: number; vulnerabilities: number; codeSmells: number; total: number };
     bySeverity: Record<string, number>;
+    linesAuthored: number | null;
+    perKLoc: number | null;
   };
   evidence: AppraisalEvidence[];
   dataBlindSpots: string[];

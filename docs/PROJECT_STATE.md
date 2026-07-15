@@ -1992,3 +1992,23 @@ returns "" when nothing is mapped/captured so most reports are unaffected. Verif
 block ("Bugs 2 (was 6)", "Coverage 10.1% (was 5%)") for a mapped project; "" for an unmapped one.
 
 Both workspaces typecheck/lint, api 129 tests + build pass. **Workstream C + D complete.**
+
+### 12.8 Fairness normalize (E) — 2026-07-15
+
+Sharpens the fairness mission on the code-quality signal.
+
+- **E1 — per-KLOC normalization (appraisal).** `computeEmployeeCodeQuality` now also returns
+  `linesAuthored` (all-time sum of the employee's commit additions, by username) and `perKLoc`
+  (issues per 1,000 lines authored; left null under ~500 lines where the ratio is too noisy). The
+  appraisal Code Quality card shows "≈ N issues per 1,000 lines authored", and the fairness caveat
+  is reworded to point at it (still honest: blame ≠ authorship, issues are all-time vs lines added).
+  Verified real data: 377 issues / 147,576 lines → 2.6 per KLOC.
+- **E2 — team-level codebase health (Analysis).** The project-scoped `CodeHealthCard` now also renders
+  on the standalone Analysis page (`!embedded` only, to avoid duplicating the project-detail card),
+  framing quality as the **team's** codebase health rather than one person's — reducing the
+  "blame one person" risk.
+
+Both workspaces typecheck/lint, api 129 tests + build pass. **Workstream E complete — the code-quality
+integration arc (setup → page → gate → Overview/project/Analysis → appraisal + per-KLOC → trends →
+report) is now feature-complete for the self-hosted, single-org phase.** Remaining big items: multi-tenant
+(§12.3) + VPS deploy.

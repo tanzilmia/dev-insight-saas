@@ -482,6 +482,18 @@ export function AppraisalManager() {
                         ))}
                     </div>
                   ) : null}
+                  {appraisal.codeQuality.perKLoc !== null ? (
+                    <div className="mt-3 rounded-lg bg-(--surface-soft) px-3 py-2">
+                      <p className="text-sm font-bold text-(--text)">
+                        ≈ {appraisal.codeQuality.perKLoc} issues per 1,000 lines authored
+                      </p>
+                      <p className="text-[11px] text-(--muted)">
+                        A fairer lens than the raw count — normalized by the{" "}
+                        {appraisal.codeQuality.linesAuthored?.toLocaleString()} lines this person has
+                        added. Still rough (see the fairness note below); never rank on it alone.
+                      </p>
+                    </div>
+                  ) : null}
                   <p className="mt-3 text-[11px] text-(--muted)">
                     From SonarQube project{appraisal.codeQuality.projectKeys.length === 1 ? "" : "s"}:{" "}
                     {appraisal.codeQuality.projectKeys.join(", ")}

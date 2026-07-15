@@ -167,7 +167,8 @@ LLM report (Markdown) → dashboard / share link / Telegram / chat
 - **Quality gate** — the single pass/fail badge (plus failed conditions) is surfaced from SonarQube's quality gate
 - **In context, not siloed** — an org-wide "Code health" card on the Overview and a project-scoped one on each project page (bugs/vulns/coverage + worst gate)
 - **Trends over time** — daily snapshots feed a coverage/bugs/code-smells trend chart, and generated reports carry a window-accurate "Code health" section (current values with "(was N)" deltas vs the period start)
-- **Woven into the Appraisal** — the per-employee Appraisal view now shows a "Code quality" card: SonarQube issues (bugs/vulns/smells + severity) attributed to that person by git-blame email, joined via their git identities. Best-effort (never fails the appraisal) and shown with explicit fairness caveats. A repo is mapped to its SonarQube project via a per-repo `sonarProjectKey`
+- **Woven into the Appraisal** — the per-employee Appraisal view shows a "Code quality" card: SonarQube issues (bugs/vulns/smells + severity) attributed to that person by git-blame email, joined via their git identities, **normalized to issues per 1,000 lines authored** so writing more code isn't penalized. Best-effort (never fails the appraisal) and shown with explicit fairness caveats. A repo is mapped to its SonarQube project via a per-repo `sonarProjectKey`
+- **Team-level framing** — the same code-health card also appears on the Analysis page (per-project, not per-person), to reduce the "blame one person" risk
 - **Auto-scan on push** — a background `pre-push` git hook runs a scan without blocking the push; results appear in SonarQube and (once the API has the token) on the Code Quality page
 - *Community-Edition limits (deliberate):* main-branch-only analysis (no pre-merge PR gate — that needs SonarCloud/Developer Edition); attribution is blame-based, so it's evidence, not exact fault
 

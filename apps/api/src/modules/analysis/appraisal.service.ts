@@ -185,7 +185,9 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
         available: false,
         projectKeys: [],
         totals: { bugs: 0, vulnerabilities: 0, codeSmells: 0, total: 0 },
-        bySeverity: {}
+        bySeverity: {},
+        linesAuthored: null,
+        perKLoc: null
       } as AppraisalCodeQuality,
       evidence: [] as EvidenceItem[],
       dataBlindSpots: [
@@ -367,7 +369,8 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
   const codeQuality = await computeEmployeeCodeQuality(
     query.organizationId,
     project?.id,
-    employeeEmails
+    employeeEmails,
+    usernames
   );
 
   const dataBlindSpots = [
@@ -376,7 +379,7 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
     ...(codeQuality.available
       ? [
           "Code-quality issues are attributed by git blame (whoever last touched a line) and reflect the current state of the main branch — treat them as a signal, not exact fault, and not a within-window measure.",
-          "Raw issue counts tend to be higher for whoever writes more code or owns harder modules — never rank a person on the count alone."
+          "Raw counts favour whoever writes more, so we also show issues per 1,000 lines authored as a fairer lens — but even that is rough: blame isn't authorship, and issue counts are all-time while lines are what this person added."
         ]
       : []),
     ...(truncated
@@ -443,25 +446,32 @@ export type AppraisalCodeQuality = {
   projectKeys: string[];
   totals: { bugs: number; vulnerabilities: number; codeSmells: number; total: number };
   bySeverity: Record<string, number>;
+  /** Lines this person has authored (all-time additions) — the fair denominator. */
+  linesAuthored: number | null;
+  /** Issues per 1,000 lines authored — a fairer lens than the raw count. */
+  perKLoc: number | null;
 };
 
 /**
  * Best-effort per-employee code-quality signal from SonarQube. Attributes open
  * issues (by git-blame author email) to this employee across the SonarQube
- * projects mapped to the in-scope repos. NEVER throws — a missing/unreachable
- * SonarQube degrades to `available:false` so the appraisal always renders.
- * Deliberately raw counts, not a normalized score: this is evidence, and the UI
- * shows the fairness caveats alongside it.
+ * projects mapped to the in-scope repos, and normalizes by the lines they've
+ * authored (issues per 1,000 lines) so someone who simply writes more code isn't
+ * unfairly penalized. NEVER throws — a missing/unreachable SonarQube degrades to
+ * `available:false` so the appraisal always renders. Still evidence, not a score;
+ * the UI shows the fairness caveats alongside.
  */
 async function computeEmployeeCodeQuality(
   organizationId: string,
   projectId: string | undefined,
-  emails: Set<string>
+  emails: Set<string>,
+  usernames: string[]
 ): Promise<AppraisalCodeQuality> {
   const empty = { bugs: 0, vulnerabilities: 0, codeSmells: 0, total: 0 };
+  const base = { linesAuthored: null, perKLoc: null };
   const provider = await getCodeQualityProvider(organizationId);
   if (!provider.available) {
-    return { available: false, reason: "not_configured", projectKeys: [], totals: empty, bySeverity: {} };
+    return { available: false, reason: "not_configured", projectKeys: [], totals: empty, bySeverity: {}, ...base };
   }
 
   const repos = await prisma.repository.findMany({
@@ -476,7 +486,7 @@ async function computeEmployeeCodeQuality(
     ...new Set(repos.map((repo) => repo.sonarProjectKey).filter((key): key is string => Boolean(key)))
   ];
   if (projectKeys.length === 0) {
-    return { available: false, reason: "no_project_mapped", projectKeys: [], totals: empty, bySeverity: {} };
+    return { available: false, reason: "no_project_mapped", projectKeys: [], totals: empty, bySeverity: {}, ...base };
   }
 
   const totals = { bugs: 0, vulnerabilities: 0, codeSmells: 0, total: 0 };
@@ -505,7 +515,24 @@ async function computeEmployeeCodeQuality(
   }
 
   if (!anySucceeded) {
-    return { available: false, reason: "unreachable", projectKeys, totals: empty, bySeverity: {} };
+    return { available: false, reason: "unreachable", projectKeys, totals: empty, bySeverity: {}, ...base };
   }
-  return { available: true, projectKeys, totals, bySeverity };
+
+  // Fair denominator: total lines this person has authored (all-time additions),
+  // so issue counts are comparable across people who write different amounts.
+  let linesAuthored: number | null = null;
+  let perKLoc: number | null = null;
+  if (usernames.length) {
+    const agg = await prisma.commit.aggregate({
+      where: { repository: { organizationId }, username: { in: usernames, mode: "insensitive" } },
+      _sum: { additions: true }
+    });
+    linesAuthored = agg._sum.additions ?? 0;
+    if (linesAuthored >= 500) {
+      // Below ~500 lines the ratio is too noisy to be fair; leave it null.
+      perKLoc = Math.round((totals.total / (linesAuthored / 1000)) * 10) / 10;
+    }
+  }
+
+  return { available: true, projectKeys, totals, bySeverity, linesAuthored, perKLoc };
 }
