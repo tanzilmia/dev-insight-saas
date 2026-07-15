@@ -74,6 +74,10 @@ LLM report (Markdown) → dashboard / share link / Telegram / chat
 
 ---
 
+### Code quality (static analysis)
+- **SonarQube Community Edition**, self-hosted via Docker (`docker-compose.sonar.yml`), read through its **Web API** behind a `CodeQualityProvider` abstraction (SonarCloud is a config-only swap — same interface, same API).
+- Coverage fed from **Vitest v8 → lcov**; scans run via `scripts/sonar-scan.sh` (Dockerized `sonar-scanner-cli`) or automatically on push (a background `pre-push` git hook).
+
 ## 3. Features implemented
 
 ### Authentication & organizations
@@ -155,6 +159,14 @@ LLM report (Markdown) → dashboard / share link / Telegram / chat
 - **Per-employee Appraisal / Increment view** — the core purpose made concrete: evidence-backed, **not a score or verdict**. Headline real-work totals, consistency (active weeks + monthly chart), focus, ownership (module breadth + security-critical paths), kind-of-work, dual team rankings (real work + updates), **clickable commit evidence**, honest **"what data can't see"** blind-spots, Print/PDF, fairness banner. Unlinked identity → honest empty appraisal (the gap is the finding)
 - **Project details hub** (`/dashboard/projects/[id]`) — repositories + team + embedded analysis locked to one project
 
+### Code quality analysis (SonarQube)
+- **Code Quality dashboard page** (manager-only) — for a SonarQube project: Reliability / Security / Maintainability ratings (A–E), and headline measures (bugs, vulnerabilities, code smells, coverage %, duplication %, security hotspots, tech-debt, lines of code)
+- **Per-developer breakdown** — open issues grouped by git author (blame-based), each **joined to the mapped employee** via the existing git-alias/mapping tables — bug/vuln/smell counts + severity chips. This is the objective, per-developer quality signal that complements the activity data (fair *evidence*, not a verdict)
+- **`CodeQualityProvider` abstraction** — reads the SonarQube Web API; **SonarCloud is a config-only swap** (set the organization + base URL). Degrades gracefully (shows "not connected") when no token is set
+- **Woven into the Appraisal** — the per-employee Appraisal view now shows a "Code quality" card: SonarQube issues (bugs/vulns/smells + severity) attributed to that person by git-blame email, joined via their git identities. Best-effort (never fails the appraisal) and shown with explicit fairness caveats. A repo is mapped to its SonarQube project via a per-repo `sonarProjectKey`
+- **Auto-scan on push** — a background `pre-push` git hook runs a scan without blocking the push; results appear in SonarQube and (once the API has the token) on the Code Quality page
+- *Community-Edition limits (deliberate):* main-branch-only analysis (no pre-merge PR gate — that needs SonarCloud/Developer Edition); attribution is blame-based, so it's evidence, not exact fault
+
 ### Scheduled reports
 - **`ReportSchedule`** with cadence (DAILY / WEEKLY / MONTHLY), **time-of-day + timezone (DST-correct)**
 - In-process scheduler (`setInterval`, 60s tick); each due schedule **claimed atomically** (conditional `updateMany`) so multiple instances can't double-run
@@ -200,6 +212,7 @@ LLM report (Markdown) → dashboard / share link / Telegram / chat
 - **Discord/Slack** delivery (Telegram is done; the provider abstraction makes them drop-in)
 - **Conversational Telegram** (Telegram → OpenClaw → reports, mostly OpenClaw config)
 - Employee self-login/invite flow
+- **Multi-tenant code quality** — SonarQube works locally today; scanning **customers'** repos automatically (provision a project + token per repo, inject the workflow + `SONAR_TOKEN` secret into the client repo via the existing GitHub App / CI pipeline, read results back) is the next step. SonarCloud migration would then be config-only.
 
 ---
 

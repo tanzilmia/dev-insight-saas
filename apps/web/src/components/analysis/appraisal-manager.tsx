@@ -46,6 +46,13 @@ function categoryPill(category: string) {
   return "bg-(--surface-soft) text-(--muted)";
 }
 
+function severityChip(severity: string) {
+  if (severity === "BLOCKER" || severity === "CRITICAL")
+    return "bg-red-500/15 text-red-600 dark:text-red-400";
+  if (severity === "MAJOR") return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
+  return "bg-(--surface-soft) text-(--muted)";
+}
+
 function monthLabel(key: string): string {
   const [year, month] = key.split("-").map(Number);
   if (!year || !month) return key;
@@ -443,6 +450,57 @@ export function AppraisalManager() {
                   )}
                 </div>
               </div>
+
+              {/* Code quality (SonarQube) — objective per-developer signal */}
+              {appraisal.codeQuality.available ? (
+                <div className="glass rounded-xl p-5">
+                  <p className="mb-1 inline-flex items-center gap-1.5 text-sm font-black text-(--text)">
+                    <ShieldAlert size={15} className="text-(--accent)" />
+                    Code quality (SonarQube)
+                  </p>
+                  <p className="mb-3 text-xs text-(--muted)">
+                    Open issues on the main branch attributed to this person by git blame — objective
+                    evidence, not a verdict. Read it with the fairness note below.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    <StatTile label="Total issues" value={appraisal.codeQuality.totals.total} />
+                    <StatTile label="Bugs" value={appraisal.codeQuality.totals.bugs} />
+                    <StatTile label="Vulnerabilities" value={appraisal.codeQuality.totals.vulnerabilities} />
+                    <StatTile label="Code smells" value={appraisal.codeQuality.totals.codeSmells} />
+                  </div>
+                  {Object.keys(appraisal.codeQuality.bySeverity).length ? (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {Object.entries(appraisal.codeQuality.bySeverity)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([sev, count]) => (
+                          <span
+                            key={sev}
+                            className={`rounded-md px-2 py-0.5 text-xs font-medium ${severityChip(sev)}`}
+                          >
+                            {sev.toLowerCase()} {count}
+                          </span>
+                        ))}
+                    </div>
+                  ) : null}
+                  <p className="mt-3 text-[11px] text-(--muted)">
+                    From SonarQube project{appraisal.codeQuality.projectKeys.length === 1 ? "" : "s"}:{" "}
+                    {appraisal.codeQuality.projectKeys.join(", ")}
+                  </p>
+                </div>
+              ) : appraisal.codeQuality.reason === "no_project_mapped" ? (
+                <div className="rounded-xl border border-(--border) bg-(--surface-soft) p-4 text-sm text-(--muted)">
+                  <p className="mb-1 inline-flex items-center gap-1.5 font-bold text-(--text)">
+                    <ShieldAlert size={14} className="text-(--accent)" />
+                    Code quality (SonarQube)
+                  </p>
+                  No SonarQube project is mapped to this scope&apos;s repositories yet. Set a repo&apos;s
+                  SonarQube key on the{" "}
+                  <Link href="/dashboard/repositories" className="font-bold text-(--accent) hover:underline">
+                    Repositories
+                  </Link>{" "}
+                  page to surface per-developer code quality here.
+                </div>
+              ) : null}
 
               {/* Evidence — the proof */}
               <div className="glass rounded-xl p-5">

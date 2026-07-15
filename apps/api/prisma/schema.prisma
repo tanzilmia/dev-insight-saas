@@ -222,6 +222,10 @@ model Repository {
   isPrivate      Boolean     @default(false)
   defaultBranch  String?
   lastSyncedAt   DateTime?
+  // The SonarQube/SonarCloud project key this repo is analyzed under (nullable —
+  // set once code-quality scanning is wired for the repo). Lets appraisals/reports
+  // map a repo to its static-analysis results.
+  sonarProjectKey String?
   // Live sync (GitHub webhook): hook id on the provider, the HMAC secret
   // (encrypted at rest, never returned by any API), status (ACTIVE/ERROR,
   // null = off) and the last delivery time.

@@ -35,6 +35,7 @@ import {
   listRepositories,
   resyncRepository,
   selectRepositories,
+  setRepositorySonarProjectKey,
   startDeepCollection,
   syncRepositories,
   untrackRepository
@@ -339,6 +340,25 @@ export function RepositoriesManager() {
 
     try {
       await resyncRepository(repo.id);
+      await refresh();
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleSetSonarKey(repo: TrackedRepository) {
+    const input = window.prompt(
+      `SonarQube project key for ${repo.fullName} (blank to clear):`,
+      repo.sonarProjectKey ?? ""
+    );
+    if (input === null) return; // cancelled
+
+    setBusyId(repo.id);
+    setRowError(null);
+    try {
+      await setRepositorySonarProjectKey(repo.id, input.trim() ? input.trim() : null);
       await refresh();
     } catch (error) {
       setRowError(getApiErrorMessage(error));
@@ -825,6 +845,19 @@ export function RepositoriesManager() {
                                 ) : (
                                   <span className="text-xs text-(--muted)">—</span>
                                 )}
+                                {manageable ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => handleSetSonarKey(repo)}
+                                    title="Map this repo to a SonarQube project key (for code-quality analysis)"
+                                    className="mt-1.5 block text-[11px] font-semibold text-(--muted) hover:text-(--accent) disabled:opacity-50"
+                                  >
+                                    {repo.sonarProjectKey
+                                      ? `Sonar: ${repo.sonarProjectKey}`
+                                      : "+ Sonar key"}
+                                  </button>
+                                ) : null}
                               </td>
                               {manageable ? (
                                 <td className="px-4 py-3">

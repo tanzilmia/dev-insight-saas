@@ -549,6 +549,8 @@ export type TrackedRepository = RepositoryInput & {
   id: string;
   provider: "GITHUB";
   project: { id: string; name: string } | null;
+  /** SonarQube/SonarCloud project key this repo is analyzed under (null = unset). */
+  sonarProjectKey: string | null;
   commitCount: number;
   lastSyncedAt: string | null;
   /** Live sync (GitHub webhook) state. null status = off. */
@@ -687,6 +689,18 @@ export async function assignRepositoryProject(
   const response = await api.patch<{ repository: TrackedRepository }>(
     `/api/repositories/${repositoryId}`,
     { projectId }
+  );
+
+  return response.data.repository;
+}
+
+export async function setRepositorySonarProjectKey(
+  repositoryId: string,
+  sonarProjectKey: string | null
+) {
+  const response = await api.patch<{ repository: TrackedRepository }>(
+    `/api/repositories/${repositoryId}/sonar-project`,
+    { sonarProjectKey }
   );
 
   return response.data.repository;
@@ -1332,6 +1346,13 @@ export type EmployeeAppraisal = {
     byRealWork: { rank: number; of: number };
     byCommits: { rank: number; of: number };
   } | null;
+  codeQuality: {
+    available: boolean;
+    reason?: "not_configured" | "no_project_mapped" | "unreachable";
+    projectKeys: string[];
+    totals: { bugs: number; vulnerabilities: number; codeSmells: number; total: number };
+    bySeverity: Record<string, number>;
+  };
   evidence: AppraisalEvidence[];
   dataBlindSpots: string[];
 };
