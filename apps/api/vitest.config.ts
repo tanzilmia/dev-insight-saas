@@ -27,6 +27,17 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // Coverage for SonarQube: `vitest run --coverage` writes lcov to ./coverage,
+    // which sonar-project.properties points at. Only src is measured; the tests
+    // themselves and generated/boot files are excluded so the % reflects real
+    // product code.
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      reportsDirectory: "./coverage",
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.d.ts", "src/main.ts"]
+    },
     // Hermetic env so importing config/env.ts (Zod-validated at load) never
     // depends on a developer's .env. None of these are real; the unit suite
     // never opens a DB connection or calls an external service.

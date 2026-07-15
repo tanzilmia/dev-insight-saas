@@ -9,6 +9,7 @@ import { analysisRouter } from "./modules/analysis/analysis.controller.js";
 import { authRouter } from "./modules/auth/auth.controller.js";
 import { channelsRouter } from "./modules/channels/channels.controller.js";
 import { ciRouter } from "./modules/ci/ci.controller.js";
+import { codeQualityRouter } from "./modules/code-quality/code-quality.controller.js";
 import { contributorsRouter } from "./modules/contributors/contributors.controller.js";
 import { credentialsRouter } from "./modules/credentials/credentials.controller.js";
 import { employeesRouter } from "./modules/employees/employees.controller.js";
@@ -62,6 +63,7 @@ export function createApp() {
   app.use("/api/public/reports", publicReportsRouter);
   app.use("/api/reports", reportsRouter);
   app.use("/api/statistics", statisticsRouter);
+  app.use("/api/code-quality", codeQualityRouter);
   app.use("/api/analysis", analysisRouter);
   app.use("/api/schedules", schedulesRouter);
   app.use("/api/channels", channelsRouter);

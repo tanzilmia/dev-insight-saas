@@ -1155,6 +1155,53 @@ export async function getStatisticsOverview(
 }
 
 /* ------------------------------------------------------------------ */
+/* Code quality (SonarQube measures + per-developer issues)           */
+/* ------------------------------------------------------------------ */
+
+export type QualityRating = "A" | "B" | "C" | "D" | "E" | null;
+
+export type CodeQualityMeasures = {
+  linesOfCode: number | null;
+  bugs: number | null;
+  vulnerabilities: number | null;
+  securityHotspots: number | null;
+  codeSmells: number | null;
+  coverage: number | null;
+  duplicatedLinesDensity: number | null;
+  techDebtMinutes: number | null;
+  reliabilityRating: QualityRating;
+  securityRating: QualityRating;
+  maintainabilityRating: QualityRating;
+};
+
+export type CodeQualityDeveloper = {
+  author: string;
+  total: number;
+  bugs: number;
+  vulnerabilities: number;
+  codeSmells: number;
+  bySeverity: Record<string, number>;
+  /** Matched employee, or null when the git author isn't mapped to anyone. */
+  employee: { userId: string; name: string; email: string } | null;
+};
+
+export type CodeQualityOverview = {
+  projectKey: string;
+  available: boolean;
+  capabilities: { branchAnalysis: boolean; pullRequestAnalysis: boolean };
+  measures: CodeQualityMeasures | null;
+  developers: CodeQualityDeveloper[];
+};
+
+export async function getCodeQualityOverview(organizationId: string, projectKey: string) {
+  const response = await api.get<{ overview: CodeQualityOverview }>("/api/code-quality/overview", {
+    params: { organizationId, projectKey }
+  });
+
+  return response.data.overview;
+}
+
+/* ------------------------------------------------------------------ */
 /* Project analysis (manager-only per-employee activity cards)        */
 /* ------------------------------------------------------------------ */
 

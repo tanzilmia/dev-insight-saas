@@ -1,0 +1,57 @@
+# SonarQube Community Edition — local static-analysis stack for DevInsight.
+#
+# Deliberately separate from any application compose file: this is a developer
+# tool, not part of the app runtime. SonarQube needs its OWN PostgreSQL (NOT the
+# app's Neon database); the embedded H2 engine is unsupported for real use.
+#
+#   Start:   docker compose -f docker-compose.sonar.yml up -d
+#   URL:     http://localhost:9000   (first login: admin / admin -> change it)
+#   Stop:    docker compose -f docker-compose.sonar.yml down       (keeps data)
+#   Wipe:    docker compose -f docker-compose.sonar.yml down -v     (drops volumes)
+#
+# Community Edition analyzes the MAIN branch only (no PR/branch analysis) and is
+# unauthenticated to the outside world here — do not expose port 9000 publicly.
+services:
+  sonarqube:
+    image: sonarqube:community
+    container_name: devinsight-sonarqube
+    depends_on:
+      sonar_db:
+        condition: service_healthy
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonar_db:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar
+    ports:
+      - "9000:9000"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    # Elasticsearch (bundled) wants a high open-file limit; raise it so the
+    # bootstrap checks pass on Docker Desktop.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  sonar_db:
+    image: postgres:16-alpine
+    container_name: devinsight-sonar-db
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB: sonar
+    volumes:
+      - sonar_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar -d sonar"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sonarqube_data: {}
+  sonarqube_extensions: {}
+  sonarqube_logs: {}
+  sonar_db_data: {}

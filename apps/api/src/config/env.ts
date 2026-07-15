@@ -41,7 +41,15 @@ const envSchema = z.object({
   // The App's RSA private key (PEM). Accepts a base64-encoded PEM (recommended —
   // avoids newline issues in env) or a raw PEM with literal newlines.
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
-  GITHUB_APP_WEBHOOK_SECRET: z.string().optional()
+  GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
+  // Code-quality provider (SonarQube self-hosted, or SonarCloud with the same
+  // Web API). All optional — code-quality features stay unavailable (with a UI
+  // hint) until SONAR_TOKEN is set. SONAR_ORGANIZATION is empty for self-hosted
+  // and set for SonarCloud; supplying it also enables branch/PR capabilities.
+  CODE_QUALITY_PROVIDER: z.enum(["sonarqube"]).default("sonarqube"),
+  SONAR_BASE_URL: z.string().url().default("http://localhost:9000"),
+  SONAR_TOKEN: z.string().optional(),
+  SONAR_ORGANIZATION: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);

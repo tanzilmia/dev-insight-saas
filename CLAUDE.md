@@ -25,11 +25,11 @@ npm workspaces (`apps/*`, `packages/*`), Node ≥ 20.
 Run from the repo root; each fans out across workspaces via `--if-present`:
 
 ```bash
-npm run dev          # web (:3000) + api (:4000)
+npm run dev          # web (:3000) + api (:4000) + MCP (:4100) together — runs ./start-dev.sh (Ctrl+C stops all)
 npm run dev:web      # web only  (== npm run dev -w @devinsight/web)
 npm run dev:api      # api only  (== npm run dev -w @devinsight/api)
 npm run dev:mcp      # MCP server (:4100) for the OpenClaw chat path
-./start-dev.sh       # web + api + MCP together (OpenClaw itself runs separately in Docker on :18789)
+./start-dev.sh       # same as `npm run dev` (OpenClaw itself runs separately in Docker on :18789)
 npm run build        # tsc / next build across workspaces
 npm run lint         # eslint across workspaces
 npm run typecheck    # tsc --noEmit across workspaces
