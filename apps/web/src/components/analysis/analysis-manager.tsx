@@ -39,6 +39,7 @@ import {
 } from "@/components/dashboard/dashboard-chrome";
 import { BarList, StatTile } from "@/components/statistics/charts";
 import { CodeHealthCard } from "@/components/statistics/code-health-card";
+import { CollaborationPanel } from "./collaboration-panel";
 import { ComparePanel } from "./compare-panel";
 import { AwardsPanel } from "./awards-panel";
 import {
@@ -516,6 +517,10 @@ export function AnalysisManager({
                 project-detail page already shows this card. */}
             {!embedded && organizationId && projectId ? (
               <CodeHealthCard organizationId={organizationId} projectId={projectId} />
+            ) : null}
+
+            {!embedded ? (
+              <CollaborationPanel organizationId={organizationId} projectId={projectId} />
             ) : null}
 
             {organizationId && projectId ? (

@@ -189,6 +189,14 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
         linesAuthored: null,
         perKLoc: null
       } as AppraisalCodeQuality,
+      collaboration: {
+        hasData: false,
+        prsOpened: 0,
+        prsMerged: 0,
+        reviewsGiven: 0,
+        approvals: 0,
+        changesRequested: 0
+      } as AppraisalCollaboration,
       evidence: [] as EvidenceItem[],
       dataBlindSpots: [
         `${employee.name} has no linked Git identity yet, so no work can be attributed. Link their GitHub username on the Contributors page — otherwise their contribution is invisible here.`
@@ -372,6 +380,13 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
     employeeEmails,
     usernames
   );
+  const collaboration = await computeEmployeeCollaboration(
+    query.organizationId,
+    project?.id,
+    usernames,
+    range.from,
+    range.to
+  );
 
   const dataBlindSpots = [
     "Line and commit counts reflect activity, not difficulty or quality — a hard bug fixed in a few lines can outweigh a large routine change.",
@@ -423,6 +438,7 @@ export async function getEmployeeAppraisal(actorId: string, query: EmployeeAppra
     quality: { features, bugFixes, refactors, largeCommits, riskyCommits },
     teamComparison,
     codeQuality,
+    collaboration,
     evidence,
     dataBlindSpots
   };
@@ -451,6 +467,61 @@ export type AppraisalCodeQuality = {
   /** Issues per 1,000 lines authored — a fairer lens than the raw count. */
   perKLoc: number | null;
 };
+
+export type AppraisalCollaboration = {
+  /** True when any PRs have been collected for the scope (else "not collected"). */
+  hasData: boolean;
+  prsOpened: number;
+  prsMerged: number;
+  reviewsGiven: number;
+  approvals: number;
+  changesRequested: number;
+};
+
+/**
+ * Per-employee collaboration signal from collected pull requests: PRs they
+ * opened/merged and reviews they gave, within the appraisal window. This is the
+ * review/mentoring work that commit counts miss — the quiet contributor the
+ * product exists to protect. Read-only; matches by git login (case-insensitive).
+ */
+async function computeEmployeeCollaboration(
+  organizationId: string,
+  projectId: string | undefined,
+  usernames: string[],
+  from: Date,
+  to: Date
+): Promise<AppraisalCollaboration> {
+  const scope = { organizationId, ...(projectId ? { projectId } : {}) };
+  const set = new Set(usernames.map((u) => u.toLowerCase()));
+
+  const [prs, reviews, anyPr] = await Promise.all([
+    prisma.pullRequest.findMany({
+      where: { repository: scope, openedAt: { gte: from, lte: to } },
+      select: { authorLogin: true, merged: true }
+    }),
+    prisma.pullRequestReview.findMany({
+      where: { pullRequest: { repository: scope }, submittedAt: { gte: from, lte: to } },
+      select: { reviewerLogin: true, state: true }
+    }),
+    prisma.pullRequest.count({ where: { repository: scope } })
+  ]);
+
+  const result = { hasData: anyPr > 0, prsOpened: 0, prsMerged: 0, reviewsGiven: 0, approvals: 0, changesRequested: 0 };
+  for (const pr of prs) {
+    if (pr.authorLogin && set.has(pr.authorLogin.toLowerCase())) {
+      result.prsOpened += 1;
+      if (pr.merged) result.prsMerged += 1;
+    }
+  }
+  for (const review of reviews) {
+    if (review.reviewerLogin && set.has(review.reviewerLogin.toLowerCase())) {
+      result.reviewsGiven += 1;
+      if (review.state === "APPROVED") result.approvals += 1;
+      else if (review.state === "CHANGES_REQUESTED") result.changesRequested += 1;
+    }
+  }
+  return result;
+}
 
 /**
  * Best-effort per-employee code-quality signal from SonarQube. Attributes open

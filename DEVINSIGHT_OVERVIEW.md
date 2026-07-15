@@ -210,8 +210,9 @@ LLM report (Markdown) → dashboard / share link / Telegram / chat
 
 ---
 
-### Collaboration / code-review metrics (in progress)
-- Fetches **pull requests + reviews** from GitHub (`PullRequest` / `PullRequestReview` models) and computes per-developer collaboration metrics — PRs opened/merged and **reviews given** (approvals / changes-requested), joined to employees by git login. This surfaces review/mentoring work that commit counts miss — the "quiet contributor" the product exists to protect. Backend + metrics done; UI surfacing (Analysis/Appraisal cards) is the next increment.
+### Collaboration / code-review metrics
+- Fetches **pull requests + reviews** from GitHub (`PullRequest` / `PullRequestReview` models) and computes per-developer collaboration metrics — PRs opened/merged and **reviews given** (approvals / changes-requested), joined to employees by git login. This surfaces review/mentoring work that commit counts miss — the "quiet contributor" the product exists to protect.
+- Surfaced in the UI: a **"Collect PRs"** action per repository, a **"Collaboration & review" card** on the per-employee Appraisal, and a team **Collaboration panel** on the Analysis page.
 
 ## 5. What is NOT yet built
 

@@ -2037,3 +2037,17 @@ Fills the product's biggest fairness blind spot: it measured code volume + code 
 **Increment 2 (next, NOT built):** surface it in the UI — a "Collect PRs" trigger, and a "Collaboration &
 review" card on the Analysis (team) + Appraisal (per-employee) pages, so review/mentoring work is finally
 visible alongside commits. Consider folding a per-employee collaboration block into `getEmployeeAppraisal`.
+
+**Increment 2 — surfaced in the UI (done + verified):**
+- **Appraisal** — `getEmployeeAppraisal` now returns a `collaboration` block (PRs opened/merged +
+  reviews given / approvals / changes-requested for the employee's git logins, within the window;
+  `hasData` false when no PRs are collected). A "Collaboration & review" card renders it, or a hint to
+  collect. Verified real data (Tanzil: 1 PR opened/merged).
+- **Repositories page** — a per-repo **"PRs"** button (`collectPullRequests`) triggers collection.
+- **Analysis page** — a self-contained **`CollaborationPanel`** (team, per-project): per-developer PRs
+  opened/merged + reviews given (from `getReviewMetrics`), stays silent until PRs are collected.
+- Both workspaces typecheck/lint, api 129 tests + build pass.
+
+**PR/review metrics complete for the single-org phase.** Possible follow-ups: review latency / time-to-merge,
+reviewer↔author matrix (who reviews whom), scheduled PR collection in the tick, and folding collaboration
+into the LLM report narrative.

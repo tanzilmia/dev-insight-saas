@@ -6,6 +6,7 @@ import {
   Check,
   DownloadCloud,
   FolderGit2,
+  GitPullRequest,
   Globe,
   HardDriveDownload,
   History,
@@ -29,6 +30,7 @@ import {
   assignRepositoryProject,
   cancelDeepCollection,
   collectActivity,
+  collectPullRequests,
   disableLiveSync,
   enableLiveSync,
   getApiErrorMessage,
@@ -457,6 +459,24 @@ export function RepositoriesManager() {
         });
       }
       await refresh();
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleCollectPrs(repo: TrackedRepository) {
+    setBusyId(repo.id);
+    setRowError(null);
+    setRowNotice(null);
+
+    try {
+      const result = await collectPullRequests(repo.id);
+      setRowNotice({
+        tone: "success",
+        text: `Collected ${result.prCount} pull request(s) and ${result.reviewCount} review(s) from ${repo.fullName}.`
+      });
     } catch (error) {
       setRowError(getApiErrorMessage(error));
     } finally {
@@ -953,6 +973,16 @@ export function RepositoriesManager() {
                                           <History size={13} />
                                         )}
                                         Collect
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCollectPrs(repo)}
+                                        disabled={busy || jobActive}
+                                        title="Fetch pull requests + reviews for collaboration metrics"
+                                        className="inline-flex items-center gap-1.5 rounded-md border border-(--border) px-3 py-1.5 text-xs font-semibold text-(--text) transition hover:bg-(--surface) disabled:cursor-not-allowed disabled:opacity-55"
+                                      >
+                                        <GitPullRequest size={13} />
+                                        PRs
                                       </button>
                                       <button
                                         type="button"

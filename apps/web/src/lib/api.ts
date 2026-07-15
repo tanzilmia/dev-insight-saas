@@ -1320,6 +1320,44 @@ export async function getCodeQualityTrend(organizationId: string, projectKey: st
 }
 
 /* ------------------------------------------------------------------ */
+/* Collaboration / code-review metrics (pull requests + reviews)      */
+/* ------------------------------------------------------------------ */
+
+export type ReviewMetricsDeveloper = {
+  login: string;
+  employee: { userId: string; name: string } | null;
+  prsOpened: number;
+  prsMerged: number;
+  reviewsGiven: number;
+  approvals: number;
+  changesRequested: number;
+};
+
+export type ReviewMetrics = {
+  period: { from: string; to: string };
+  totals: { prsOpened: number; prsMerged: number; reviewsGiven: number };
+  developers: ReviewMetricsDeveloper[];
+};
+
+export async function getReviewMetrics(
+  organizationId: string,
+  options: { projectId?: string; from?: string; to?: string } = {}
+) {
+  const response = await api.get<{ metrics: ReviewMetrics }>("/api/pull-requests/review-metrics", {
+    params: { organizationId, ...options }
+  });
+  return response.data.metrics;
+}
+
+export async function collectPullRequests(repositoryId: string) {
+  const response = await api.post<{ result: { prCount: number; reviewCount: number } }>(
+    "/api/pull-requests/collect",
+    { repositoryId }
+  );
+  return response.data.result;
+}
+
+/* ------------------------------------------------------------------ */
 /* Project analysis (manager-only per-employee activity cards)        */
 /* ------------------------------------------------------------------ */
 
@@ -1458,6 +1496,14 @@ export type EmployeeAppraisal = {
     bySeverity: Record<string, number>;
     linesAuthored: number | null;
     perKLoc: number | null;
+  };
+  collaboration: {
+    hasData: boolean;
+    prsOpened: number;
+    prsMerged: number;
+    reviewsGiven: number;
+    approvals: number;
+    changesRequested: number;
   };
   evidence: AppraisalEvidence[];
   dataBlindSpots: string[];

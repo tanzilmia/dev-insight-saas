@@ -9,6 +9,7 @@ import {
   CalendarDays,
   ExternalLink,
   FileDiff,
+  GitPullRequest,
   Info,
   Loader2,
   Printer,
@@ -513,6 +514,39 @@ export function AppraisalManager() {
                   page to surface per-developer code quality here.
                 </div>
               ) : null}
+
+              {/* Collaboration & review — work commit counts miss */}
+              {appraisal.collaboration.hasData ? (
+                <div className="glass rounded-xl p-5">
+                  <p className="mb-1 inline-flex items-center gap-1.5 text-sm font-black text-(--text)">
+                    <GitPullRequest size={15} className="text-(--accent)" />
+                    Collaboration &amp; review
+                  </p>
+                  <p className="mb-3 text-xs text-(--muted)">
+                    Pull-request and review activity — the review/mentoring work that commit counts
+                    don&apos;t capture.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                    <StatTile label="PRs opened" value={appraisal.collaboration.prsOpened} />
+                    <StatTile label="PRs merged" value={appraisal.collaboration.prsMerged} />
+                    <StatTile label="Reviews given" value={appraisal.collaboration.reviewsGiven} />
+                    <StatTile label="Approvals" value={appraisal.collaboration.approvals} />
+                    <StatTile label="Changes requested" value={appraisal.collaboration.changesRequested} />
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-(--border) bg-(--surface-soft) p-4 text-sm text-(--muted)">
+                  <p className="mb-1 inline-flex items-center gap-1.5 font-bold text-(--text)">
+                    <GitPullRequest size={14} className="text-(--accent)" />
+                    Collaboration &amp; review
+                  </p>
+                  No pull requests collected yet. Collect them on the{" "}
+                  <Link href="/dashboard/repositories" className="font-bold text-(--accent) hover:underline">
+                    Repositories
+                  </Link>{" "}
+                  page to surface review/mentoring work here.
+                </div>
+              )}
 
               {/* Evidence — the proof */}
               <div className="glass rounded-xl p-5">
