@@ -31,6 +31,9 @@ const envSchema = z.object({
   OPENCLAW_SERVICE_KEY: z.string().optional(),
   OPENCLAW_GATEWAY_URL: z.string().url().optional(),
   OPENCLAW_GATEWAY_TOKEN: z.string().optional(),
+  // Used only by this API to mint short-lived, tenant-scoped tool context.
+  // Never share it with OpenClaw or the MCP bridge.
+  OPENCLAW_CONTEXT_SIGNING_SECRET: z.string().min(32).optional(),
   // GitHub App (customer repository connection). All optional: App features stay
   // unavailable (with a clear UI hint) until the DevInside owner registers the
   // App and sets these — see docs/architecture/github-app-foundation.md.
@@ -50,7 +53,18 @@ const envSchema = z.object({
   SONAR_BASE_URL: z.string().url().default("http://localhost:9000"),
   SONAR_TOKEN: z.string().optional(),
   SONAR_ORGANIZATION: z.string().optional()
+}).superRefine((value, ctx) => {
+  const openClawEnabled = Boolean(
+    value.OPENCLAW_SERVICE_KEY || value.OPENCLAW_GATEWAY_URL || value.OPENCLAW_GATEWAY_TOKEN
+  );
+
+  if (openClawEnabled && !value.OPENCLAW_CONTEXT_SIGNING_SECRET) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["OPENCLAW_CONTEXT_SIGNING_SECRET"],
+      message: "OPENCLAW_CONTEXT_SIGNING_SECRET is required when OpenClaw is configured"
+    });
+  }
 });
 
 export const env = envSchema.parse(process.env);
-

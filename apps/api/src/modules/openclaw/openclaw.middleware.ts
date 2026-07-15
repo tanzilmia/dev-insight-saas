@@ -3,6 +3,20 @@ import type { NextFunction, Request, Response } from "express";
 
 import { AppError } from "../../common/errors/app-error.js";
 import { env } from "../../config/env.js";
+import {
+  verifyOpenClawContext,
+  type OpenClawToolContext
+} from "./openclaw-context.js";
+
+declare global {
+  // Express exposes request augmentation through a namespace declaration.
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      openClawContext?: OpenClawToolContext;
+    }
+  }
+}
 
 function safeEqual(a: string, b: string): boolean {
   const bufferA = Buffer.from(a);
@@ -33,5 +47,18 @@ export function requireServiceKey(req: Request, _res: Response, next: NextFuncti
     return;
   }
 
-  next();
+  const contextToken = req.header("x-openclaw-context");
+  if (!contextToken) {
+    next(
+      new AppError(401, "Missing OpenClaw context", "MISSING_OPENCLAW_CONTEXT")
+    );
+    return;
+  }
+
+  try {
+    req.openClawContext = verifyOpenClawContext(contextToken);
+    next();
+  } catch (error) {
+    next(error);
+  }
 }

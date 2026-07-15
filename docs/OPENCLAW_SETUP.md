@@ -106,8 +106,9 @@ Chat → reports needs these running (ports: web 3000, api 4000, MCP 4100, OpenC
 Then open the dashboard → the **💬 chat box** → e.g. *"give me this month's report for
 the backend repo"*. The agent resolves the repo and returns the AI report in chat.
 
-One-time registration (already done): `openclaw mcp set devinsight
-'{"url":"http://host.docker.internal:4100/mcp","transport":"streamable-http"}'`.
+One-time registration: add `DEVINSIGHT_MCP_TOKEN=<MCP_ACCESS_TOKEN>` to OpenClaw's
+ignored `.env`, then run `openclaw mcp set devinsight
+'{"url":"http://host.docker.internal:4100/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${DEVINSIGHT_MCP_TOKEN}"}}'`.
 
 ## Conversational Telegram (chat WITH the bot to get reports)
 
@@ -116,13 +117,12 @@ There are **two independent Telegram features** — don't confuse them:
 | Feature | Direction | Where it's configured | Status |
 |---|---|---|---|
 | **Report delivery** (Channels page) | DevInsight → Telegram (**outbound**) | DevInsight admin panel (`/dashboard/channels`) | ✅ built in DevInsight |
-| **Conversational** (this section) | Telegram → OpenClaw → reports (**inbound**) | OpenClaw runtime (Docker) | operator config, **no DevInsight code** |
+| **Conversational** (this section) | Telegram → OpenClaw (**inbound**) | OpenClaw runtime (Docker) | report tools disabled until account linking exists |
 
-The conversational path reuses the **exact same agent + DevInsight MCP tools** that
-already power the website chat box — a Telegram message becomes another entry channel
-into the same agent. **DevInsight needs no new code** for this: the MCP server
-(`:4100`) and `/api/openclaw/tools/*` are already what the agent calls. It's purely an
-OpenClaw channel registration.
+The website chat mints a short-lived tenant token after authenticating a DevInsight user.
+Telegram currently has no DevInsight account-linking flow, so Telegram conversations may
+use the general OpenClaw agent but **cannot call DevInsight report tools**. This is a
+fail-closed security boundary, not a runtime error.
 
 ### Steps (operator, one-time)
 1. **Create a Telegram bot** with [@BotFather](https://t.me/BotFather) → `/newbot` →
@@ -138,19 +138,14 @@ OpenClaw channel registration.
    docker compose restart openclaw-gateway
    ```
    (Equivalently, the Control UI → **Channels → Add Telegram**.)
-3. **Message the bot** on Telegram: *"give me this month's report for the backend repo"*.
-   OpenClaw's agent picks the DevInsight MCP tools itself (`devinsight_context` →
-   `devinsight_generate_report`) and replies with the AI report — **no SKILL needed**,
-   same as the web chat.
+3. **Message the bot** for non-DevInsight conversation. DevInsight reports require a
+   future account-linking flow that can mint an authenticated tenant context.
 
-### Important: single-org scoping
-The DevInsight MCP server is **pinned to one org/requester** via
-`integrations/devinsight-mcp-server/run.sh` (`DEVINSIGHT_ORG_ID` / `DEVINSIGHT_REQUESTER_ID`).
-So **anyone who messages the Telegram bot gets that one org's data** — fine for the
-single-org MVP, but do **not** expose the bot publicly across tenants. Making the
-conversational path multi-org means resolving the org **per Telegram chat/user** inside
-the MCP server (replace the pinned env constants with a lookup keyed on the incoming
-chat id) — a future enhancement, out of scope for the MVP.
+### Important: tenant scoping
+
+The MCP server has no default organization or requester. Every DevInsight tool call must
+carry a ten-minute API-signed context token minted by authenticated website chat. A
+channel without such a token receives no organization data.
 
 ### Networking
 The agent runs inside the OpenClaw container and reaches the DevInsight MCP server at

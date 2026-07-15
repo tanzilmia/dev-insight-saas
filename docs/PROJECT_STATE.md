@@ -114,6 +114,8 @@ Added for provider integration (all have safe defaults / are optional):
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | any OpenAI-compatible endpoint |
 | `OPENAI_MODEL` | `gpt-4o-mini` | model id |
 | `OPENCLAW_SERVICE_KEY` | *(unset)* | shared secret the OpenClaw plugin uses to call our tool endpoints (`x-openclaw-key` header) |
+| `OPENCLAW_CONTEXT_SIGNING_SECRET` | *(unset)* | API-only secret used to sign ten-minute tenant context; never shared with OpenClaw/MCP |
+| `MCP_ACCESS_TOKEN` | *(unset)* | bearer credential OpenClaw sends to the standalone MCP HTTP endpoint |
 | `OPENCLAW_GATEWAY_URL` | *(unset)* | OpenClaw runtime base URL for the website chat proxy (e.g. `http://localhost:18789`) |
 | `OPENCLAW_GATEWAY_TOKEN` | *(unset)* | bearer token for the gateway (server-side only) |
 | `CODE_QUALITY_PROVIDER` | `sonarqube` | code-quality provider selector (SonarCloud slots in behind the same interface) |
@@ -434,12 +436,14 @@ How it was wired (this machine):
 - **Report tools via an MCP server, NOT the TS plugin.** `integrations/devinsight-mcp-server/`
   (streamable-HTTP, host-run on :4100) exposes `devinsight_context` +
   `devinsight_generate_report` calling `/api/openclaw/tools/*`. Registered with
-  `openclaw mcp set devinsight '{"url":"http://host.docker.internal:4100/mcp","transport":"streamable-http"}'`.
+  `openclaw mcp set devinsight '{"url":"http://host.docker.internal:4100/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${DEVINSIGHT_MCP_TOKEN}"}}'`;
+  the ignored OpenClaw `.env` supplies `DEVINSIGHT_MCP_TOKEN`.
   The `../devinsight-openclaw-plugin/` (TS plugin) was superseded by this — kept for reference.
 
 **To run the whole thing** (see `docs/OPENCLAW_SETUP.md` §"Run everything"): OpenClaw
 (Docker, persistent) + DevInsight `npm run dev` (web+api) + `integrations/devinsight-mcp-server/run.sh`.
-MVP is **single-org** (the MCP server is pinned to one org/requester via `run.sh`).
+MCP tenant identity is now **per website-chat request** via a ten-minute API-signed
+context token. The bridge has no fixed organization/requester fallback.
 
 Prereqs from the operator: run OpenClaw self-hosted (Docker) — **step-by-step guide in
 `docs/OPENCLAW_SETUP.md`** (clone openclaw repo → `./scripts/docker/setup.sh` → set the
@@ -1521,8 +1525,8 @@ cases) and the CSV parser (edge cases) unit-verified.
    an OpenClaw **channel registration** (long-polling; no inbound webhook). Documented
    step-by-step in `docs/OPENCLAW_SETUP.md` (new "Conversational Telegram" section) incl.
    the two-Telegram-features distinction (outbound delivery vs inbound chat) and the
-   single-org caveat (the MCP server pins one org via `run.sh`; multi-org needs per-chat
-   org resolution — future).
+   security boundary: Telegram cannot call DevInsight report tools until an authenticated
+   account-linking flow can mint the same short-lived tenant context used by website chat.
 
 **Award cards — plain-language enrichment (2026-07-14) ✅** (follow-up to item 4, for
 non-technical CEO/management readers). Each "Employee of the month" card now shows

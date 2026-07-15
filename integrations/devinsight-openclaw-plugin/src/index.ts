@@ -6,12 +6,11 @@ import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 type DevInsightConfig = {
   serviceUrl: string;
   apiKey: string;
-  organizationId: string;
-  requesterId: string;
 };
 
 async function callDevInsight(
   config: DevInsightConfig,
+  contextToken: string,
   path: string,
   init: { method?: string; body?: unknown } = {}
 ): Promise<unknown> {
@@ -19,7 +18,8 @@ async function callDevInsight(
     method: init.method ?? "GET",
     headers: {
       "content-type": "application/json",
-      "x-openclaw-key": config.apiKey
+      "x-openclaw-key": config.apiKey,
+      "x-openclaw-context": contextToken
     },
     body: init.body ? JSON.stringify(init.body) : undefined
   });
@@ -41,9 +41,7 @@ export default defineToolPlugin({
       description:
         "DevInsight API base URL. Inside the OpenClaw container use http://host.docker.internal:4000"
     }),
-    apiKey: Type.String({ description: "DevInsight OPENCLAW_SERVICE_KEY" }),
-    organizationId: Type.String({ description: "Default DevInsight organization id" }),
-    requesterId: Type.String({ description: "DevInsight user id the agent acts as" })
+    apiKey: Type.String({ description: "DevInsight OPENCLAW_SERVICE_KEY" })
   }),
   tools: (tool) => [
     tool({
@@ -51,13 +49,19 @@ export default defineToolPlugin({
       label: "List DevInsight repos / projects / employees",
       description:
         "List the organization's tracked repositories, projects, and employees (id + name) so you can resolve the names in a request to ids before generating a report.",
-      parameters: Type.Object({}),
-      async execute(_params: Record<string, never>, config: DevInsightConfig) {
+      parameters: Type.Object({
+        contextToken: Type.String({
+          description: "Opaque context token supplied by the DevInsight chat system message."
+        })
+      }),
+      async execute(
+        params: { contextToken: string },
+        config: DevInsightConfig
+      ) {
         const data = (await callDevInsight(
           config,
-          `/api/openclaw/tools/context?organizationId=${encodeURIComponent(
-            config.organizationId
-          )}&requesterId=${encodeURIComponent(config.requesterId)}`
+          params.contextToken,
+          "/api/openclaw/tools/context"
         )) as { context: unknown };
         return JSON.stringify(data.context);
       }
@@ -68,6 +72,9 @@ export default defineToolPlugin({
       description:
         "Generate a developer work report for a repository, project, employee, or team over a period. Resolve ids with devinsight_context first if the user gave names. Returns Markdown.",
       parameters: Type.Object({
+        contextToken: Type.String({
+          description: "Opaque context token supplied by the DevInsight chat system message."
+        }),
         reportType: Type.Union(
           [
             Type.Literal("repository"),
@@ -101,6 +108,7 @@ export default defineToolPlugin({
       }),
       async execute(
         params: {
+          contextToken: string;
           reportType: "repository" | "project" | "employee" | "team";
           repositoryId?: string;
           projectId?: string;
@@ -109,18 +117,21 @@ export default defineToolPlugin({
         },
         config: DevInsightConfig
       ) {
-        const data = (await callDevInsight(config, "/api/openclaw/tools/generate-report", {
-          method: "POST",
-          body: {
-            requesterId: config.requesterId,
-            organizationId: config.organizationId,
-            period: params.period ?? "last_7_days",
-            reportType: params.reportType,
-            repositoryId: params.repositoryId,
-            projectId: params.projectId,
-            employeeIds: params.employeeIds
+        const data = (await callDevInsight(
+          config,
+          params.contextToken,
+          "/api/openclaw/tools/generate-report",
+          {
+            method: "POST",
+            body: {
+              period: params.period ?? "last_7_days",
+              reportType: params.reportType,
+              repositoryId: params.repositoryId,
+              projectId: params.projectId,
+              employeeIds: params.employeeIds
+            }
           }
-        })) as { report?: { markdown?: string } };
+        )) as { report?: { markdown?: string } };
 
         return data.report?.markdown ?? "No report was produced.";
       }

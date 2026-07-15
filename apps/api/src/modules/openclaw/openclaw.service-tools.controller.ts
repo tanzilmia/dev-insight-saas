@@ -1,6 +1,4 @@
 import { Router } from "express";
-import { z } from "zod";
-
 import { asyncHandler } from "../../common/http/async-handler.js";
 import { listBranchNamesForRepositories } from "../activity/activity.service.js";
 import { listEmployees } from "../employees/employees.service.js";
@@ -10,17 +8,12 @@ import { requireServiceKey } from "./openclaw.middleware.js";
 import { generateReportSchema } from "./openclaw.schemas.js";
 import { orchestrateReport } from "./openclaw.service.js";
 
-const requesterSchema = z.object({ requesterId: z.string().min(1) });
-const contextQuerySchema = z.object({
-  organizationId: z.string().min(1),
-  requesterId: z.string().min(1)
-});
-
 /**
  * Tool endpoints the OpenClaw runtime calls (via its DevInsight plugin),
- * authenticated with the service key. `requesterId` is the DevInsight user the
- * agent acts for; org membership is still enforced downstream. Uses per-route
- * `requireServiceKey` so non-matching paths fall through to the JWT router.
+ * authenticated with the service key plus an API-signed tenant context. Tenant
+ * identity is derived from verified claims, never from tool-controlled input.
+ * Uses per-route `requireServiceKey` so non-matching paths fall through to the
+ * JWT router.
  */
 export const openclawServiceRouter = Router();
 
@@ -29,9 +22,12 @@ openclawServiceRouter.post(
   "/tools/generate-report",
   requireServiceKey,
   asyncHandler(async (req, res) => {
-    const { requesterId } = requesterSchema.parse(req.body);
-    const input = generateReportSchema.parse(req.body);
-    const report = await orchestrateReport(requesterId, input);
+    const context = req.openClawContext!;
+    const input = generateReportSchema.parse({
+      ...req.body,
+      organizationId: context.organizationId
+    });
+    const report = await orchestrateReport(context.requesterId, input);
 
     res.status(200).json({ report });
   })
@@ -42,7 +38,7 @@ openclawServiceRouter.get(
   "/tools/context",
   requireServiceKey,
   asyncHandler(async (req, res) => {
-    const { organizationId, requesterId } = contextQuerySchema.parse(req.query);
+    const { organizationId, requesterId } = req.openClawContext!;
 
     const [repositories, projects, employees] = await Promise.all([
       listRepositories(requesterId, organizationId),

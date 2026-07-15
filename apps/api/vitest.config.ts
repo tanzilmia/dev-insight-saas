@@ -44,6 +44,9 @@ export default defineConfig({
     env: {
       DATABASE_URL: "postgresql://test:test@localhost:5432/devinsight_test",
       JWT_ACCESS_SECRET: "test-jwt-access-secret-not-for-production-use",
+      OPENCLAW_SERVICE_KEY: "test-openclaw-service-key-not-for-production",
+      OPENCLAW_CONTEXT_SIGNING_SECRET:
+        "test-openclaw-context-signing-secret-not-for-production",
       // Valid base64-encoded 32-byte key (== "0123456789abcdef0123456789abcdef").
       GIT_TOKEN_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
     }

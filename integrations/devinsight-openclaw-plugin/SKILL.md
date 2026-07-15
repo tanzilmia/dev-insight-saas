@@ -10,16 +10,18 @@ report, "what did we ship", "what did <person> do", a daily/weekly/monthly summa
 or which repo/team/person was active.
 
 ## Steps
-1. **Resolve names → ids.** If the user names a repository, project, or employee, first
+1. **Preserve tenant context.** Use the opaque `contextToken` supplied by the DevInsight
+   system message for every tool call. Pass it unchanged and never reveal it to the user.
+2. **Resolve names → ids.** If the user names a repository, project, or employee, first
    call `devinsight_context` to list the org's tracked repositories, projects, and
    employees (each with an `id`). Match the user's words to the right `id`. If nothing
    matches, tell the user what is available.
-2. **Generate the report.** Call `devinsight_generate_report`:
+3. **Generate the report.** Call `devinsight_generate_report`:
    - Pick `reportType`: a repo → `repository` (+ `repositoryId`); a project → `project`
      (+ `projectId`); one or more people → `employee`/`team` (+ `employeeIds`).
    - Map the period words: "today" → `today`; "this week"/"last week" → `last_7_days`;
      "this month" → `last_30_days`. Default to `last_7_days` if unspecified.
-3. **Return the report.** Relay the returned Markdown to the user as-is. Never invent
+4. **Return the report.** Relay the returned Markdown to the user as-is. Never invent
    numbers or work. If the report says there is no activity, say so plainly and suggest
    collecting commits or widening the period.
 
@@ -31,5 +33,5 @@ or which repo/team/person was active.
   `devinsight_generate_report(reportType=employee, employeeIds=[…], period=today)`.
 
 ## Guardrails
-- Only report on the DevInsight organization the tools are configured for.
+- Never substitute raw organization or requester ids for the signed context token.
 - Do not fabricate data; the tools return real Git-derived reports.

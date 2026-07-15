@@ -21,10 +21,8 @@ service-key endpoints (`/api/openclaw/tools/*`).
 |-----|-------|
 | `serviceUrl` | DevInsight API base URL. From inside the OpenClaw container use **`http://host.docker.internal:4000`** (not `localhost`). |
 | `apiKey` | the DevInsight `OPENCLAW_SERVICE_KEY` (same secret set in `apps/api/.env`). |
-| `organizationId` | your DevInsight organization id (single-org MVP). |
-| `requesterId` | the DevInsight user id the agent acts as (must be an org member). |
-
-Get `organizationId` / `requesterId`: log into DevInsight and call `GET /api/auth/me`
+Tenant identity is not configured in the plugin. Each tool call requires the opaque,
+short-lived `contextToken` supplied by the authenticated DevInsight website chat.
 (the `user.id` and `organizations[].id`), or read them from the DB.
 
 ## Build & install

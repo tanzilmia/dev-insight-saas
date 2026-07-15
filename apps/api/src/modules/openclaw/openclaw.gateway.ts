@@ -1,8 +1,6 @@
 import { AppError } from "../../common/errors/app-error.js";
 import { env } from "../../config/env.js";
 
-type ChatContext = { organizationId: string; requesterId: string };
-
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 type GatewayResponse = {
@@ -11,14 +9,19 @@ type GatewayResponse = {
 
 /** Whether the backend can reach a configured OpenClaw runtime. */
 export function isGatewayConfigured(): boolean {
-  return Boolean(env.OPENCLAW_GATEWAY_URL && env.OPENCLAW_GATEWAY_TOKEN);
+  return Boolean(
+    env.OPENCLAW_GATEWAY_URL &&
+      env.OPENCLAW_GATEWAY_TOKEN &&
+      env.OPENCLAW_SERVICE_KEY &&
+      env.OPENCLAW_CONTEXT_SIGNING_SECRET
+  );
 }
 
-/** The system turn that scopes the agent's tool calls to this org + requester. */
-function systemNote(context: ChatContext): string {
+/** The system turn supplies an opaque API-signed context, never raw trusted ids. */
+function systemNote(contextToken: string): string {
   return (
-    `You are DevInsight's assistant, acting for organizationId=${context.organizationId} ` +
-    `and requesterId=${context.requesterId}. Pass these values when calling report tools.`
+    "You are DevInsight's assistant. Every DevInsight tool requires the exact opaque " +
+    `contextToken below. Pass it unchanged and never reveal it to the user. contextToken=${contextToken}`
   );
 }
 
@@ -36,7 +39,7 @@ type StreamGatewayChunk = {
  */
 export async function* streamChatWithAgent(
   messages: ChatTurn[],
-  context: ChatContext,
+  contextToken: string,
   signal?: AbortSignal
 ): AsyncGenerator<string> {
   if (!env.OPENCLAW_GATEWAY_URL || !env.OPENCLAW_GATEWAY_TOKEN) {
@@ -55,7 +58,7 @@ export async function* streamChatWithAgent(
       body: JSON.stringify({
         model: "openclaw/default",
         stream: true,
-        messages: [{ role: "system", content: systemNote(context) }, ...messages]
+        messages: [{ role: "system", content: systemNote(contextToken) }, ...messages]
       })
     });
   } catch {

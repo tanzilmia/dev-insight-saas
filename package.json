@@ -15,10 +15,11 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "security:rotate-local-secrets": "node scripts/rotate-local-security-secrets.mjs",
+    "security:sync-openclaw-mcp-token": "node scripts/sync-openclaw-mcp-token.mjs",
     "prisma:generate": "npm run prisma:generate -w @devinsight/api"
   },
   "engines": {
     "node": ">=20"
   }
 }
-
