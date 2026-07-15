@@ -63,17 +63,24 @@ function Metric({ icon: Icon, label, value }: { icon: typeof Bug; label: string;
  * SonarQube is connected/mapped or it can't load — the same quiet philosophy as
  * the other Overview cards.
  */
-export function CodeHealthCard({ organizationId }: { organizationId: string | undefined }) {
+export function CodeHealthCard({
+  organizationId,
+  projectId
+}: {
+  organizationId: string | undefined;
+  /** When set, the rollup is scoped to one project's repositories. */
+  projectId?: string;
+}) {
   const [summary, setSummary] = useState<CodeQualitySummary | null>(null);
 
   useEffect(() => {
     if (!organizationId) {
       return;
     }
-    getCodeQualitySummary(organizationId)
+    getCodeQualitySummary(organizationId, projectId)
       .then(setSummary)
       .catch(() => setSummary(null));
-  }, [organizationId]);
+  }, [organizationId, projectId]);
 
   if (!summary || !summary.available) {
     return null; // nothing mapped / not connected — stay quiet

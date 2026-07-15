@@ -1963,5 +1963,32 @@ First slice of "surface quality in context" (workstream C):
 - Verified on real org data (1 project, gate ERROR, coverage 10.4%); both workspaces typecheck/lint,
   api build pass.
 
-**Still in workstream C:** C2 project-detail inline quality, C3 report code-health section (the report
-one needs a design call on snapshot-vs-window before building).
+**C2 done (2026-07-15):** the SAME summary now takes an optional `projectId`
+(`GET /api/code-quality/summary?...&projectId=`), and the SAME `CodeHealthCard` (with a `projectId`
+prop) renders on the **project detail page** (before the embedded analysis), scoped to that project's
+repos. Verified: project with a mapped repo → available (gate ERROR, bugs 2); a project with none →
+silent (`no_project_mapped`).
+
+**Still in workstream C:** C3 report code-health section — needs a design call on snapshot-vs-window
+(SonarQube gives a current snapshot; reports cover a period) before building.
+
+### 12.7 Trends (D) + report code-health (C3) — 2026-07-15
+
+**D — trend over time.** `CodeQualitySnapshot` model (migration `code_quality_snapshot`): one row per
+`[organizationId, projectKey, dayKey]` (local day), **upserted** to the latest capture. Recorded two
+ways: (1) **capture-on-load** — `getCodeQualityOverview` records today's snapshot best-effort (never
+fails the overview); (2) **scheduler sweep** — `captureCodeQualitySnapshots` on an hourly throttle in
+the scheduler tick (mirrors the leaderboard-snapshot sweep). `GET /api/code-quality/trend?...&projectKey=`
+returns the series oldest→newest. UI: a **Trend over time** chart on the Code Quality page (reuses
+`AreaChart`) with a Coverage / Bugs / Code-smells toggle; shows a "collecting" note until ≥2 points.
+Verified: capture-on-load records today; multi-point series returns in order (coverage 8→9.5→10.1).
+
+**C3 — report code-health (now window-accurate via D).** `buildCodeHealthMarkdown(orgId, {projectId?,
+repositoryId?}, from, to)` builds a deterministic `## Code health` section from snapshots: current
+gate/bugs/vulns/smells/coverage **plus "(was N)" deltas** vs the state at the period start (falls back
+to the earliest snapshot when history began mid-period). It is appended to the persisted report markdown
+right after the caveats footer (both LLM and template paths, so every channel + the cache carry it), and
+returns "" when nothing is mapped/captured so most reports are unaffected. Verified on real data: delta
+block ("Bugs 2 (was 6)", "Coverage 10.1% (was 5%)") for a mapped project; "" for an unmapped one.
+
+Both workspaces typecheck/lint, api 129 tests + build pass. **Workstream C + D complete.**

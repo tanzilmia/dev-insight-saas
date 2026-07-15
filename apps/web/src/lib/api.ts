@@ -1295,11 +1295,28 @@ export type CodeQualitySummary =
       projects: { key: string; bugs: number; vulnerabilities: number; coverage: number | null; gate: string }[];
     };
 
-export async function getCodeQualitySummary(organizationId: string) {
+export async function getCodeQualitySummary(organizationId: string, projectId?: string) {
   const response = await api.get<{ summary: CodeQualitySummary }>("/api/code-quality/summary", {
-    params: { organizationId }
+    params: { organizationId, ...(projectId ? { projectId } : {}) }
   });
   return response.data.summary;
+}
+
+export type CodeQualityTrendPoint = {
+  dayKey: string;
+  capturedAt: string;
+  bugs: number;
+  vulnerabilities: number;
+  codeSmells: number;
+  coverage: number | null;
+  gateStatus: string;
+};
+
+export async function getCodeQualityTrend(organizationId: string, projectKey: string, limit = 30) {
+  const response = await api.get<{ trend: CodeQualityTrendPoint[] }>("/api/code-quality/trend", {
+    params: { organizationId, projectKey, limit }
+  });
+  return response.data.trend;
 }
 
 /* ------------------------------------------------------------------ */

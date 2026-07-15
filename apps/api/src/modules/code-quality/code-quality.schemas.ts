@@ -17,6 +17,23 @@ export const codeQualityOrgQuerySchema = z.object({
 
 export type CodeQualityOrgQuery = z.infer<typeof codeQualityOrgQuerySchema>;
 
+/** Org-wide (or project-scoped) code-health summary query. */
+export const codeQualitySummaryQuerySchema = z.object({
+  organizationId: z.string().min(1),
+  projectId: z.string().min(1).optional()
+});
+
+export type CodeQualitySummaryQuery = z.infer<typeof codeQualitySummaryQuerySchema>;
+
+/** Trend series query for one SonarQube project. */
+export const codeQualityTrendQuerySchema = z.object({
+  organizationId: z.string().min(1),
+  projectKey: z.string().min(1),
+  limit: z.coerce.number().int().min(2).max(180).default(30)
+});
+
+export type CodeQualityTrendQuery = z.infer<typeof codeQualityTrendQuerySchema>;
+
 /** Body to save or test a SonarQube/SonarCloud connection. */
 export const codeQualityConnectionSchema = z.object({
   organizationId: z.string().min(1),

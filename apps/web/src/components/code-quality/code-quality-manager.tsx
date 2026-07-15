@@ -27,6 +27,7 @@ import {
 import {
   type CodeQualityConnection,
   type CodeQualityOverview,
+  type CodeQualityTrendPoint,
   type QualityGateStatus,
   type QualityRating,
   type SonarProjectSummary,
@@ -34,13 +35,22 @@ import {
   getApiErrorMessage,
   getCodeQualityConnection,
   getCodeQualityOverview,
+  getCodeQualityTrend,
   listSonarProjects,
   saveCodeQualityConnection,
   testCodeQualityConnection
 } from "@/lib/api";
 import { canManage, useSession } from "@/lib/use-session";
 import { DashboardChrome, DashboardLoading } from "@/components/dashboard/dashboard-chrome";
-import { StatTile } from "@/components/statistics/charts";
+import { AreaChart, StatTile } from "@/components/statistics/charts";
+
+type TrendMetric = "coverage" | "bugs" | "codeSmells";
+
+const TREND_METRICS: { key: TrendMetric; label: string; unit: string }[] = [
+  { key: "coverage", label: "Coverage", unit: "%" },
+  { key: "bugs", label: "Bugs", unit: "" },
+  { key: "codeSmells", label: "Code smells", unit: "" }
+];
 
 const DEFAULT_BASE_URL = "http://localhost:9000";
 
@@ -130,6 +140,9 @@ export function CodeQualityManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [trend, setTrend] = useState<CodeQualityTrendPoint[]>([]);
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>("coverage");
+
   // Connection form.
   const [showConnect, setShowConnect] = useState(false);
   const [formBaseUrl, setFormBaseUrl] = useState(DEFAULT_BASE_URL);
@@ -181,6 +194,17 @@ export function CodeQualityManager() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Trend history for the current project (loads once the overview is available,
+  // so today's just-recorded snapshot is included).
+  useEffect(() => {
+    if (!organizationId || !projectKey || !overview?.available) {
+      return;
+    }
+    getCodeQualityTrend(organizationId, projectKey)
+      .then(setTrend)
+      .catch(() => setTrend([]));
+  }, [organizationId, projectKey, overview?.available]);
 
   function handleTest() {
     if (!organizationId) return;
@@ -421,6 +445,48 @@ export function CodeQualityManager() {
               View all issues <ExternalLink size={12} />
             </a>
           </div>
+
+          {/* Trend over time */}
+          <section className="glass rounded-xl p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-bold text-(--text)">Trend over time</h2>
+              <div className="flex gap-1">
+                {TREND_METRICS.map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setTrendMetric(m.key)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold ${
+                      trendMetric === m.key
+                        ? "bg-(--accent) text-white"
+                        : "bg-(--surface-soft) text-(--muted) hover:text-(--text)"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {trend.length >= 2 ? (
+              <AreaChart
+                data={trend.map((p) => ({
+                  date: p.dayKey,
+                  value:
+                    trendMetric === "coverage"
+                      ? p.coverage ?? 0
+                      : trendMetric === "bugs"
+                        ? p.bugs
+                        : p.codeSmells
+                }))}
+                unit={TREND_METRICS.find((m) => m.key === trendMetric)?.unit ?? ""}
+              />
+            ) : (
+              <p className="py-6 text-center text-sm text-(--muted)">
+                Trend is collecting — {trend.length} snapshot{trend.length === 1 ? "" : "s"} so far. A
+                point is recorded each day you view or scan; the line appears once there are two.
+              </p>
+            )}
+          </section>
 
           <section className="glass rounded-xl p-5">
             <div className="mb-4 flex items-center gap-2">

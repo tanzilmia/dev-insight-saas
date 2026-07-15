@@ -33,6 +33,7 @@ import {
   DashboardLoading
 } from "@/components/dashboard/dashboard-chrome";
 import { AnalysisManager } from "@/components/analysis/analysis-manager";
+import { CodeHealthCard } from "@/components/statistics/code-health-card";
 
 const ROLE_OPTIONS: ProjectRole[] = ["DEVELOPER", "LEAD", "REVIEWER"];
 
@@ -408,6 +409,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 ) : null}
               </section>
             </div>
+
+            {manageable ? (
+              <CodeHealthCard organizationId={organizationId} projectId={projectId} />
+            ) : null}
 
             {manageable ? (
               <AnalysisManager initialProjectId={projectId} hideProjectSelector embedded />

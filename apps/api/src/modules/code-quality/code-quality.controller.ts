@@ -6,8 +6,11 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import {
   codeQualityConnectionSchema,
   codeQualityOrgQuerySchema,
-  codeQualityQuerySchema
+  codeQualityQuerySchema,
+  codeQualitySummaryQuerySchema,
+  codeQualityTrendQuerySchema
 } from "./code-quality.schemas.js";
+import { getCodeQualityTrend } from "./snapshots.service.js";
 import {
   deleteConnection,
   getConnection,
@@ -33,12 +36,23 @@ codeQualityRouter.get(
   })
 );
 
+// GET /api/code-quality/trend — snapshot series (coverage/bugs over time).
+codeQualityRouter.get(
+  "/trend",
+  asyncHandler(async (req, res) => {
+    const query = codeQualityTrendQuerySchema.parse(req.query);
+    const trend = await getCodeQualityTrend(req.authUser!.id, query);
+
+    res.status(200).json({ trend });
+  })
+);
+
 // GET /api/code-quality/summary — org-wide code-health rollup (Overview card).
 codeQualityRouter.get(
   "/summary",
   asyncHandler(async (req, res) => {
-    const { organizationId } = codeQualityOrgQuerySchema.parse(req.query);
-    const summary = await getCodeQualitySummary(req.authUser!.id, organizationId);
+    const { organizationId, projectId } = codeQualitySummaryQuerySchema.parse(req.query);
+    const summary = await getCodeQualitySummary(req.authUser!.id, organizationId, projectId);
 
     res.status(200).json({ summary });
   })

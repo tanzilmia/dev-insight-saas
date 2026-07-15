@@ -3,6 +3,7 @@ import { prisma } from "../../config/database.js";
 
 import type { AuthorIssueBreakdown } from "./code-quality-provider.js";
 import { getCodeQualityProvider } from "./code-quality-registry.js";
+import { recordCodeQualitySnapshot } from "./snapshots.service.js";
 import type { CodeQualityQuery } from "./code-quality.schemas.js";
 
 type EmployeeRef = { userId: string; name: string; email: string };
@@ -84,6 +85,15 @@ export async function getCodeQualityOverview(actorId: string, query: CodeQuality
     employee: emailToEmployee.get(row.author.toLowerCase()) ?? null
   }));
 
+  // Record today's snapshot so trend history accrues as the page is viewed
+  // (the scheduler sweep also captures). Best-effort — never fail the overview.
+  await recordCodeQualitySnapshot(
+    query.organizationId,
+    query.projectKey,
+    measures,
+    qualityGate?.status ?? "NONE"
+  ).catch(() => undefined);
+
   return {
     projectKey: query.projectKey,
     available: true,
@@ -101,7 +111,11 @@ const GATE_RANK: Record<string, number> = { OK: 1, WARN: 2, ERROR: 3 };
  * summed issue counts, ncloc-weighted coverage, and the worst quality gate. For
  * the Overview "Code health" card. Best-effort: a project that errors is skipped.
  */
-export async function getCodeQualitySummary(actorId: string, organizationId: string) {
+export async function getCodeQualitySummary(
+  actorId: string,
+  organizationId: string,
+  projectId?: string
+) {
   await requireOrganizationMember(actorId, organizationId);
 
   const provider = await getCodeQualityProvider(organizationId);
@@ -110,7 +124,7 @@ export async function getCodeQualitySummary(actorId: string, organizationId: str
   }
 
   const repos = await prisma.repository.findMany({
-    where: { organizationId, sonarProjectKey: { not: null } },
+    where: { organizationId, sonarProjectKey: { not: null }, ...(projectId ? { projectId } : {}) },
     select: { sonarProjectKey: true }
   });
   const projectKeys = [

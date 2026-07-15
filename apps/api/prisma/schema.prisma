@@ -124,6 +124,7 @@ model Organization {
   ciConfigurations      CiConfiguration[]
   workflowRuns          WorkflowRun[]
   codeQualityConnection CodeQualityConnection?
+  codeQualitySnapshots  CodeQualitySnapshot[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
 }
@@ -144,6 +145,36 @@ model CodeQualityConnection {
   updatedAt       DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// One-per-day code-quality measurement for a SonarQube project, so trends
+/// (coverage/bugs over time) can be shown. Idempotent via [org, projectKey, dayKey]
+/// — the day's row is upserted to the latest capture.
+model CodeQualitySnapshot {
+  id                    String   @id @default(cuid())
+  organizationId        String
+  projectKey            String
+  dayKey                String // local YYYY-MM-DD
+  capturedAt            DateTime @default(now())
+  bugs                  Int
+  vulnerabilities       Int
+  codeSmells            Int
+  securityHotspots      Int
+  coverage              Float?
+  duplicatedLinesDensity Float?
+  techDebtMinutes       Int?
+  linesOfCode           Int?
+  gateStatus            String // OK | ERROR | WARN | NONE
+  reliabilityRating     String?
+  securityRating        String?
+  maintainabilityRating String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, projectKey, dayKey])
+  @@index([organizationId, projectKey])
 }
 
 model OrganizationMember {
