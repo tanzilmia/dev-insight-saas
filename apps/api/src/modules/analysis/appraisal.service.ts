@@ -459,7 +459,7 @@ async function computeEmployeeCodeQuality(
   emails: Set<string>
 ): Promise<AppraisalCodeQuality> {
   const empty = { bugs: 0, vulnerabilities: 0, codeSmells: 0, total: 0 };
-  const provider = getCodeQualityProvider();
+  const provider = await getCodeQualityProvider(organizationId);
   if (!provider.available) {
     return { available: false, reason: "not_configured", projectKeys: [], totals: empty, bySeverity: {} };
   }

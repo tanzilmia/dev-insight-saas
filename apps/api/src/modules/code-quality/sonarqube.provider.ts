@@ -1,12 +1,14 @@
 import { AppError } from "../../common/errors/app-error.js";
-import { env } from "../../config/env.js";
 
 import type {
   AuthorIssueBreakdown,
   CodeQualityCapabilities,
+  CodeQualityConfig,
   CodeQualityProvider,
+  QualityGateStatus,
   QualityMeasures,
-  QualityRating
+  QualityRating,
+  SonarProjectSummary
 } from "./code-quality-provider.js";
 
 /** SonarQube ratings come back as "1.0".."5.0"; map to letters. */
@@ -46,40 +48,53 @@ type SonarIssue = {
   severity?: string; // BLOCKER | CRITICAL | MAJOR | MINOR | INFO
 };
 
-type SonarIssuesResponse = {
-  total?: number;
-  issues?: SonarIssue[];
+type SonarIssuesResponse = { total?: number; issues?: SonarIssue[] };
+
+type SonarGateResponse = {
+  projectStatus?: {
+    status?: string;
+    conditions?: {
+      metricKey?: string;
+      status?: string;
+      actualValue?: string;
+      errorThreshold?: string;
+    }[];
+  };
 };
 
+type SonarComponentsResponse = { components?: { key?: string; name?: string }[] };
+
 /**
- * Self-hosted SonarQube (Community Edition) implementation. Reads the Web API
- * with a server-side token (Basic auth, `token:`). Works unchanged against a
- * SonarCloud host too — set `SONAR_ORGANIZATION` and it is appended to every
+ * SonarQube (Community Edition) implementation, driven by an explicit config so
+ * one class serves both a per-org saved connection and the env fallback. Works
+ * unchanged against SonarCloud: set `organizationKey` and it is appended to every
  * request (SonarCloud requires it; self-hosted ignores an absent one).
  */
 export class SonarQubeProvider implements CodeQualityProvider {
+  constructor(private readonly config: CodeQualityConfig) {}
+
   get available(): boolean {
-    return Boolean(env.SONAR_TOKEN);
+    return Boolean(this.config.token);
   }
 
-  // Community Edition: main branch only. When pointed at SonarCloud these flip
-  // on (a config change, not a code change).
+  // Community Edition: main branch only. Pointed at SonarCloud (organizationKey
+  // set) these flip on — a config change, not a code change.
   get capabilities(): CodeQualityCapabilities {
-    const isCloud = Boolean(env.SONAR_ORGANIZATION);
+    const isCloud = Boolean(this.config.organizationKey);
     return { branchAnalysis: isCloud, pullRequestAnalysis: isCloud };
   }
 
   private async apiGet<T>(path: string, params: Record<string, string>): Promise<T> {
-    if (!env.SONAR_TOKEN) {
+    if (!this.config.token) {
       throw new AppError(400, "SonarQube is not configured", "CODE_QUALITY_NOT_CONFIGURED");
     }
 
-    const url = new URL(path, env.SONAR_BASE_URL);
+    const url = new URL(path, this.config.baseUrl);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-    if (env.SONAR_ORGANIZATION) url.searchParams.set("organization", env.SONAR_ORGANIZATION);
+    if (this.config.organizationKey) url.searchParams.set("organization", this.config.organizationKey);
 
     // Token-as-username Basic auth (empty password) — same as `curl -u token:`.
-    const auth = Buffer.from(`${env.SONAR_TOKEN}:`).toString("base64");
+    const auth = Buffer.from(`${this.config.token}:`).toString("base64");
 
     let response: Response;
     try {
@@ -88,18 +103,27 @@ export class SonarQubeProvider implements CodeQualityProvider {
       throw new AppError(502, "Could not reach SonarQube", "CODE_QUALITY_UNREACHABLE");
     }
 
+    if (response.status === 401 || response.status === 403) {
+      throw new AppError(401, "SonarQube rejected the token", "CODE_QUALITY_UNAUTHORIZED");
+    }
     if (response.status === 404) {
       throw new AppError(404, "SonarQube project not found", "CODE_QUALITY_PROJECT_NOT_FOUND");
     }
     if (!response.ok) {
-      throw new AppError(
-        502,
-        `SonarQube request failed (${response.status})`,
-        "CODE_QUALITY_ERROR"
-      );
+      throw new AppError(502, `SonarQube request failed (${response.status})`, "CODE_QUALITY_ERROR");
     }
 
     return (await response.json()) as T;
+  }
+
+  /** Lightweight token check for the connect flow. Never throws. */
+  async validate(): Promise<boolean> {
+    try {
+      const data = await this.apiGet<{ valid?: boolean }>("/api/authentication/validate", {});
+      return data.valid === true;
+    } catch {
+      return false;
+    }
   }
 
   async getMeasures(projectKey: string): Promise<QualityMeasures> {
@@ -167,5 +191,35 @@ export class SonarQubeProvider implements CodeQualityProvider {
     }
 
     return [...byAuthor.values()].sort((a, b) => b.total - a.total);
+  }
+
+  async getQualityGate(projectKey: string): Promise<QualityGateStatus> {
+    const data = await this.apiGet<SonarGateResponse>("/api/qualitygates/project_status", {
+      projectKey
+    });
+    const raw = (data.projectStatus?.status ?? "NONE").toUpperCase();
+    const status: QualityGateStatus["status"] =
+      raw === "OK" || raw === "ERROR" || raw === "WARN" ? raw : "NONE";
+    return {
+      status,
+      conditions: (data.projectStatus?.conditions ?? []).map((c) => ({
+        metric: c.metricKey ?? "",
+        status: c.status ?? "",
+        actual: c.actualValue ?? null,
+        threshold: c.errorThreshold ?? null
+      }))
+    };
+  }
+
+  async listProjects(): Promise<SonarProjectSummary[]> {
+    // components/search (qualifier TRK) is readable by any authenticated user,
+    // unlike projects/search which needs admin.
+    const data = await this.apiGet<SonarComponentsResponse>("/api/components/search", {
+      qualifiers: "TRK",
+      ps: "500"
+    });
+    return (data.components ?? [])
+      .filter((c): c is { key: string; name?: string } => Boolean(c.key))
+      .map((c) => ({ key: c.key, name: c.name ?? c.key }));
   }
 }

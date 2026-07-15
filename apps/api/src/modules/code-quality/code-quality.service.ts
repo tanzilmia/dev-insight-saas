@@ -58,7 +58,7 @@ async function buildEmailToEmployee(organizationId: string): Promise<Map<string,
 export async function getCodeQualityOverview(actorId: string, query: CodeQualityQuery) {
   await requireOrganizationMember(actorId, query.organizationId);
 
-  const provider = getCodeQualityProvider();
+  const provider = await getCodeQualityProvider(query.organizationId);
 
   if (!provider.available) {
     return {
@@ -66,13 +66,16 @@ export async function getCodeQualityOverview(actorId: string, query: CodeQuality
       available: false,
       capabilities: provider.capabilities,
       measures: null,
+      qualityGate: null,
       developers: [] as DeveloperQuality[]
     };
   }
 
-  const [measures, issuesByAuthor, emailToEmployee] = await Promise.all([
+  const [measures, issuesByAuthor, qualityGate, emailToEmployee] = await Promise.all([
     provider.getMeasures(query.projectKey),
     provider.getIssuesByAuthor(query.projectKey),
+    // A project may have no gate configured; don't let that fail the overview.
+    provider.getQualityGate(query.projectKey).catch(() => null),
     buildEmailToEmployee(query.organizationId)
   ]);
 
@@ -86,6 +89,89 @@ export async function getCodeQualityOverview(actorId: string, query: CodeQuality
     available: true,
     capabilities: provider.capabilities,
     measures,
+    qualityGate,
     developers
+  };
+}
+
+const GATE_RANK: Record<string, number> = { OK: 1, WARN: 2, ERROR: 3 };
+
+/**
+ * Org-wide code-health rollup across every repo mapped to a SonarQube project:
+ * summed issue counts, ncloc-weighted coverage, and the worst quality gate. For
+ * the Overview "Code health" card. Best-effort: a project that errors is skipped.
+ */
+export async function getCodeQualitySummary(actorId: string, organizationId: string) {
+  await requireOrganizationMember(actorId, organizationId);
+
+  const provider = await getCodeQualityProvider(organizationId);
+  if (!provider.available) {
+    return { available: false as const, reason: "not_configured" as const };
+  }
+
+  const repos = await prisma.repository.findMany({
+    where: { organizationId, sonarProjectKey: { not: null } },
+    select: { sonarProjectKey: true }
+  });
+  const projectKeys = [
+    ...new Set(repos.map((r) => r.sonarProjectKey).filter((k): k is string => Boolean(k)))
+  ];
+  if (projectKeys.length === 0) {
+    return { available: false as const, reason: "no_project_mapped" as const };
+  }
+
+  const results = await Promise.all(
+    projectKeys.map(async (key) => {
+      try {
+        const [measures, gate] = await Promise.all([
+          provider.getMeasures(key),
+          provider.getQualityGate(key).catch(() => null)
+        ]);
+        return { key, measures, gate };
+      } catch {
+        return null; // project unreachable/missing — skip
+      }
+    })
+  );
+
+  const projects = results.filter((r): r is NonNullable<typeof r> => r !== null);
+  if (projects.length === 0) {
+    return { available: false as const, reason: "unreachable" as const };
+  }
+
+  const totals = { bugs: 0, vulnerabilities: 0, codeSmells: 0, securityHotspots: 0 };
+  let coverageWeightedSum = 0;
+  let coverageWeight = 0;
+  let worstGateRank = 0;
+
+  for (const { measures, gate } of projects) {
+    totals.bugs += measures.bugs ?? 0;
+    totals.vulnerabilities += measures.vulnerabilities ?? 0;
+    totals.codeSmells += measures.codeSmells ?? 0;
+    totals.securityHotspots += measures.securityHotspots ?? 0;
+    if (measures.coverage !== null) {
+      const weight = measures.linesOfCode ?? 1;
+      coverageWeightedSum += measures.coverage * weight;
+      coverageWeight += weight;
+    }
+    if (gate) worstGateRank = Math.max(worstGateRank, GATE_RANK[gate.status] ?? 0);
+  }
+
+  const worstGate =
+    worstGateRank === 3 ? "ERROR" : worstGateRank === 2 ? "WARN" : worstGateRank === 1 ? "OK" : "NONE";
+
+  return {
+    available: true as const,
+    projectCount: projects.length,
+    totals,
+    coverage: coverageWeight > 0 ? Math.round((coverageWeightedSum / coverageWeight) * 10) / 10 : null,
+    worstGate,
+    projects: projects.map(({ key, measures, gate }) => ({
+      key,
+      bugs: measures.bugs ?? 0,
+      vulnerabilities: measures.vulnerabilities ?? 0,
+      coverage: measures.coverage,
+      gate: gate?.status ?? "NONE"
+    }))
   };
 }

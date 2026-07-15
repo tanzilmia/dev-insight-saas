@@ -1,19 +1,35 @@
+import { decryptToken } from "../../common/crypto/token-cipher.js";
+import { prisma } from "../../config/database.js";
 import { env } from "../../config/env.js";
 
-import type { CodeQualityProvider } from "./code-quality-provider.js";
+import type { CodeQualityConfig, CodeQualityProvider } from "./code-quality-provider.js";
 import { SonarQubeProvider } from "./sonarqube.provider.js";
 
-const sonarQubeProvider = new SonarQubeProvider();
+/**
+ * Resolves the effective config for an org: its saved `CodeQualityConnection`
+ * (token decrypted) if present, else the env fallback (local dev / default).
+ */
+async function resolveConfig(organizationId: string): Promise<CodeQualityConfig> {
+  const connection = await prisma.codeQualityConnection.findUnique({ where: { organizationId } });
+  if (connection) {
+    return {
+      baseUrl: connection.baseUrl,
+      token: decryptToken(connection.tokenCipher),
+      organizationKey: connection.organizationKey
+    };
+  }
+  return {
+    baseUrl: env.SONAR_BASE_URL,
+    token: env.SONAR_TOKEN ?? null,
+    organizationKey: env.SONAR_ORGANIZATION ?? null
+  };
+}
 
 /**
- * Returns the active code-quality provider. `CODE_QUALITY_PROVIDER` selects the
- * implementation; only SonarQube is wired today (self-hosted or, with
- * `SONAR_ORGANIZATION` set, SonarCloud — same Web API, same class).
+ * Returns the active code-quality provider for an organization. Only SonarQube
+ * is wired (self-hosted, or SonarCloud when the connection carries an
+ * organization key — same Web API, same class).
  */
-export function getCodeQualityProvider(): CodeQualityProvider {
-  switch (env.CODE_QUALITY_PROVIDER) {
-    case "sonarqube":
-    default:
-      return sonarQubeProvider;
-  }
+export async function getCodeQualityProvider(organizationId: string): Promise<CodeQualityProvider> {
+  return new SonarQubeProvider(await resolveConfig(organizationId));
 }

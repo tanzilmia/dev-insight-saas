@@ -1199,11 +1199,17 @@ export type CodeQualityDeveloper = {
   employee: { userId: string; name: string; email: string } | null;
 };
 
+export type QualityGateStatus = {
+  status: "OK" | "ERROR" | "WARN" | "NONE";
+  conditions: { metric: string; status: string; actual: string | null; threshold: string | null }[];
+};
+
 export type CodeQualityOverview = {
   projectKey: string;
   available: boolean;
   capabilities: { branchAnalysis: boolean; pullRequestAnalysis: boolean };
   measures: CodeQualityMeasures | null;
+  qualityGate: QualityGateStatus | null;
   developers: CodeQualityDeveloper[];
 };
 
@@ -1213,6 +1219,87 @@ export async function getCodeQualityOverview(organizationId: string, projectKey:
   });
 
   return response.data.overview;
+}
+
+/* --- SonarQube connection (per-org, manager-managed) --- */
+
+export type CodeQualityConnection =
+  | {
+      connected: true;
+      provider: string;
+      baseUrl: string;
+      organizationKey: string | null;
+      status: string | null;
+      lastCheckedAt: string | null;
+    }
+  | { connected: false; envFallback?: boolean };
+
+export type SonarProjectSummary = { key: string; name: string };
+
+export type CodeQualityConnectionInput = {
+  organizationId: string;
+  provider?: "sonarqube" | "sonarcloud";
+  baseUrl: string;
+  token: string;
+  organizationKey?: string;
+};
+
+export async function getCodeQualityConnection(organizationId: string) {
+  const response = await api.get<{ connection: CodeQualityConnection }>(
+    "/api/code-quality/connection",
+    { params: { organizationId } }
+  );
+  return response.data.connection;
+}
+
+export async function testCodeQualityConnection(input: CodeQualityConnectionInput) {
+  const response = await api.post<{ result: { valid: boolean; status: string } }>(
+    "/api/code-quality/connection/test",
+    input
+  );
+  return response.data.result;
+}
+
+export async function saveCodeQualityConnection(input: CodeQualityConnectionInput) {
+  const response = await api.put<{ connection: CodeQualityConnection }>(
+    "/api/code-quality/connection",
+    input
+  );
+  return response.data.connection;
+}
+
+export async function deleteCodeQualityConnection(organizationId: string) {
+  const response = await api.delete<{ connection: CodeQualityConnection }>(
+    "/api/code-quality/connection",
+    { params: { organizationId } }
+  );
+  return response.data.connection;
+}
+
+export async function listSonarProjects(organizationId: string) {
+  const response = await api.get<{ available: boolean; projects: SonarProjectSummary[] }>(
+    "/api/code-quality/projects",
+    { params: { organizationId } }
+  );
+  return response.data;
+}
+
+export type CodeQualitySummary =
+  | { available: false; reason: "not_configured" | "no_project_mapped" | "unreachable" }
+  | {
+      available: true;
+      projectCount: number;
+      totals: { bugs: number; vulnerabilities: number; codeSmells: number; securityHotspots: number };
+      coverage: number | null;
+      worstGate: "OK" | "ERROR" | "WARN" | "NONE";
+      projects: { key: string; bugs: number; vulnerabilities: number; coverage: number | null; gate: string }[];
+    };
+
+export async function getCodeQualitySummary(organizationId: string) {
+  const response = await api.get<{ summary: CodeQualitySummary }>("/api/code-quality/summary", {
+    params: { organizationId }
+  });
+  return response.data.summary;
 }
 
 /* ------------------------------------------------------------------ */

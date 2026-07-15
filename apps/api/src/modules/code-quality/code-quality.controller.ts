@@ -3,8 +3,19 @@ import { Router } from "express";
 import { asyncHandler } from "../../common/http/async-handler.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 
-import { codeQualityQuerySchema } from "./code-quality.schemas.js";
-import { getCodeQualityOverview } from "./code-quality.service.js";
+import {
+  codeQualityConnectionSchema,
+  codeQualityOrgQuerySchema,
+  codeQualityQuerySchema
+} from "./code-quality.schemas.js";
+import {
+  deleteConnection,
+  getConnection,
+  listSonarProjects,
+  saveConnection,
+  testConnection
+} from "./connection.service.js";
+import { getCodeQualityOverview, getCodeQualitySummary } from "./code-quality.service.js";
 
 export const codeQualityRouter = Router();
 
@@ -19,5 +30,71 @@ codeQualityRouter.get(
     const overview = await getCodeQualityOverview(req.authUser!.id, query);
 
     res.status(200).json({ overview });
+  })
+);
+
+// GET /api/code-quality/summary — org-wide code-health rollup (Overview card).
+codeQualityRouter.get(
+  "/summary",
+  asyncHandler(async (req, res) => {
+    const { organizationId } = codeQualityOrgQuerySchema.parse(req.query);
+    const summary = await getCodeQualitySummary(req.authUser!.id, organizationId);
+
+    res.status(200).json({ summary });
+  })
+);
+
+// GET /api/code-quality/connection — current SonarQube connection (no token).
+codeQualityRouter.get(
+  "/connection",
+  asyncHandler(async (req, res) => {
+    const { organizationId } = codeQualityOrgQuerySchema.parse(req.query);
+    const connection = await getConnection(req.authUser!.id, organizationId);
+
+    res.status(200).json({ connection });
+  })
+);
+
+// POST /api/code-quality/connection/test — validate base URL + token (no save).
+codeQualityRouter.post(
+  "/connection/test",
+  asyncHandler(async (req, res) => {
+    const input = codeQualityConnectionSchema.parse(req.body);
+    const result = await testConnection(req.authUser!.id, input);
+
+    res.status(200).json({ result });
+  })
+);
+
+// PUT /api/code-quality/connection — test then save (token encrypted at rest).
+codeQualityRouter.put(
+  "/connection",
+  asyncHandler(async (req, res) => {
+    const input = codeQualityConnectionSchema.parse(req.body);
+    const connection = await saveConnection(req.authUser!.id, input);
+
+    res.status(200).json({ connection });
+  })
+);
+
+// DELETE /api/code-quality/connection — remove the connection.
+codeQualityRouter.delete(
+  "/connection",
+  asyncHandler(async (req, res) => {
+    const { organizationId } = codeQualityOrgQuerySchema.parse(req.query);
+    const connection = await deleteConnection(req.authUser!.id, organizationId);
+
+    res.status(200).json({ connection });
+  })
+);
+
+// GET /api/code-quality/projects — SonarQube projects for the mapping dropdown.
+codeQualityRouter.get(
+  "/projects",
+  asyncHandler(async (req, res) => {
+    const { organizationId } = codeQualityOrgQuerySchema.parse(req.query);
+    const result = await listSonarProjects(req.authUser!.id, organizationId);
+
+    res.status(200).json(result);
   })
 );

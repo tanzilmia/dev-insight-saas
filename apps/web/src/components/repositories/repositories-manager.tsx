@@ -14,6 +14,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ShieldCheck,
   Trash2,
   X,
   Zap
@@ -23,6 +24,7 @@ import {
   type AvailableRepository,
   type CollectionJob,
   type Project,
+  type SonarProjectSummary,
   type TrackedRepository,
   assignRepositoryProject,
   cancelDeepCollection,
@@ -33,6 +35,7 @@ import {
   listCollectionJobs,
   listProjects,
   listRepositories,
+  listSonarProjects,
   resyncRepository,
   selectRepositories,
   setRepositorySonarProjectKey,
@@ -128,6 +131,7 @@ export function RepositoriesManager() {
 
   const [tracked, setTracked] = useState<TrackedRepository[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [sonarProjects, setSonarProjects] = useState<SonarProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -190,6 +194,18 @@ export function RepositoriesManager() {
     listProjects(organizationId)
       .then(setProjects)
       .catch(() => setProjects([]));
+  }, [organizationId]);
+
+  // SonarQube projects for the code-quality mapping dropdown (empty when no
+  // SonarQube is connected — the row then falls back to a manual key prompt).
+  useEffect(() => {
+    if (!organizationId) {
+      return;
+    }
+
+    listSonarProjects(organizationId)
+      .then((result) => setSonarProjects(result.projects))
+      .catch(() => setSonarProjects([]));
   }, [organizationId]);
 
   // Load the latest job per repository once, so an in-flight deep collection
@@ -348,23 +364,57 @@ export function RepositoriesManager() {
     }
   }
 
-  async function handleSetSonarKey(repo: TrackedRepository) {
-    const input = window.prompt(
-      `SonarQube project key for ${repo.fullName} (blank to clear):`,
-      repo.sonarProjectKey ?? ""
-    );
-    if (input === null) return; // cancelled
-
+  async function setSonarKey(repo: TrackedRepository, key: string | null) {
     setBusyId(repo.id);
     setRowError(null);
     try {
-      await setRepositorySonarProjectKey(repo.id, input.trim() ? input.trim() : null);
+      await setRepositorySonarProjectKey(repo.id, key);
       await refresh();
     } catch (error) {
       setRowError(getApiErrorMessage(error));
     } finally {
       setBusyId(null);
     }
+  }
+
+  // Manual entry when no SonarQube projects are listed (not connected).
+  async function handleSetSonarKeyManual(repo: TrackedRepository) {
+    const input = window.prompt(
+      `SonarQube project key for ${repo.fullName} (blank to clear):`,
+      repo.sonarProjectKey ?? ""
+    );
+    if (input === null) return;
+    await setSonarKey(repo, input.trim() ? input.trim() : null);
+  }
+
+  // Best-effort bulk mapping: match each unmapped repo to a SonarQube project
+  // whose key or name looks like the repo (case-insensitive substring).
+  async function handleAutoMapSonar() {
+    const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const candidates = tracked.filter((repo) => !repo.sonarProjectKey);
+    let mapped = 0;
+    setRowError(null);
+    for (const repo of candidates) {
+      const repoTokens = [norm(repo.name), norm(repo.fullName.replace("/", ""))];
+      const match = sonarProjects.find((project) => {
+        const pk = norm(project.key);
+        const pn = norm(project.name);
+        return repoTokens.some((t) => t && (pk.includes(t) || t.includes(pk) || pn.includes(t)));
+      });
+      if (match) {
+        try {
+          await setRepositorySonarProjectKey(repo.id, match.key);
+          mapped += 1;
+        } catch {
+          /* keep going */
+        }
+      }
+    }
+    await refresh();
+    setRowNotice({
+      text: `Auto-mapped ${mapped} repositor${mapped === 1 ? "y" : "ies"} to SonarQube.`,
+      tone: mapped > 0 ? "success" : "warning"
+    });
   }
 
   async function handleUntrack(repo: TrackedRepository) {
@@ -502,19 +552,32 @@ export function RepositoriesManager() {
             </p>
           </div>
           {manageable ? (
-            <button
-              type="button"
-              onClick={handleSync}
-              disabled={syncing}
-              className="btn-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold"
-            >
-              {syncing ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                <DownloadCloud size={16} />
-              )}
-              {syncing ? "Syncing..." : "Sync from GitHub"}
-            </button>
+            <div className="flex items-center gap-2">
+              {sonarProjects.length ? (
+                <button
+                  type="button"
+                  onClick={handleAutoMapSonar}
+                  title="Match tracked repos to SonarQube projects by name"
+                  className="inline-flex items-center gap-2 rounded-lg border border-(--border) px-3 py-2.5 text-sm font-semibold text-(--text) hover:bg-(--surface-soft)"
+                >
+                  <ShieldCheck size={16} />
+                  Auto-map Sonar
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={handleSync}
+                disabled={syncing}
+                className="btn-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold"
+              >
+                {syncing ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <DownloadCloud size={16} />
+                )}
+                {syncing ? "Syncing..." : "Sync from GitHub"}
+              </button>
+            </div>
           ) : null}
         </section>
 
@@ -845,17 +908,32 @@ export function RepositoriesManager() {
                                 ) : (
                                   <span className="text-xs text-(--muted)">—</span>
                                 )}
-                                {manageable ? (
+                                {manageable && sonarProjects.length ? (
+                                  <select
+                                    value={repo.sonarProjectKey ?? ""}
+                                    disabled={busy}
+                                    onChange={(event) =>
+                                      setSonarKey(repo, event.target.value || null)
+                                    }
+                                    title="Map this repo to a SonarQube project (for code-quality analysis)"
+                                    className="mt-1.5 block rounded-md bg-transparent text-[11px] font-semibold text-(--muted)"
+                                  >
+                                    <option value="">No Sonar project</option>
+                                    {sonarProjects.map((project) => (
+                                      <option key={project.key} value={project.key}>
+                                        Sonar: {project.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : manageable ? (
                                   <button
                                     type="button"
                                     disabled={busy}
-                                    onClick={() => handleSetSonarKey(repo)}
+                                    onClick={() => handleSetSonarKeyManual(repo)}
                                     title="Map this repo to a SonarQube project key (for code-quality analysis)"
                                     className="mt-1.5 block text-[11px] font-semibold text-(--muted) hover:text-(--accent) disabled:opacity-50"
                                   >
-                                    {repo.sonarProjectKey
-                                      ? `Sonar: ${repo.sonarProjectKey}`
-                                      : "+ Sonar key"}
+                                    {repo.sonarProjectKey ? `Sonar: ${repo.sonarProjectKey}` : "+ Sonar key"}
                                   </button>
                                 ) : null}
                               </td>

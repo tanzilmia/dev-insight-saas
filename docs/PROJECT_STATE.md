@@ -1919,3 +1919,49 @@ not just the standalone page.
 **Deliberately NOT a normalized score yet** — raw attributed counts + caveats. A future
 improvement is per-KLOC / new-code-period normalization once windowed issue attribution exists
 (CE only gives the current main-branch snapshot).
+
+### 12.5 Friendly setup + Quality Gate (A+B, 2026-07-15)
+
+Made the integration self-serve instead of env/CLI-driven.
+
+- **Per-org connection** — `CodeQualityConnection` model (migration `code_quality_connection`):
+  baseUrl + AES-256-GCM-encrypted token (token-cipher, never returned) + optional `organizationKey`
+  (SonarCloud). Endpoints (all manager-gated): `GET/PUT/DELETE /api/code-quality/connection`,
+  `POST /api/code-quality/connection/test`, `GET /api/code-quality/projects`.
+- **Provider is now config-driven** — `SonarQubeProvider` takes `{baseUrl, token, organizationKey}`;
+  `getCodeQualityProvider(organizationId)` is **async**, resolving the org's saved connection
+  (token decrypted) and **falling back to env** (`SONAR_*`) so the local dogfood path is unchanged.
+  New provider methods: `getQualityGate`, `listProjects`, `validate`. Callers (`code-quality.service`,
+  `appraisal.service`) now `await getCodeQualityProvider(orgId)`.
+- **Quality gate** — the overview now returns `qualityGate` (OK/ERROR/WARN/NONE + failed conditions);
+  a pass/fail badge shows on the Code Quality page.
+- **UI (Code Quality page)** — a connection panel (Connect/Test/Save/Reconfigure/Disconnect,
+  shows "using env default" when unconnected), a **project dropdown** (from `listProjects`, replacing
+  the free-text key; manual entry only when nothing is listed), the gate badge, and **direct links**
+  into SonarQube.
+- **UI (Repositories page)** — the per-repo "+ Sonar key" prompt is now a **dropdown** of the org's
+  SonarQube projects, plus a header **"Auto-map Sonar"** that name-matches repos → projects in bulk.
+- **Verified end-to-end** (temp instance, real token): connection false→test(valid)→save(connected,
+  token never returned)→overview(gate:ERROR, bugs:2)→delete; env fallback lists `devinsight`; both
+  workspaces typecheck/lint, api 129 tests + build pass.
+
+**SonarCloud migration stays config-only** and is now even closer: a connection with an
+`organizationKey` flips capabilities on. Multi-tenant (§12.3) reuses this same per-org connection
+as its foundation.
+
+### 12.6 Code health on the Overview (C1, 2026-07-15)
+
+First slice of "surface quality in context" (workstream C):
+
+- **Org-wide rollup** — `getCodeQualitySummary` + `GET /api/code-quality/summary`: across every repo
+  with a `sonarProjectKey`, sums bugs/vulns/smells/hotspots, computes ncloc-weighted coverage, and the
+  **worst quality gate**. Best-effort (a failing project is skipped); `available:false` when nothing is
+  connected/mapped.
+- **Overview "Code health" card** (`components/statistics/code-health-card.tsx`) — self-contained,
+  manager-only, **stays silent** when unavailable (same quiet philosophy as the other Overview cards).
+  Shows bugs / vulnerabilities / coverage / code smells + a gate chip + a link to the Code Quality page.
+- Verified on real org data (1 project, gate ERROR, coverage 10.4%); both workspaces typecheck/lint,
+  api build pass.
+
+**Still in workstream C:** C2 project-detail inline quality, C3 report code-health section (the report
+one needs a design call on snapshot-vs-window before building).

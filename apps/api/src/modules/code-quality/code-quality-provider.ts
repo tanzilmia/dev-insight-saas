@@ -51,6 +51,22 @@ export type CodeQualityCapabilities = {
   readonly pullRequestAnalysis: boolean;
 };
 
+/** Runtime configuration for a provider instance (per-org or env fallback). */
+export type CodeQualityConfig = {
+  baseUrl: string;
+  token: string | null;
+  organizationKey: string | null;
+};
+
+/** Quality gate outcome — the single pass/fail signal, with failed conditions. */
+export type QualityGateStatus = {
+  status: "OK" | "ERROR" | "WARN" | "NONE";
+  conditions: { metric: string; status: string; actual: string | null; threshold: string | null }[];
+};
+
+/** A project as listed by the server (for the mapping dropdown). */
+export type SonarProjectSummary = { key: string; name: string };
+
 export interface CodeQualityProvider {
   /** True when the provider is configured (base URL + token present). */
   readonly available: boolean;
@@ -59,4 +75,8 @@ export interface CodeQualityProvider {
   getMeasures(projectKey: string): Promise<QualityMeasures>;
   /** Open issues grouped by git author, for per-developer analysis. */
   getIssuesByAuthor(projectKey: string): Promise<AuthorIssueBreakdown[]>;
+  /** Quality gate status (pass/fail) for a project. */
+  getQualityGate(projectKey: string): Promise<QualityGateStatus>;
+  /** Projects visible to the configured token (for repo→project mapping). */
+  listProjects(): Promise<SonarProjectSummary[]>;
 }
