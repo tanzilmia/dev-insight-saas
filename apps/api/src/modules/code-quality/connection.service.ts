@@ -123,5 +123,24 @@ export async function listSonarProjects(actorId: string, organizationId: string)
   const provider = await getCodeQualityProvider(organizationId);
   if (!provider.available) return { available: false, projects: [] };
   const projects = await provider.listProjects();
-  return { available: true, projects };
+
+  // Tenant isolation: when the org has its OWN connection, the token only sees
+  // that server's projects (already isolated). When it uses the SHARED env
+  // fallback, the token can see every customer's project — so restrict the list
+  // to projects mapped to THIS org's repos, or one customer could enumerate
+  // another's project keys (which reveal repo/company names).
+  const ownConnection = await prisma.codeQualityConnection.findUnique({
+    where: { organizationId },
+    select: { id: true }
+  });
+  if (ownConnection) {
+    return { available: true, projects };
+  }
+
+  const mapped = await prisma.repository.findMany({
+    where: { organizationId, sonarProjectKey: { not: null } },
+    select: { sonarProjectKey: true }
+  });
+  const ownedKeys = new Set(mapped.map((r) => r.sonarProjectKey).filter((k): k is string => Boolean(k)));
+  return { available: true, projects: projects.filter((p) => ownedKeys.has(p.key)) };
 }

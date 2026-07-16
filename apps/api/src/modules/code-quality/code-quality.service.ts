@@ -1,4 +1,5 @@
 import { requireOrganizationMember } from "../../common/access/organization-access.js";
+import { AppError } from "../../common/errors/app-error.js";
 import { prisma } from "../../config/database.js";
 
 import type { AuthorIssueBreakdown } from "./code-quality-provider.js";
@@ -51,6 +52,25 @@ async function buildEmailToEmployee(organizationId: string): Promise<Map<string,
 }
 
 /**
+ * Guards that a SonarQube project key belongs to a repository in the given org.
+ * This is the tenant boundary on the shared SonarQube server: results are only
+ * ever readable for projects the org actually owns (mapped to one of its repos).
+ */
+async function assertProjectKeyInOrg(organizationId: string, projectKey: string): Promise<void> {
+  const owned = await prisma.repository.findFirst({
+    where: { organizationId, sonarProjectKey: projectKey },
+    select: { id: true }
+  });
+  if (!owned) {
+    throw new AppError(
+      404,
+      "No code-quality project with that key is mapped to this organization.",
+      "CODE_QUALITY_PROJECT_NOT_IN_ORG"
+    );
+  }
+}
+
+/**
  * Code-quality overview for an org's SonarQube project: headline measures plus
  * per-git-author issue breakdown, each author joined to an employee where the
  * org's git mappings allow. Degrades gracefully (available:false) when no
@@ -58,6 +78,12 @@ async function buildEmailToEmployee(organizationId: string): Promise<Map<string,
  */
 export async function getCodeQualityOverview(actorId: string, query: CodeQualityQuery) {
   await requireOrganizationMember(actorId, query.organizationId);
+
+  // Tenant isolation (shared SonarQube): the project must be mapped to a repo in
+  // THIS org. Without this, a member of one org could read another tenant's
+  // measures + per-author issues by passing a guessable projectKey — because on a
+  // shared server the provider token can see every customer's project.
+  await assertProjectKeyInOrg(query.organizationId, query.projectKey);
 
   const provider = await getCodeQualityProvider(query.organizationId);
 

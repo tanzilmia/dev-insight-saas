@@ -31,10 +31,18 @@ import { getCodeQualityProvider } from "./code-quality-registry.js";
  * explicit action, so failures surface as clear errors.
  */
 
-/** Sonar project keys allow [a-zA-Z0-9_.-]; the prefix guarantees a non-numeric key. */
+/**
+ * Sonar project keys allow [a-zA-Z0-9_.-]; the prefix guarantees a non-numeric
+ * key. The DevInsight organizationId is folded in so the key is unique PER TENANT
+ * on the shared SonarQube server — two customers who each track the same GitHub
+ * owner/repo (e.g. both a public `facebook/react`) must NOT collide onto one
+ * project. An existing (manually mapped) key is left untouched.
+ */
 function makeProjectKey(repository: Repository): string {
   if (repository.sonarProjectKey?.trim()) return repository.sonarProjectKey.trim();
-  const slug = `${repository.owner}-${repository.name}`.replace(/[^a-zA-Z0-9_.-]/g, "-").slice(0, 380);
+  const slug = `${repository.organizationId}-${repository.owner}-${repository.name}`
+    .replace(/[^a-zA-Z0-9_.-]/g, "-")
+    .slice(0, 380);
   return `devinside-${slug}`;
 }
 
