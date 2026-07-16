@@ -84,14 +84,26 @@ export class SonarQubeProvider implements CodeQualityProvider {
     return { branchAnalysis: isCloud, pullRequestAnalysis: isCloud };
   }
 
+  /**
+   * Builds a full request URL by APPENDING the API path to the configured base
+   * URL. We concatenate (not `new URL(path, base)`) so a base URL that carries a
+   * path — e.g. a reverse-proxy context like `http://sonarqube:9000/sonarqube` —
+   * is preserved; `new URL("/api/x", base)` would drop the base's `/sonarqube`.
+   */
+  private buildUrl(path: string, params: Record<string, string>): URL {
+    const base = this.config.baseUrl.replace(/\/+$/, "");
+    const url = new URL(`${base}${path}`);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    if (this.config.organizationKey) url.searchParams.set("organization", this.config.organizationKey);
+    return url;
+  }
+
   private async apiGet<T>(path: string, params: Record<string, string>): Promise<T> {
     if (!this.config.token) {
       throw new AppError(400, "SonarQube is not configured", "CODE_QUALITY_NOT_CONFIGURED");
     }
 
-    const url = new URL(path, this.config.baseUrl);
-    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-    if (this.config.organizationKey) url.searchParams.set("organization", this.config.organizationKey);
+    const url = this.buildUrl(path, params);
 
     // Token-as-username Basic auth (empty password) — same as `curl -u token:`.
     const auth = Buffer.from(`${this.config.token}:`).toString("base64");
@@ -234,9 +246,7 @@ export class SonarQubeProvider implements CodeQualityProvider {
     if (!this.config.token) {
       throw new AppError(400, "SonarQube is not configured", "CODE_QUALITY_NOT_CONFIGURED");
     }
-    const url = new URL(path, this.config.baseUrl);
-    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-    if (this.config.organizationKey) url.searchParams.set("organization", this.config.organizationKey);
+    const url = this.buildUrl(path, params);
 
     const auth = Buffer.from(`${this.config.token}:`).toString("base64");
     try {
