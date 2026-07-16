@@ -5,7 +5,7 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-15.
+> Last updated: 2026-07-16.
 
 ---
 
@@ -2064,3 +2064,58 @@ visible alongside commits. Consider folding a per-employee collaboration block i
 **PR/review metrics complete for the single-org phase.** Possible follow-ups: review latency / time-to-merge,
 reviewer↔author matrix (who reviews whom), scheduled PR collection in the tick, and folding collaboration
 into the LLM report narrative.
+
+## 14. Production deployment (VPS + Docker) — scaffolding DONE (2026-07-16)
+
+The whole app now ships as a Docker stack for a single VPS. **Local dev is
+unchanged** (`npm run dev` still runs host processes; the standalone build is
+gated behind `NEXT_OUTPUT=standalone`, only set by the web Dockerfile). Full
+operator guide in **`docs/DEPLOYMENT.md`**.
+
+**Decisions (from the product owner):**
+- **Database stays on Neon** (external) — no app Postgres container. Production
+  reuses the SAME `JWT_ACCESS_SECRET` + `GIT_TOKEN_ENCRYPTION_KEY` as the current
+  `apps/api/.env` (else existing JWTs/encrypted PATs break).
+- **No domain yet → HTTP only on port 80**, IP access. A **Caddy** reverse proxy
+  (`deploy/Caddyfile`, `auto_https off`) serves one origin: `/api/*` → api:4000,
+  everything else → web:3000. Because it's same-origin, the web image is built
+  with `NEXT_PUBLIC_API_URL=""` (relative `/api/...` calls) — so the image never
+  needs rebuilding when the IP changes, and adding a domain+HTTPS later is a
+  Caddyfile edit, not a rebuild.
+- **Optional services via Compose profiles:** `sonar` (SonarQube CE + its own
+  Postgres, bound to 127.0.0.1:9000) and `openclaw` (our `mcp` bridge, fully
+  containerized, + the external `openclaw-gateway` image — gateway still needs its
+  own LLM/`openclaw mcp set` config per `docs/OPENCLAW_SETUP.md`).
+
+**Files added:**
+- `apps/api/Dockerfile` (multi-stage: `npm ci` → `prisma generate` → `tsc`; runner
+  keeps the whole tree incl. Prisma CLI) + `apps/api/docker-entrypoint.sh` (runs
+  `prisma migrate deploy` then `node dist/main.js` on every start). Base
+  `node:20-slim` + `openssl` (Prisma engines). `/health` used for the healthcheck.
+- `apps/web/Dockerfile` (Next.js **standalone**; monorepo layout preserved via
+  `outputFileTracingRoot` → repo root, so the entry is `apps/web/server.js`;
+  `static` + `public` copied alongside). `NEXT_PUBLIC_API_URL` is a build ARG.
+- `apps/web/next.config.ts` — `output:"standalone"` + `outputFileTracingRoot`,
+  **only when `NEXT_OUTPUT=standalone`** (local build sees `{}`).
+- `integrations/devinsight-mcp-server/Dockerfile` (+ `.dockerignore`) — the MCP
+  bridge (`DEVINSIGHT_URL=http://api:4000`, service key + MCP token from env).
+- `docker-compose.prod.yml` (project `devinsight-prod`), `deploy/Caddyfile`,
+  `deploy/env.prod.example` (→ copy to `deploy/.env.prod`, gitignored),
+  `deploy/openclaw/` (gateway state mount), root `.dockerignore`.
+- Root `package.json` scripts: `prod:up` (all profiles, build+start),
+  `prod:core` (web+api+caddy only), `prod:down`, `prod:logs`, `prod:ps`,
+  `prod:config`.
+
+**Verified (Docker daemon was down locally, so images not built here, but):**
+`npm run build -w @devinsight/api` (tsc) passes; `NEXT_OUTPUT=standalone` web
+build produces `apps/web/.next/standalone/apps/web/server.js` + root
+`node_modules` (matches the Dockerfile COPY paths exactly); `docker compose
+--env-file … -f docker-compose.prod.yml --profile sonar --profile openclaw config`
+resolves all 7 services + 6 volumes with no errors and `NEXT_PUBLIC_API_URL=""`.
+
+**Operator TODO on the VPS** (see `docs/DEPLOYMENT.md`): install Docker, open port
+80, `cp deploy/env.prod.example deploy/.env.prod` + fill in (Neon URL + the SAME
+secrets), `npm run prod:up`, browse `http://<vps-ip>`. **Single API instance only**
+(scheduler + collection worker are in-process). Not yet exercised end-to-end on a
+real VPS. Remaining infra polish: real domain + HTTPS (Caddyfile one-liner),
+optional image-size trimming, and (for horizontal scale) a shared scheduler queue.

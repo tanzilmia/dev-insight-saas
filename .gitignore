@@ -5,6 +5,11 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# OpenClaw gateway runtime state (bind-mounted in the prod stack); keep the dir.
+deploy/openclaw/*
+!deploy/openclaw/.gitkeep
+
 *.log
 .DS_Store
 

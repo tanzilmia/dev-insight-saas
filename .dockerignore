@@ -1,0 +1,35 @@
+# Keep the Docker build context small and free of secrets / build artifacts.
+# npm ci runs fresh inside the image, so host node_modules must never be copied.
+node_modules
+**/node_modules
+
+.next
+**/.next
+dist
+**/dist
+coverage
+**/coverage
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+.git
+.gitignore
+.github
+
+# Secrets & local env — never bake these into an image.
+.env
+**/.env
+deploy/.env.prod
+deploy/openclaw
+
+# Logs / OS cruft
+*.log
+.sonar-scan.log
+.DS_Store
+**/.DS_Store
+
+# Local-only tooling that the images don't need
+.githooks
+.superpowers
+.vscode
+.idea
