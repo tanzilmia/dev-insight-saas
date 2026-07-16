@@ -1,12 +1,12 @@
 # DevInsight — VPS Deployment (Docker)
 
-Production runs the whole app in Docker on a single VPS, behind a Caddy reverse
-proxy on port **80** (HTTP, IP-only for now). The database stays on **Neon**
-(external) — no app Postgres container.
+Production runs the whole app in Docker on a single VPS, behind an **nginx**
+reverse proxy on port **80** (HTTP, IP-only for now). The database stays on
+**Neon** (external) — no app Postgres container.
 
 ```
                          VPS (one host, port 80)
-   browser ──HTTP──▶  ┌──────────────── caddy ────────────────┐
+   browser ──HTTP──▶  ┌──────────────── nginx ────────────────┐
                       │   /api/*  ─▶ api:4000  (Express)       │
                       │   /*      ─▶ web:3000  (Next.js)       │
                       └───────────────────────────────────────┘
@@ -29,7 +29,7 @@ unchanged — keep using `npm run dev` (see the main README / CLAUDE.md).
 | `apps/api/Dockerfile` + `docker-entrypoint.sh` | API image; runs `prisma migrate deploy` on start |
 | `apps/web/Dockerfile` | Next.js **standalone** image |
 | `integrations/devinsight-mcp-server/Dockerfile` | MCP bridge image (OpenClaw chat) |
-| `deploy/Caddyfile` | Reverse proxy (`:80`, `/api` → api, else → web) |
+| `deploy/nginx.conf` | Reverse proxy (`:80`, `/api` → api, else → web) |
 | `deploy/env.prod.example` | Production env template → copy to `deploy/.env.prod` |
 
 ---
@@ -58,7 +58,7 @@ Fill in at minimum:
   from your current `apps/api/.env`.** They must match, because the Neon data
   already contains JWTs and Git PATs encrypted with those secrets. A new key
   makes existing PATs undecryptable.
-- Leave `NEXT_PUBLIC_API_URL=""` (same-origin API calls via Caddy).
+- Leave `NEXT_PUBLIC_API_URL=""` (same-origin API calls via nginx).
 - `PUBLIC_API_URL="http://YOUR_VPS_IP"` if you want GitHub live-sync webhooks.
 - LLM / OpenClaw / SonarQube / GitHub App values as needed (all optional).
 
@@ -68,7 +68,7 @@ Fill in at minimum:
 # Everything (core + SonarQube + OpenClaw), build images on first run:
 npm run prod:up
 
-# …or just the core (web + api + caddy):
+# …or just the core (web + api + nginx):
 npm run prod:core
 ```
 
@@ -106,7 +106,7 @@ already-created migrations, never resets).
 
 ## Profiles
 
-Services without a profile (`caddy`, `web`, `api`) always start. The rest are
+Services without a profile (`nginx`, `web`, `api`) always start. The rest are
 opt-in:
 
 - **`sonar`** — `sonarqube` + its own Postgres. Bound to `127.0.0.1:9000` on the
@@ -136,16 +136,47 @@ docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml \
   (a shared queue would be needed first — see PROJECT_STATE "Phase E").
 - **Same-origin design.** `NEXT_PUBLIC_API_URL=""` means the web bundle never
   hard-codes the host, so you don't rebuild the web image when the IP changes.
-- **Data safety.** All persistent Docker data (Caddy certs, SonarQube) lives in
-  named volumes; `prod:down` keeps them. The app's real data is in Neon.
+- **Data safety.** Persistent Docker data (SonarQube) lives in named volumes;
+  `prod:down` keeps them. The app's real data is in Neon.
+- **NDJSON chat stream.** `deploy/nginx.conf` sets `proxy_buffering off` on
+  `/api/` so the AI chat streams token-by-token; don't remove it or the reply
+  will only appear once, at the end.
+- **No 502 after updates.** The proxy uses Docker's DNS resolver
+  (`resolver 127.0.0.11`) so it re-resolves `api`/`web` when they are rebuilt.
 
 ## Later: add a domain + HTTPS
 
-1. Point an A record at the VPS IP.
-2. In `deploy/Caddyfile`, replace `:80` with `yourdomain.com` and delete the
-   `auto_https off` block.
-3. Uncomment the `- "443:443"` port in `docker-compose.prod.yml` and open 443.
-4. `npm run prod:up`. Caddy fetches a Let's Encrypt certificate automatically.
+nginx does not fetch certificates automatically, so pick one of:
+
+**Option A — Certbot (Let's Encrypt) on the host.** Simplest if the VPS terminates
+TLS itself.
+1. Point an A record at the VPS IP and open port **443** (uncomment `- "443:443"`
+   in `docker-compose.prod.yml`).
+2. Get certs (e.g. `certbot certonly --standalone -d yourdomain.com` while nginx
+   is briefly stopped, or use the webroot method) and mount them into the nginx
+   container — uncomment the `./deploy/certs:/etc/nginx/certs:ro` volume.
+3. Add an SSL server block to `deploy/nginx.conf` and redirect `:80` → `:443`:
+   ```nginx
+   server {
+       listen 80;
+       server_name yourdomain.com;
+       return 301 https://$host$request_uri;
+   }
+   server {
+       listen 443 ssl;
+       http2 on;
+       server_name yourdomain.com;
+       ssl_certificate     /etc/nginx/certs/fullchain.pem;
+       ssl_certificate_key /etc/nginx/certs/privkey.pem;
+       # …then the same location /api/, /health, / blocks as the :80 server.
+   }
+   ```
+4. `npm run prod:up`. Renewals: `certbot renew` + `docker compose … restart nginx`
+   (or reload).
+
+**Option B — Cloudflare (or any managed TLS front).** Point the domain through
+Cloudflare with SSL "Full", keep the container on plain HTTP `:80`, and let
+Cloudflare terminate TLS. Nothing in the stack changes.
 
 No image rebuild is needed for the API URL (it's already same-origin). If you had
 set `PUBLIC_API_URL`, update it to `https://yourdomain.com`.

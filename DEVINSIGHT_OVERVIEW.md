@@ -218,7 +218,7 @@ LLM report (Markdown) → dashboard / share link / Telegram / chat
 ## 5. What is NOT yet built
 
 - **Automated tests** — no runner installed yet (verification is done by driving the running API against mock GitHub/LLM servers). Prime candidates when added: `token-cipher`, coverage interval math, commit-classifier, `computeNextRun`, the report flow with mocked providers
-- **Deployment** — ✅ **Docker stack scaffolded (2026-07-16)**: multi-stage Dockerfiles (api / web-standalone / mcp), `docker-compose.prod.yml` (Caddy reverse proxy on :80, DB stays on Neon, `sonar` + `openclaw` Compose profiles), `deploy/env.prod.example`, and `docs/DEPLOYMENT.md`. Local dev is unchanged. **Not yet run end-to-end on a real VPS**; remaining infra polish = domain + HTTPS (a Caddyfile edit) and a shared scheduler queue for horizontal scale
+- **Deployment** — ✅ **Docker stack scaffolded (2026-07-16)**: multi-stage Dockerfiles (api / web-standalone / mcp), `docker-compose.prod.yml` (nginx reverse proxy on :80, DB stays on Neon, `sonar` + `openclaw` Compose profiles), `deploy/nginx.conf`, `deploy/env.prod.example`, and `docs/DEPLOYMENT.md`. Local dev is unchanged. **Not yet run end-to-end on a real VPS**; remaining infra polish = domain + HTTPS (Certbot/Cloudflare with nginx) and a shared scheduler queue for horizontal scale
 - **Discord/Slack** delivery (Telegram is done; the provider abstraction makes them drop-in)
 - **Conversational Telegram** (Telegram → OpenClaw → reports, mostly OpenClaw config)
 - Employee self-login/invite flow

@@ -137,10 +137,11 @@ Vitest is now installed and the pure-core unit suite is in place (see the Tests 
 
 ## Production deploy (VPS + Docker)
 
-Full guide: `docs/DEPLOYMENT.md`. Everything runs in Docker on one VPS behind a **Caddy** reverse proxy on port 80 (`deploy/Caddyfile`: `/api/*` → api, else → web — single origin, HTTP-only/IP for now). The **DB stays on Neon** (no app Postgres container). Files: `docker-compose.prod.yml` (project `devinsight-prod`; core = caddy/web/api, plus `sonar` + `openclaw` Compose profiles), `apps/{api,web}/Dockerfile`, `integrations/devinsight-mcp-server/Dockerfile`, `deploy/env.prod.example` → `deploy/.env.prod`. Root scripts: `prod:up` / `prod:core` / `prod:down` / `prod:logs` / `prod:config`.
+Full guide: `docs/DEPLOYMENT.md`. Everything runs in Docker on one VPS behind an **nginx** reverse proxy on port 80 (`deploy/nginx.conf`: `/api/*` → api, else → web — single origin, HTTP-only/IP for now). The **DB stays on Neon** (no app Postgres container). Files: `docker-compose.prod.yml` (project `devinsight-prod`; core = nginx/web/api, plus `sonar` + `openclaw` Compose profiles), `apps/{api,web}/Dockerfile`, `integrations/devinsight-mcp-server/Dockerfile`, `deploy/env.prod.example` → `deploy/.env.prod`. Root scripts: `prod:up` / `prod:core` / `prod:down` / `prod:logs` / `prod:config`.
 
 Things easy to get wrong here:
 - **Local dev is untouched.** Web standalone output is gated behind `NEXT_OUTPUT=standalone` (set only in `apps/web/Dockerfile`); `next dev`/`next build` see an empty config. Don't remove the gate.
-- **Same-origin web build.** The web image builds with `NEXT_PUBLIC_API_URL=""` so the browser calls `/api/...` on its own origin (Caddy routes it). Don't hard-code the VPS IP into the build.
+- **Same-origin web build.** The web image builds with `NEXT_PUBLIC_API_URL=""` so the browser calls `/api/...` on its own origin (nginx routes it). Don't hard-code the VPS IP into the build.
+- **nginx specifics.** `deploy/nginx.conf` needs `proxy_buffering off` on `/api/` (the NDJSON chat stream must not be buffered) and uses the Docker DNS `resolver 127.0.0.11` so rebuilt api/web containers don't 502. Keep both.
 - **Reuse the existing secrets.** Because production points at the same Neon DB, `deploy/.env.prod` must reuse the exact `GIT_TOKEN_ENCRYPTION_KEY` + `JWT_ACCESS_SECRET` from `apps/api/.env`, or existing encrypted PATs won't decrypt.
 - **Migrations auto-run** on api container start (`docker-entrypoint.sh` → `prisma migrate deploy`). **Single api instance only** (in-process scheduler + collection worker).
