@@ -42,6 +42,12 @@ function toRepository(repository: RepositoryWithProject) {
     isPrivate: repository.isPrivate,
     defaultBranch: repository.defaultBranch,
     sonarProjectKey: repository.sonarProjectKey,
+    // Automated code-quality scanning: provisioned (SonarQube project + analysis
+    // token injected as repo secrets) when this timestamp is set.
+    codeQualityScan: {
+      provisioned: Boolean(repository.sonarProvisionedAt),
+      provisionedAt: repository.sonarProvisionedAt
+    },
     project: repository.project,
     commitCount: repository._count.commits,
     lastSyncedAt: repository.lastSyncedAt,

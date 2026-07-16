@@ -321,6 +321,12 @@ model Repository {
   // set once code-quality scanning is wired for the repo). Lets appraisals/reports
   // map a repo to its static-analysis results.
   sonarProjectKey String?
+  // Multi-tenant auto-scan provisioning: the per-project SonarQube analysis token
+  // (AES-256-GCM encrypted at rest, like PATs — never returned by any API), and
+  // when the repo was provisioned (project created + token injected into the repo's
+  // GitHub Actions secrets). Null → not provisioned for automated code-quality scans.
+  sonarTokenCipher   String?
+  sonarProvisionedAt DateTime?
   // Live sync (GitHub webhook): hook id on the provider, the HMAC secret
   // (encrypted at rest, never returned by any API), status (ACTIVE/ERROR,
   // null = off) and the last delivery time.

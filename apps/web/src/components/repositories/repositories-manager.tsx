@@ -31,6 +31,7 @@ import {
   cancelDeepCollection,
   collectActivity,
   collectPullRequests,
+  deprovisionRepositoryCodeQuality,
   disableLiveSync,
   enableLiveSync,
   getApiErrorMessage,
@@ -38,6 +39,7 @@ import {
   listProjects,
   listRepositories,
   listSonarProjects,
+  provisionRepositoryCodeQuality,
   resyncRepository,
   selectRepositories,
   setRepositorySonarProjectKey,
@@ -372,6 +374,49 @@ export function RepositoriesManager() {
     try {
       await setRepositorySonarProjectKey(repo.id, key);
       await refresh();
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Enable automated SonarQube scanning: provisions the project + token, injects
+  // the repo secrets, and opens the workflow-update PR (merge lands the scan job).
+  async function handleEnableScan(repo: TrackedRepository) {
+    setBusyId(repo.id);
+    setRowError(null);
+    try {
+      const result = await provisionRepositoryCodeQuality(repo.id);
+      await refresh();
+      setRowNotice({
+        text:
+          result.ci.pullRequest && result.ci.pullRequest.state !== "merged"
+            ? `Scanning enabled for ${repo.fullName}. Merge the "Enable CI with DevInside" PR to start scanning.`
+            : `Scanning enabled for ${repo.fullName} (project ${result.projectKey}).`,
+        tone: "success"
+      });
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDisableScan(repo: TrackedRepository) {
+    if (
+      !window.confirm(
+        `Turn off automated code-quality scanning for ${repo.fullName}? The SonarQube project and its results are kept.`
+      )
+    ) {
+      return;
+    }
+    setBusyId(repo.id);
+    setRowError(null);
+    try {
+      await deprovisionRepositoryCodeQuality(repo.id);
+      await refresh();
+      setRowNotice({ text: `Scanning turned off for ${repo.fullName}.`, tone: "success" });
     } catch (error) {
       setRowError(getApiErrorMessage(error));
     } finally {
@@ -955,6 +1000,31 @@ export function RepositoriesManager() {
                                   >
                                     {repo.sonarProjectKey ? `Sonar: ${repo.sonarProjectKey}` : "+ Sonar key"}
                                   </button>
+                                ) : null}
+                                {manageable ? (
+                                  repo.codeQualityScan.provisioned ? (
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => handleDisableScan(repo)}
+                                      title="Automated SonarQube scan runs on each push to the default branch. Click to turn off."
+                                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-(--accent) hover:opacity-80 disabled:opacity-50"
+                                    >
+                                      <ShieldCheck size={12} />
+                                      Scanning on
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => handleEnableScan(repo)}
+                                      title="Create the SonarQube project + token, inject repo secrets, and add a scan job to the CI workflow (via a PR)."
+                                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-(--muted) hover:text-(--accent) disabled:opacity-50"
+                                    >
+                                      <ShieldCheck size={12} />
+                                      Enable scan
+                                    </button>
+                                  )
                                 ) : null}
                               </td>
                               {manageable ? (

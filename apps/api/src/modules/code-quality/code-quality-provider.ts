@@ -79,4 +79,19 @@ export interface CodeQualityProvider {
   getQualityGate(projectKey: string): Promise<QualityGateStatus>;
   /** Projects visible to the configured token (for repo→project mapping). */
   listProjects(): Promise<SonarProjectSummary[]>;
+
+  // --- Provisioning (multi-tenant auto-scan). Optional: needs an admin /
+  // create-project-capable token, so only the self-hosted SonarQube impl wires
+  // these. Callers guard on their presence. ---
+  /**
+   * Ensures a project with this key exists (idempotent — an already-existing
+   * project is treated as success). Needs "Create Projects" / admin permission.
+   */
+  ensureProject?(projectKey: string, name: string): Promise<void>;
+  /**
+   * Generates a fresh project-scoped analysis token, revoking any prior token of
+   * the same name first so the operation is repeatable. Returns the token value
+   * (shown by SonarQube only once — the caller must store/inject it immediately).
+   */
+  generateProjectToken?(projectKey: string, tokenName: string): Promise<string>;
 }

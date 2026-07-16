@@ -1,3 +1,5 @@
+import _sodium from "libsodium-wrappers";
+
 import { AppError } from "../../common/errors/app-error.js";
 import { env } from "../../config/env.js";
 import { GitRateLimitError } from "../git-providers/git-provider.js";
@@ -340,6 +342,65 @@ class GitHubDevOpsProvider implements DevOpsProvider {
       startedAt: run.run_started_at ?? run.created_at ?? null,
       completedAt: run.status === "completed" ? (run.updated_at ?? null) : null
     }));
+  }
+
+  /**
+   * Creates/updates a repository Actions secret. GitHub requires the value to be
+   * encrypted client-side with the repo's public key using a libsodium sealed
+   * box before upload. Needs the App's `secrets: write` permission.
+   */
+  async putRepoSecret(
+    token: string,
+    ref: RepositoryRef,
+    name: string,
+    value: string
+  ): Promise<void> {
+    // 1. Fetch the repository's public key for Actions secrets.
+    const keyResponse = await this.request(
+      `/repos/${this.encode(ref)}/actions/secrets/public-key`,
+      token
+    );
+    this.assertSecretsWritable(keyResponse);
+    if (!keyResponse.ok) {
+      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+    }
+    const publicKey = (await keyResponse.json()) as { key_id?: string; key?: string };
+    if (!publicKey.key || !publicKey.key_id) {
+      throw new AppError(502, "GitHub returned no Actions public key", "GIT_PROVIDER_ERROR");
+    }
+
+    // 2. Encrypt with a libsodium sealed box (GitHub's required scheme).
+    await _sodium.ready;
+    const sodium = _sodium;
+    const keyBytes = sodium.from_base64(publicKey.key, sodium.base64_variants.ORIGINAL);
+    const messageBytes = sodium.from_string(value);
+    const sealed = sodium.crypto_box_seal(messageBytes, keyBytes);
+    const encryptedValue = sodium.to_base64(sealed, sodium.base64_variants.ORIGINAL);
+
+    // 3. Upload. 201 = created, 204 = updated.
+    const putResponse = await this.request(
+      `/repos/${this.encode(ref)}/actions/secrets/${encodeURIComponent(name)}`,
+      token,
+      { method: "PUT", body: { encrypted_value: encryptedValue, key_id: publicKey.key_id } }
+    );
+    this.assertSecretsWritable(putResponse);
+    if (!putResponse.ok) {
+      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+    }
+  }
+
+  /** A 403 on the secrets API means the App lacks the `secrets: write` scope. */
+  private assertSecretsWritable(response: Response): void {
+    if (response.status === 403) {
+      throw new AppError(
+        403,
+        "GitHub refused to set the Actions secret. The DevInside App needs Secrets (read & write) permission on this repository — update the App permissions and re-accept the installation.",
+        "DEVOPS_SECRETS_PERMISSION_DENIED"
+      );
+    }
+    if (response.status === 404) {
+      throw new AppError(404, "Repository not found on GitHub", "REPO_NOT_ON_PROVIDER");
+    }
   }
 
   /**

@@ -551,6 +551,8 @@ export type TrackedRepository = RepositoryInput & {
   project: { id: string; name: string } | null;
   /** SonarQube/SonarCloud project key this repo is analyzed under (null = unset). */
   sonarProjectKey: string | null;
+  /** Automated code-quality scanning state (SonarQube project + repo secrets provisioned). */
+  codeQualityScan: { provisioned: boolean; provisionedAt: string | null };
   commitCount: number;
   lastSyncedAt: string | null;
   /** Live sync (GitHub webhook) state. null status = off. */
@@ -1282,6 +1284,37 @@ export async function listSonarProjects(organizationId: string) {
     { params: { organizationId } }
   );
   return response.data;
+}
+
+/** Result of provisioning a repo for automated SonarQube scanning. */
+export type CodeQualityProvisionResult = {
+  provisioned: boolean;
+  projectKey: string;
+  provisionedAt: string;
+  sonarHostUrl: string;
+  ci: CiStatus;
+};
+
+/**
+ * Enable automated code-quality scanning for a repo: creates the SonarQube
+ * project + analysis token, injects the repo's Actions secrets, and opens the
+ * managed-workflow update PR (its Sonar job lands on merge).
+ */
+export async function provisionRepositoryCodeQuality(repositoryId: string) {
+  const response = await api.post<{ result: CodeQualityProvisionResult }>(
+    "/api/code-quality/provision",
+    { repositoryId }
+  );
+  return response.data.result;
+}
+
+/** Turn off automated scanning for a repo (project + results are kept). */
+export async function deprovisionRepositoryCodeQuality(repositoryId: string) {
+  const response = await api.delete<{ result: { provisioned: boolean } }>(
+    "/api/code-quality/provision",
+    { params: { repositoryId } }
+  );
+  return response.data.result;
 }
 
 export type CodeQualitySummary =

@@ -34,6 +34,13 @@ export const codeQualityTrendQuerySchema = z.object({
 
 export type CodeQualityTrendQuery = z.infer<typeof codeQualityTrendQuerySchema>;
 
+/** Body/query identifying a repository for provision / deprovision. */
+export const codeQualityRepositorySchema = z.object({
+  repositoryId: z.string().min(1)
+});
+
+export type CodeQualityRepositoryInput = z.infer<typeof codeQualityRepositorySchema>;
+
 /** Body to save or test a SonarQube/SonarCloud connection. */
 export const codeQualityConnectionSchema = z.object({
   organizationId: z.string().min(1),

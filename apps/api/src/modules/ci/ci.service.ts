@@ -40,6 +40,16 @@ function refOf(repository: Repository): RepositoryRef {
   return { owner: repository.owner, repo: repository.name };
 }
 
+/**
+ * The Sonar project key to bake into the workflow's code-quality job — only when
+ * the repo is actually provisioned (analysis token injected as a repo secret). A
+ * key that is merely mapped (for reading results) must NOT emit the scan job, or
+ * the scan would fail for lack of a token.
+ */
+function sonarKeyIfProvisioned(repository: Repository): string | null {
+  return repository.sonarProvisionedAt ? repository.sonarProjectKey : null;
+}
+
 /** Resolves an installation token + the DevOps provider for a repository. */
 async function accessFor(repository: Repository): Promise<{ token: string; devops: DevOpsProvider }> {
   const { token } = await resolveRepositoryToken(repository);
@@ -89,10 +99,20 @@ export async function enableCi(actorId: string, repositoryId: string) {
   const ref = refOf(repository);
   const defaultBranch = await devops.getDefaultBranch(token, ref);
 
-  // Idempotency 1: the managed workflow already lives on the default branch → CI
-  // is effectively enabled; record it and skip the PR.
+  // Inspect + generate (throws STACK_UNSUPPORTED for non-Node repos). The
+  // workflow includes a SonarQube code-quality job only when the repo has been
+  // provisioned for automated scanning (project created + analysis token injected
+  // as a repo secret) — a mapped key alone is not enough, or the scan would fail
+  // for lack of a token.
+  const stack = await inspect(repository, token, devops);
+  const workflow = generateWorkflow(stack, { sonarProjectKey: sonarKeyIfProvisioned(repository) });
+
+  // Idempotency: the managed workflow already lives on the default branch. If its
+  // content already matches what we'd generate, CI is up to date — record ENABLED
+  // and skip the PR. If it DIFFERS (e.g. we now add a Sonar job), fall through to
+  // open an update PR rather than treating it as done.
   const onDefault = await devops.getFile(token, ref, MANAGED_WORKFLOW_PATH, defaultBranch);
-  if (onDefault) {
+  if (onDefault && onDefault.content === workflow.content) {
     const marker = parseManagedMarker(onDefault.content);
     const config = await upsertConfig(repository, actorId, {
       status: "ENABLED",
@@ -106,10 +126,6 @@ export async function enableCi(actorId: string, repositoryId: string) {
     await audit(repository, actorId, "ci.enable", { result: "already-on-default-branch" });
     return statusFor(repository, config, await latestRun(repositoryId), defaultBranch);
   }
-
-  // Inspect + generate (throws STACK_UNSUPPORTED for non-Node repos).
-  const stack = await inspect(repository, token, devops);
-  const workflow = generateWorkflow(stack);
 
   // Create/reuse the setup branch off the default branch head.
   const headSha = await devops.getBranchHeadSha(token, ref, defaultBranch);
@@ -135,7 +151,7 @@ export async function enableCi(actorId: string, repositoryId: string) {
       head: SETUP_BRANCH,
       base: defaultBranch,
       title: "Enable CI with DevInside",
-      body: pullRequestBody(stack)
+      body: pullRequestBody(stack, sonarKeyIfProvisioned(repository))
     });
   }
 
@@ -158,22 +174,29 @@ export async function enableCi(actorId: string, repositoryId: string) {
   return statusFor(repository, config, await latestRun(repositoryId), defaultBranch);
 }
 
-function pullRequestBody(stack: DetectedStack): string {
+function pullRequestBody(stack: DetectedStack, sonarProjectKey?: string | null): string {
   const steps = ["install dependencies"]
     .concat(stack.scripts.lint ? ["lint"] : [])
     .concat(stack.scripts.typecheck ? ["typecheck"] : [])
     .concat(stack.scripts.test ? ["test"] : [])
     .concat(stack.scripts.build ? ["build"] : []);
+  const sonar = sonarProjectKey?.trim() || null;
   return [
     "This pull request adds a GitHub Actions workflow managed by **DevInside**.",
     "",
     `Detected stack: **Node.js** (${stack.packageManager}${stack.isMonorepo ? ", monorepo" : ""}${stack.framework ? `, ${stack.framework}` : ""}), Node ${stack.nodeVersion}.`,
     "",
     `On every pull request and push to \`${stack.defaultBranch}\`, CI will run: ${steps.join(" → ")}.`,
+    ...(sonar
+      ? [
+          "",
+          `On each push to \`${stack.defaultBranch}\`, a **SonarQube code-quality scan** also runs (project \`${sonar}\`), sending results to your DevInside code-quality dashboard. It uses the \`SONAR_TOKEN\` / \`SONAR_HOST_URL\` repository secrets DevInside has set for you.`
+        ]
+      : []),
     "",
     "Merge this PR to enable GitHub Actions. DevInside will keep this workflow up to date (e.g. adding code-quality or security checks) via future pull requests — please don't edit the file by hand.",
     "",
-    "_Least privilege: the workflow requests read-only permissions and uses no secrets._"
+    `_Least privilege: the workflow requests read-only permissions${sonar ? " and uses only the SonarQube analysis secrets" : " and uses no secrets"}._`
   ].join("\n");
 }
 

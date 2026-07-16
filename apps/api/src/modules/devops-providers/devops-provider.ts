@@ -93,6 +93,19 @@ export interface DevOpsProvider {
     ref: RepositoryRef,
     options?: { perPage?: number; branch?: string }
   ): Promise<WorkflowRunDto[]>;
+  /**
+   * Creates or updates a repository Actions secret. The value is encrypted in
+   * transit with the repository's public key per the provider's own scheme
+   * (GitHub: libsodium sealed box), so callers pass plaintext. Used to inject the
+   * SonarQube analysis token + host URL for automated code-quality scanning.
+   * Requires the App's `secrets: write` permission on the repository.
+   */
+  putRepoSecret(
+    token: string,
+    ref: RepositoryRef,
+    name: string,
+    value: string
+  ): Promise<void>;
 
   // --- Extension points (wired later for SonarQube / manual control). ---
   dispatchWorkflow?(

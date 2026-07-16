@@ -7,6 +7,7 @@ import {
   codeQualityConnectionSchema,
   codeQualityOrgQuerySchema,
   codeQualityQuerySchema,
+  codeQualityRepositorySchema,
   codeQualitySummaryQuerySchema,
   codeQualityTrendQuerySchema
 } from "./code-quality.schemas.js";
@@ -19,6 +20,10 @@ import {
   testConnection
 } from "./connection.service.js";
 import { getCodeQualityOverview, getCodeQualitySummary } from "./code-quality.service.js";
+import {
+  deprovisionRepositoryCodeQuality,
+  provisionRepositoryCodeQuality
+} from "./provisioning.service.js";
 
 export const codeQualityRouter = Router();
 
@@ -110,5 +115,30 @@ codeQualityRouter.get(
     const result = await listSonarProjects(req.authUser!.id, organizationId);
 
     res.status(200).json(result);
+  })
+);
+
+// POST /api/code-quality/provision — enable automated SonarQube scanning for a
+// repo (create project + token, inject repo secrets, open the workflow-update
+// PR). Manager-gated in the service.
+codeQualityRouter.post(
+  "/provision",
+  asyncHandler(async (req, res) => {
+    const { repositoryId } = codeQualityRepositorySchema.parse(req.body);
+    const result = await provisionRepositoryCodeQuality(req.authUser!.id, repositoryId);
+
+    res.status(200).json({ result });
+  })
+);
+
+// DELETE /api/code-quality/provision — turn off automated scanning (clears the
+// provisioning marker; the SonarQube project + results are kept).
+codeQualityRouter.delete(
+  "/provision",
+  asyncHandler(async (req, res) => {
+    const { repositoryId } = codeQualityRepositorySchema.parse(req.query);
+    const result = await deprovisionRepositoryCodeQuality(req.authUser!.id, repositoryId);
+
+    res.status(200).json({ result });
   })
 );

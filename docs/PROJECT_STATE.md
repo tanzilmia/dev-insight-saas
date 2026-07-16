@@ -2026,6 +2026,54 @@ integration arc (setup → page → gate → Overview/project/Analysis → appra
 report) is now feature-complete for the self-hosted, single-org phase.** Remaining big items: multi-tenant
 (§12.3) + VPS deploy.
 
+### 12.9 Multi-tenant auto-scan (client repos via GitHub Actions) — ✅ DONE (2026-07-16)
+
+The §12.3 plan is now implemented end-to-end — a manager can turn on automated SonarQube scanning for a
+client repo, and each push to its default branch scans and reports back to DevInside. This became possible
+because the app is now on a **public VPS** (`https://devinside.softathena.com`): a client repo's GitHub
+Actions runner can finally reach the SonarQube server (localhost was unreachable from GitHub's runners).
+
+**Two SonarQube URLs (the key architectural point):**
+- **Internal** `SONAR_BASE_URL=http://sonarqube:9000` — how the API reaches SonarQube (Docker network) to
+  provision + read results.
+- **Public** `SONAR_PUBLIC_URL=https://devinside.softathena.com/sonarqube` (new env) — the URL injected into
+  the client repo, used by its runner to push scan results over the internet. Routed through nginx (HTTPS)
+  so the analysis token isn't sent in clear text (`deploy/nginx.conf` `/sonarqube/` in the 443 block).
+
+**The four pieces (all built):**
+1. **Sonar-aware workflow** — `ci/workflow-templates.ts` bumped `node@v1`→`v2`. When a repo is provisioned,
+   `generateWorkflow(stack, { sonarProjectKey })` emits a separate **`code_quality` job** that runs
+   `SonarSource/sonarqube-scan-action@v4` **only on push** (`if: github.event_name == 'push'` — CE analyzes
+   the main branch only) with `fetch-depth: 0` (full history for accurate SCM-blame attribution). Token +
+   host come from injected repo secrets, never baked in. Unit-tested (`workflow-templates.test.ts`).
+2. **Repo secret injection** — new `DevOpsProvider.putRepoSecret` (`github-devops.provider.ts`): fetches the
+   repo's Actions public key, **libsodium sealed-box** encrypts (new dep `libsodium-wrappers`), `PUT
+   /repos/{o}/{r}/actions/secrets/{name}`. A 403 maps to `DEVOPS_SECRETS_PERMISSION_DENIED` (the App needs
+   **`secrets: write`**). ⚠️ **Operator prerequisite: add `Secrets: read & write` to the GitHub App
+   permissions and re-accept the installation**, else provisioning 403s.
+3. **Provisioning** — new `SonarQubeProvider.ensureProject` + `generateProjectToken` (admin API:
+   `/api/projects/create` idempotent, `/api/user_tokens/generate` type=PROJECT_ANALYSIS_TOKEN, revoke-first
+   for repeatability). New `code-quality/provisioning.service.ts` `provisionRepositoryCodeQuality` orchestrates:
+   ensure project → mint token → inject `SONAR_TOKEN` + `SONAR_HOST_URL` secrets → persist
+   `Repository.sonarProjectKey` + encrypted `sonarTokenCipher` + `sonarProvisionedAt` (migration
+   `repository_sonar_provisioning`) → `enableCi` opens/refreshes the workflow PR (now **content-aware**: an
+   already-merged workflow that now needs the Sonar job triggers an update PR instead of no-op). Manager-gated
+   + audit-logged. `deprovision…` clears the marker (project/results kept).
+4. **Read results** — already existed (§12.1); the mapped `sonarProjectKey` flows into the existing overview /
+   appraisal / trends.
+
+**Endpoints:** `POST /api/code-quality/provision` + `DELETE /api/code-quality/provision` (both manager-gated).
+**UI:** an "Enable scan" / "Scanning on" toggle per repo on the Repositories page (next to the Sonar-key map),
+using `provisionRepositoryCodeQuality` / `deprovisionRepositoryCodeQuality`. Repo DTO gained `codeQualityScan
+{ provisioned, provisionedAt }`.
+
+**Verified locally:** api typecheck/lint/**142 tests**/build + web typecheck/lint/build all pass. **NOT yet
+run against a real client repo** — the live e2e (grant App `secrets: write` → set `SONAR_PUBLIC_URL` on the
+VPS → deploy → "Enable scan" on a repo → merge PR → push → confirm scan lands) is the next step.
+
+**SonarCloud migration stays config-only** (the same `SonarQubeProvider` methods exist; SonarCloud project
+creation differs but the read path is identical).
+
 ## 13. PR / code-review metrics (collaboration) — Increment 1 (backend), 2026-07-15
 
 Fills the product's biggest fairness blind spot: it measured code volume + code quality but not
@@ -2070,7 +2118,8 @@ into the LLM report narrative.
 **SHIPPED: Full end-to-end production deployment on Ubuntu VPS with HTTPS.**
 
 The whole app now ships as a Docker stack for a single VPS at **https://devinside.softathena.com**
-(DigitalOcean Ubuntu 24.04, 2GB RAM). Dashboard fully operational, all services running.
+(Ubuntu 24.04, 7.6 GB RAM — comfortably runs the core stack + SonarQube CE, which
+alone uses ~2.2 GB). Dashboard fully operational, all services running.
 **Local dev is unchanged** (`npm run dev` still runs host processes; the standalone build is
 gated behind `NEXT_OUTPUT=standalone`, only set by the web Dockerfile). Full
 operator guide in **`docs/DEPLOYMENT.md`**.

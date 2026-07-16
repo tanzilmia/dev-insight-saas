@@ -25,8 +25,8 @@ describe("generateWorkflow", () => {
     const wf = generateWorkflow(stack());
     expect(wf.path).toBe(MANAGED_WORKFLOW_PATH);
     expect(wf.templateId).toBe("node");
-    expect(wf.templateVersion).toBe("1");
-    expect(wf.content).toContain("# devinside-managed: node@v1");
+    expect(wf.templateVersion).toBe("2");
+    expect(wf.content).toContain("# devinside-managed: node@v2");
     expect(wf.content).toContain("name: CI");
     expect(wf.content).toContain("workflow_dispatch:");
     expect(wf.content).toContain("pull_request:");
@@ -37,6 +37,31 @@ describe("generateWorkflow", () => {
     expect(wf.content).toContain('node-version: "20"');
     expect(wf.content).toContain('cache: "npm"');
     expect(wf.content).toContain("run: npm ci");
+  });
+
+  it("omits the code-quality job when no Sonar project key is given", () => {
+    const wf = generateWorkflow(stack());
+    expect(wf.content).not.toContain("code_quality:");
+    expect(wf.content).not.toContain("sonarqube-scan-action");
+  });
+
+  it("emits a push-only SonarQube scan job when provisioned", () => {
+    const wf = generateWorkflow(stack(), { sonarProjectKey: "devinside-acme-web" });
+    expect(wf.content).toContain("code_quality:");
+    // Community Edition scans main only → gated to push events, not PRs.
+    expect(wf.content).toContain("if: github.event_name == 'push'");
+    expect(wf.content).toContain("SonarSource/sonarqube-scan-action@");
+    expect(wf.content).toContain("-Dsonar.projectKey=devinside-acme-web");
+    // Full history for accurate SCM-blame author attribution.
+    expect(wf.content).toContain("fetch-depth: 0");
+    // Token + host come from injected repo secrets, never baked in.
+    expect(wf.content).toContain("SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}");
+    expect(wf.content).toContain("SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}");
+  });
+
+  it("treats a blank Sonar project key as not provisioned", () => {
+    const wf = generateWorkflow(stack(), { sonarProjectKey: "   " });
+    expect(wf.content).not.toContain("code_quality:");
   });
 
   it("emits only the steps whose scripts exist", () => {
@@ -89,7 +114,7 @@ describe("parseManagedMarker", () => {
   it("round-trips its own generated output", () => {
     expect(parseManagedMarker(generateWorkflow(stack()).content)).toEqual({
       templateId: "node",
-      templateVersion: "1"
+      templateVersion: "2"
     });
   });
 });

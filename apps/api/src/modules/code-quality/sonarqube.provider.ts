@@ -222,4 +222,79 @@ export class SonarQubeProvider implements CodeQualityProvider {
       .filter((c): c is { key: string; name?: string } => Boolean(c.key))
       .map((c) => ({ key: c.key, name: c.name ?? c.key }));
   }
+
+  // --- Provisioning (admin API; POST, params in the query string) -------------
+
+  /**
+   * POST to a SonarQube Web API endpoint. Params go in the query string (how the
+   * SonarQube Web API expects them, even for writes). Returns the raw Response so
+   * callers can branch on status (e.g. treat "already exists" as success).
+   */
+  private async apiPost(path: string, params: Record<string, string>): Promise<Response> {
+    if (!this.config.token) {
+      throw new AppError(400, "SonarQube is not configured", "CODE_QUALITY_NOT_CONFIGURED");
+    }
+    const url = new URL(path, this.config.baseUrl);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    if (this.config.organizationKey) url.searchParams.set("organization", this.config.organizationKey);
+
+    const auth = Buffer.from(`${this.config.token}:`).toString("base64");
+    try {
+      return await fetch(url, { method: "POST", headers: { Authorization: `Basic ${auth}` } });
+    } catch {
+      throw new AppError(502, "Could not reach SonarQube", "CODE_QUALITY_UNREACHABLE");
+    }
+  }
+
+  async ensureProject(projectKey: string, name: string): Promise<void> {
+    const response = await this.apiPost("/api/projects/create", { project: projectKey, name });
+    if (response.ok) return;
+
+    if (response.status === 401 || response.status === 403) {
+      throw new AppError(
+        401,
+        "The SonarQube token lacks permission to create projects (needs 'Create Projects' or admin).",
+        "CODE_QUALITY_PROVISION_FORBIDDEN"
+      );
+    }
+    // A 400 whose message says the key already exists is idempotent success.
+    if (response.status === 400) {
+      const body = (await response.json().catch(() => null)) as
+        | { errors?: { msg?: string }[] }
+        | null;
+      const alreadyExists = (body?.errors ?? []).some((e) =>
+        (e.msg ?? "").toLowerCase().includes("already exists")
+      );
+      if (alreadyExists) return;
+    }
+    throw new AppError(502, `SonarQube project create failed (${response.status})`, "CODE_QUALITY_ERROR");
+  }
+
+  async generateProjectToken(projectKey: string, tokenName: string): Promise<string> {
+    // Revoke any prior token of this name so the operation is repeatable
+    // (SonarQube requires token names to be unique per user). Ignore failures —
+    // a not-found revoke is fine.
+    await this.apiPost("/api/user_tokens/revoke", { name: tokenName }).catch(() => undefined);
+
+    const response = await this.apiPost("/api/user_tokens/generate", {
+      name: tokenName,
+      type: "PROJECT_ANALYSIS_TOKEN",
+      projectKey
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new AppError(
+        401,
+        "The SonarQube token lacks permission to generate analysis tokens.",
+        "CODE_QUALITY_PROVISION_FORBIDDEN"
+      );
+    }
+    if (!response.ok) {
+      throw new AppError(502, `SonarQube token generate failed (${response.status})`, "CODE_QUALITY_ERROR");
+    }
+    const data = (await response.json()) as { token?: string };
+    if (!data.token) {
+      throw new AppError(502, "SonarQube returned no analysis token", "CODE_QUALITY_ERROR");
+    }
+    return data.token;
+  }
 }

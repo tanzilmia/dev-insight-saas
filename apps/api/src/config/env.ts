@@ -52,7 +52,14 @@ const envSchema = z.object({
   CODE_QUALITY_PROVIDER: z.enum(["sonarqube"]).default("sonarqube"),
   SONAR_BASE_URL: z.string().url().default("http://localhost:9000"),
   SONAR_TOKEN: z.string().optional(),
-  SONAR_ORGANIZATION: z.string().optional()
+  SONAR_ORGANIZATION: z.string().optional(),
+  // Externally reachable SonarQube base URL — the one a CLIENT repo's GitHub
+  // Actions runner uses to push scan results (over the internet), as opposed to
+  // SONAR_BASE_URL which is how THIS API reaches SonarQube (Docker-internal).
+  // Optional: multi-tenant auto-scan provisioning stays unavailable (clean 400)
+  // until it is set. Prefer an HTTPS URL so the injected analysis token isn't
+  // sent in clear text (e.g. https://your-domain/sonarqube).
+  SONAR_PUBLIC_URL: z.string().url().optional()
 }).superRefine((value, ctx) => {
   const openClawEnabled = Boolean(
     value.OPENCLAW_SERVICE_KEY || value.OPENCLAW_GATEWAY_URL || value.OPENCLAW_GATEWAY_TOKEN
