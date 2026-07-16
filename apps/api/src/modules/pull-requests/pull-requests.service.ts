@@ -15,8 +15,8 @@ const MAX_REVIEW_FETCH = 150;
 
 /**
  * Fetches pull requests (+ reviews for the newest ones) for a repository and
- * stores them, de-duplicated. Manager-gated; uses the repo's stored credential /
- * App installation — never a personal token. This is the raw data behind the
+ * stores them, de-duplicated. Manager-gated and authorized exclusively by the
+ * repository's GitHub App installation. This is the raw data behind the
  * collaboration/review metrics (work that never appears in commit counts).
  */
 export async function collectPullRequests(actorId: string, repositoryId: string) {
@@ -27,7 +27,6 @@ export async function collectPullRequests(actorId: string, repositoryId: string)
       organizationId: true,
       owner: true,
       name: true,
-      credentialId: true,
       appInstallationId: true,
       provider: true
     }

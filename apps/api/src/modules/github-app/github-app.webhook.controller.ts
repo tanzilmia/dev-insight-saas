@@ -7,6 +7,10 @@ import {
   handleInstallationRepositoriesEvent,
   type WebhookInstallationPayload
 } from "./github-app.service.js";
+import {
+  handleGitHubAppPushEvent,
+  type GitHubAppPushPayload
+} from "./github-app-push.service.js";
 
 /**
  * GitHub App webhook receiver. ONE endpoint for every installation (configured
@@ -39,9 +43,10 @@ githubAppWebhookRouter.post(
       return;
     }
 
-    let payload: WebhookInstallationPayload;
+    let payload: WebhookInstallationPayload & GitHubAppPushPayload;
     try {
-      payload = JSON.parse(rawBody.toString("utf8")) as WebhookInstallationPayload;
+      payload = JSON.parse(rawBody.toString("utf8")) as WebhookInstallationPayload &
+        GitHubAppPushPayload;
     } catch {
       res.status(400).json({ error: { code: "BAD_PAYLOAD", message: "Invalid JSON" } });
       return;
@@ -49,10 +54,16 @@ githubAppWebhookRouter.post(
 
     // Answer fast (GitHub times deliveries out at ~10s); process in background.
     res.status(202).json({ accepted: true });
+    let task: Promise<void> | undefined;
     if (event === "installation") {
-      void handleInstallationEvent(payload);
+      task = handleInstallationEvent(payload);
     } else if (event === "installation_repositories") {
-      void handleInstallationRepositoriesEvent(payload);
+      task = handleInstallationRepositoriesEvent(payload);
+    } else if (event === "push") {
+      task = handleGitHubAppPushEvent(payload);
     }
+    void task?.catch((error) => {
+      console.warn(`[github-app] ${event ?? "unknown"} webhook processing failed`, error);
+    });
   })
 );

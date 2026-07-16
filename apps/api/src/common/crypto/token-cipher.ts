@@ -9,7 +9,7 @@ const IV_LENGTH = 12; // 96-bit nonce, recommended for GCM
 const key = Buffer.from(env.GIT_TOKEN_ENCRYPTION_KEY, "base64");
 
 /**
- * Encrypts a secret (e.g. a Git PAT) with AES-256-GCM. The returned string
+ * Encrypts a server-side integration secret with AES-256-GCM. The returned string
  * packs the IV, auth tag, and ciphertext as base64 segments joined by ":".
  * This is the only representation that should ever be persisted.
  */

@@ -278,47 +278,6 @@ export async function removeProjectMember(projectId: string, userId: string) {
   return response.data;
 }
 
-/* ------------------------------------------------------------------ */
-/* Git credentials                                                    */
-/* ------------------------------------------------------------------ */
-
-export type CredentialStatus = "CONNECTED" | "INVALID" | "DISCONNECTED";
-
-export type GitCredential = {
-  id: string;
-  provider: "GITHUB";
-  status: CredentialStatus;
-  tokenLast4: string | null;
-  accountLogin: string | null;
-  scopes: string[];
-  /** Which repo affiliations "Sync from GitHub" lists (owner/collaborator/organization_member). */
-  repoAffiliations: string[];
-  lastValidatedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export async function listCredentials(organizationId: string) {
-  const response = await api.get<{ credentials: GitCredential[] }>(
-    "/api/git-credentials",
-    { params: { organizationId } }
-  );
-
-  return response.data.credentials;
-}
-
-export async function connectCredential(input: {
-  organizationId: string;
-  token: string;
-}) {
-  const response = await api.post<{ credential: GitCredential }>(
-    "/api/git-credentials",
-    input
-  );
-
-  return response.data.credential;
-}
-
 /** A GitHub account resolved from a handle, for previewing before mapping. */
 export type GitUserProfile = {
   login: string;
@@ -331,51 +290,14 @@ export type GitUserProfile = {
   type: string;
 };
 
-/** Resolves a GitHub username via the org credential; null if it doesn't exist. */
+/** Resolves a GitHub username via the organization's App installation. */
 export async function resolveGitUser(organizationId: string, username: string) {
   const response = await api.get<{ user: GitUserProfile | null }>(
-    "/api/git-credentials/resolve-user",
+    "/api/github-app/resolve-user",
     { params: { organizationId, username } }
   );
 
   return response.data.user;
-}
-
-export async function validateCredential(credentialId: string) {
-  const response = await api.post<{ credential: GitCredential }>(
-    `/api/git-credentials/${credentialId}/validate`
-  );
-
-  return response.data.credential;
-}
-
-export async function reconnectCredential(credentialId: string, token: string) {
-  const response = await api.patch<{ credential: GitCredential }>(
-    `/api/git-credentials/${credentialId}/reconnect`,
-    { token }
-  );
-
-  return response.data.credential;
-}
-
-export async function updateCredentialRepoAccess(
-  credentialId: string,
-  repoAffiliations: string[]
-) {
-  const response = await api.patch<{ credential: GitCredential }>(
-    `/api/git-credentials/${credentialId}/repo-access`,
-    { repoAffiliations }
-  );
-
-  return response.data.credential;
-}
-
-export async function deleteCredential(credentialId: string) {
-  const response = await api.delete<{ id: string }>(
-    `/api/git-credentials/${credentialId}`
-  );
-
-  return response.data;
 }
 
 /* -------------------------- GitHub App connection -------------------------- */
@@ -541,9 +463,6 @@ export type RepositoryInput = {
   defaultBranch: string | null;
 };
 
-/** A repository available on the provider, with tracking status. */
-export type AvailableRepository = RepositoryInput & { tracked: boolean };
-
 /** A repository persisted (tracked) for the organization. */
 export type TrackedRepository = RepositoryInput & {
   id: string;
@@ -555,27 +474,11 @@ export type TrackedRepository = RepositoryInput & {
   codeQualityScan: { provisioned: boolean; provisionedAt: string | null };
   commitCount: number;
   lastSyncedAt: string | null;
-  /** Live sync (GitHub webhook) state. null status = off. */
+  /** GitHub App push-delivery state. */
   liveSync: { status: "ACTIVE" | "ERROR" | null; lastWebhookAt: string | null };
   createdAt: string;
   updatedAt: string;
 };
-
-export async function enableLiveSync(repositoryId: string) {
-  const response = await api.post<{ repository: TrackedRepository }>(
-    `/api/repositories/${repositoryId}/live-sync`
-  );
-
-  return response.data.repository;
-}
-
-export async function disableLiveSync(repositoryId: string) {
-  const response = await api.delete<{ repository: TrackedRepository }>(
-    `/api/repositories/${repositoryId}/live-sync`
-  );
-
-  return response.data.repository;
-}
 
 export type CollectActivityResult = {
   range: { since: string; until: string };
@@ -663,27 +566,6 @@ export async function listRepositories(organizationId: string) {
   return response.data.repositories;
 }
 
-export async function syncRepositories(organizationId: string) {
-  const response = await api.post<{ repositories: AvailableRepository[] }>(
-    "/api/repositories/sync",
-    { organizationId }
-  );
-
-  return response.data.repositories;
-}
-
-export async function selectRepositories(
-  organizationId: string,
-  repositories: RepositoryInput[]
-) {
-  const response = await api.post<{ repositories: TrackedRepository[] }>(
-    "/api/repositories/select",
-    { organizationId, repositories }
-  );
-
-  return response.data.repositories;
-}
-
 export async function assignRepositoryProject(
   repositoryId: string,
   projectId: string | null
@@ -714,14 +596,6 @@ export async function resyncRepository(repositoryId: string) {
   );
 
   return response.data.repository;
-}
-
-export async function untrackRepository(repositoryId: string) {
-  const response = await api.delete<{ id: string }>(
-    `/api/repositories/${repositoryId}`
-  );
-
-  return response.data;
 }
 
 /* ------------------------------------------------------------------ */

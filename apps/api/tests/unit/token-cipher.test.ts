@@ -29,7 +29,7 @@ describe("token-cipher", () => {
   });
 
   it("documents the empty-plaintext edge: empty ciphertext base64 trips the guard", () => {
-    // Not a real case (a PAT/bot token is never empty); pinning current behavior.
+    // Integration tokens are never empty; pin the helper's current behavior.
     expect(() => decryptToken(encryptToken(""))).toThrow(/Malformed/);
   });
 

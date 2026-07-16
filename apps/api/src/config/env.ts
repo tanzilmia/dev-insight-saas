@@ -16,9 +16,6 @@ const envSchema = z.object({
     ),
   // Overridable so tests can point the GitHub provider at a mock server.
   GITHUB_API_BASE_URL: z.string().url().default("https://api.github.com"),
-  // Externally reachable base URL of THIS API — where GitHub delivers webhooks.
-  // Optional: live sync stays unavailable (with a UI hint) until it is set.
-  PUBLIC_API_URL: z.string().url().optional(),
   // LLM (OpenAI-compatible). Key is optional — reports fall back to a template
   // when it is absent. Base URL is overridable so tests can use a mock server.
   OPENAI_API_KEY: z.string().optional(),

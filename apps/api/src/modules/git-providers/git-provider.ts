@@ -13,12 +13,6 @@ export class GitRateLimitError extends AppError {
   }
 }
 
-export type CredentialValidationResult = {
-  valid: boolean;
-  accountLogin?: string;
-  scopes?: string[];
-};
-
 /** Normalized repository as returned by any provider. */
 export type GitRepository = {
   externalId: string;
@@ -114,18 +108,6 @@ export type ListPullRequestsOptions = {
 };
 
 /**
- * Which relationships between the token's account and a repository make it
- * appear in listRepositories. Mirrors GitHub's `affiliation` values.
- */
-export const REPO_AFFILIATIONS = ["owner", "collaborator", "organization_member"] as const;
-export type RepoAffiliation = (typeof REPO_AFFILIATIONS)[number];
-
-export type ListRepositoriesOptions = {
-  /** Defaults to all affiliations when omitted. */
-  affiliations?: RepoAffiliation[];
-};
-
-/**
  * Common abstraction over Git hosting providers. GitHub is the only
  * implementation for the MVP; GitLab/Bitbucket can be added behind the same
  * interface without touching callers. Later phases will extend this with
@@ -138,10 +120,10 @@ export interface GitProvider {
    * hits this ceiling, so no commits are silently dropped.
    */
   readonly maxCommitsPerList?: number;
-  validateCredential(token: string): Promise<CredentialValidationResult>;
   /** Resolves a single account by login/handle. Returns null if it doesn't exist. */
   getUser(token: string, username: string): Promise<GitUser | null>;
-  listRepositories(token: string, options?: ListRepositoriesOptions): Promise<GitRepository[]>;
+  /** Repositories selected for the GitHub App installation token. */
+  listRepositories(token: string): Promise<GitRepository[]>;
   listContributors(token: string, owner: string, repo: string): Promise<GitContributor[]>;
   /**
    * Repository collaborators (people granted access), regardless of whether
@@ -164,20 +146,6 @@ export interface GitProvider {
     repo: string,
     sha: string
   ): Promise<GitCommitDetail>;
-  /**
-   * Registers a push webhook on the repository (live sync). The secret signs
-   * deliveries (HMAC). Throws WEBHOOK_PERMISSION_DENIED when the token lacks
-   * hook permission.
-   */
-  createWebhook(
-    token: string,
-    owner: string,
-    repo: string,
-    url: string,
-    secret: string
-  ): Promise<{ externalId: string }>;
-  /** Removes a previously registered webhook. Tolerates already-deleted hooks. */
-  deleteWebhook(token: string, owner: string, repo: string, externalId: string): Promise<void>;
   /** Pull requests (all states), newest first, for collaboration metrics. */
   listPullRequests(
     token: string,

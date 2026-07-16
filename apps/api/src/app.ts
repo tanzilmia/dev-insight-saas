@@ -12,7 +12,6 @@ import { channelsRouter } from "./modules/channels/channels.controller.js";
 import { ciRouter } from "./modules/ci/ci.controller.js";
 import { codeQualityRouter } from "./modules/code-quality/code-quality.controller.js";
 import { contributorsRouter } from "./modules/contributors/contributors.controller.js";
-import { credentialsRouter } from "./modules/credentials/credentials.controller.js";
 import { employeesRouter } from "./modules/employees/employees.controller.js";
 import { githubAppRouter } from "./modules/github-app/github-app.controller.js";
 import { githubAppWebhookRouter } from "./modules/github-app/github-app.webhook.controller.js";
@@ -26,7 +25,6 @@ import { publicReportsRouter } from "./modules/reports/reports.public.controller
 import { repositoriesRouter } from "./modules/repositories/repositories.controller.js";
 import { schedulesRouter } from "./modules/schedules/schedules.controller.js";
 import { statisticsRouter } from "./modules/statistics/statistics.controller.js";
-import { webhooksRouter } from "./modules/webhooks/webhooks.controller.js";
 
 export function createApp() {
   const app = express();
@@ -35,7 +33,6 @@ export function createApp() {
   app.use(cors());
   // Webhook deliveries need the RAW body for HMAC verification, so these routers
   // (with their own raw parsers) mount before the global JSON parser.
-  app.use("/api/webhooks", webhooksRouter);
   app.use("/api/webhooks/github-app", githubAppWebhookRouter);
   app.use(express.json());
   app.use(pinoHttp(HTTP_LOGGER_OPTIONS));
@@ -51,7 +48,6 @@ export function createApp() {
   app.use("/api/organizations", organizationsRouter);
   app.use("/api/projects", projectsRouter);
   app.use("/api/employees", employeesRouter);
-  app.use("/api/git-credentials", credentialsRouter);
   app.use("/api/github-app", githubAppRouter);
   app.use("/api/ci", ciRouter);
   app.use("/api/repositories", repositoriesRouter);

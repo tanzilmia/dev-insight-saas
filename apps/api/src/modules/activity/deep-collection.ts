@@ -9,6 +9,7 @@ import {
 } from "../../common/access/organization-access.js";
 import { GitRateLimitError } from "../git-providers/git-provider.js";
 import { hasGitAccess, resolveRepositoryToken } from "../github-app/repository-token.js";
+import { discoverContributorsForRepository } from "../contributors/contributors.service.js";
 import type { Interval } from "./coverage.js";
 import { getMissingRanges, ingestBranchRange, syncBranches } from "./activity.service.js";
 
@@ -21,8 +22,7 @@ const JOB_LIST_SCAN = 200;
 
 /** Errors that retrying cannot fix — the job fails immediately with a clear message. */
 const PERMANENT_ERROR_CODES = new Set([
-  "INVALID_CREDENTIAL",
-  "NO_CREDENTIAL",
+  "GITHUB_APP_ACCESS_REQUIRED",
   "REPO_NOT_ON_PROVIDER",
   "PROVIDER_UNSUPPORTED"
 ]);
@@ -98,8 +98,8 @@ export async function startDeepCollection(
   if (!hasGitAccess(repository)) {
     throw new AppError(
       400,
-      "This repository has no GitHub access. Connect the GitHub App or a credential.",
-      "NO_CREDENTIAL"
+      "This repository is not accessible through the connected GitHub App.",
+      "GITHUB_APP_ACCESS_REQUIRED"
     );
   }
 
@@ -151,6 +151,60 @@ export async function startDeepCollection(
   });
 
   return serializeCollectionJob(job);
+}
+
+/**
+ * Ensures one system-owned 90-day onboarding job for an App repository. The
+ * nullable requestedById distinguishes this from user-triggered Deep Collect.
+ * It is safe to call after every App sync and push delivery.
+ */
+export async function ensureInitialAppBackfill(repositoryId: string): Promise<boolean> {
+  const repository = await loadRepository(repositoryId);
+  if (!hasGitAccess(repository)) {
+    return false;
+  }
+
+  const existingSystemJob = await prisma.collectionJob.findFirst({
+    where: { repositoryId, requestedById: null },
+    select: { id: true }
+  });
+  if (existingSystemJob) return false;
+
+  const active = await prisma.collectionJob.findFirst({
+    where: { repositoryId, status: { in: ["QUEUED", "RUNNING"] } },
+    select: { id: true }
+  });
+  if (active) return false;
+
+  const now = new Date();
+  try {
+    const job = await prisma.collectionJob.create({
+      data: {
+        organizationId: repository.organizationId,
+        repositoryId,
+        requestedById: null,
+        rangeStart: new Date(now.getTime() - 90 * DAY_MS),
+        rangeEnd: now,
+        verify: true,
+        currentPhase: "queued"
+      }
+    });
+    await prisma.auditLog.create({
+      data: {
+        organizationId: repository.organizationId,
+        action: "activity.initial_backfill.queued",
+        entityType: "CollectionJob",
+        entityId: job.id,
+        metadataJson: { repositoryId, lookbackDays: 90, verify: true }
+      }
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -362,6 +416,11 @@ export async function runCollectionJob(jobId: string): Promise<void> {
       }
       branchesDone += 1;
       await setJob(jobId, { branchesDone, heartbeatAt: new Date() });
+    }
+
+    if (job.requestedById === null) {
+      await setJob(jobId, { currentPhase: "discovering-contributors", heartbeatAt: new Date() });
+      await discoverContributorsForRepository(repository, null);
     }
 
     await finalizeJob(jobId, "COMPLETED");

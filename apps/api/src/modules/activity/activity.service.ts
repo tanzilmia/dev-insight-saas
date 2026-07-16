@@ -536,8 +536,8 @@ async function resolveScopeRepositories(scope: CollectScope): Promise<Repository
  * Smart-engine entry point (Phase C): before a report is built, make sure the
  * [from, until] window is in the DB for every repository the report touches.
  * For each repo it consults the coverage ledger and fetches ONLY the missing
- * sub-ranges from Git (using the org's stored credential — never a personal
- * PAT). Resilient: a repo that has no credential or errors is skipped with a
+ * sub-ranges from Git using a short-lived GitHub App installation token.
+ * Resilient: a repo that has no active App grant or errors is skipped with a
  * warning so the report is still produced from whatever is already stored.
  */
 export async function ensureActivityCollected(

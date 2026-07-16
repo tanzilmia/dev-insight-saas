@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Check,
-  DownloadCloud,
   FolderGit2,
   GitPullRequest,
   Globe,
@@ -12,17 +10,14 @@ import {
   History,
   Loader2,
   Lock,
-  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
-  Trash2,
   X,
   Zap
 } from "lucide-react";
 
 import {
-  type AvailableRepository,
   type CollectionJob,
   type Project,
   type SonarProjectSummary,
@@ -32,8 +27,6 @@ import {
   collectActivity,
   collectPullRequests,
   deprovisionRepositoryCodeQuality,
-  disableLiveSync,
-  enableLiveSync,
   getApiErrorMessage,
   listCollectionJobs,
   listProjects,
@@ -41,11 +34,8 @@ import {
   listSonarProjects,
   provisionRepositoryCodeQuality,
   resyncRepository,
-  selectRepositories,
   setRepositorySonarProjectKey,
-  startDeepCollection,
-  syncRepositories,
-  untrackRepository
+  startDeepCollection
 } from "@/lib/api";
 import { canManage, useSession } from "@/lib/use-session";
 import {
@@ -139,12 +129,6 @@ export function RepositoriesManager() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [available, setAvailable] = useState<AvailableRepository[] | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [saving, setSaving] = useState(false);
-
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
   const [rowNotice, setRowNotice] = useState<{
@@ -152,7 +136,6 @@ export function RepositoriesManager() {
     tone: "success" | "warning";
   } | null>(null);
 
-  const [availableQuery, setAvailableQuery] = useState("");
   const [trackedQuery, setTrackedQuery] = useState("");
 
   // Deep-history collection jobs, keyed by repository id (latest per repo).
@@ -254,22 +237,6 @@ export function RepositoriesManager() {
     }
   }, [jobs, refresh]);
 
-  const untrackedAvailable = useMemo(
-    () => available?.filter((repo) => !repo.tracked) ?? [],
-    [available]
-  );
-
-  const filteredAvailable = useMemo(() => {
-    if (!available) {
-      return [];
-    }
-    const query = availableQuery.trim().toLowerCase();
-    if (!query) {
-      return available;
-    }
-    return available.filter((repo) => repo.fullName.toLowerCase().includes(query));
-  }, [available, availableQuery]);
-
   const filteredTracked = useMemo(() => {
     const query = trackedQuery.trim().toLowerCase();
     if (!query) {
@@ -277,68 +244,6 @@ export function RepositoriesManager() {
     }
     return tracked.filter((repo) => repo.fullName.toLowerCase().includes(query));
   }, [tracked, trackedQuery]);
-
-  async function handleSync() {
-    if (!organizationId) {
-      return;
-    }
-
-    setSyncing(true);
-    setSyncError(null);
-    setSelectedIds(new Set());
-
-    try {
-      setAvailable(await syncRepositories(organizationId));
-    } catch (error) {
-      setSyncError(getApiErrorMessage(error));
-      setAvailable(null);
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  function toggleSelect(externalId: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(externalId)) {
-        next.delete(externalId);
-      } else {
-        next.add(externalId);
-      }
-      return next;
-    });
-  }
-
-  async function handleAddSelected() {
-    if (!organizationId || !available || selectedIds.size === 0) {
-      return;
-    }
-
-    setSaving(true);
-    setSyncError(null);
-
-    try {
-      const payload = available
-        .filter((repo) => selectedIds.has(repo.externalId))
-        .map((repo) => ({
-          externalId: repo.externalId,
-          owner: repo.owner,
-          name: repo.name,
-          fullName: repo.fullName,
-          remoteUrl: repo.remoteUrl,
-          isPrivate: repo.isPrivate,
-          defaultBranch: repo.defaultBranch
-        }));
-      await selectRepositories(organizationId, payload);
-      setAvailable(null);
-      setSelectedIds(new Set());
-      await refresh();
-    } catch (error) {
-      setSyncError(getApiErrorMessage(error));
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleAssignProject(repo: TrackedRepository, projectId: string) {
     setBusyId(repo.id);
@@ -464,27 +369,6 @@ export function RepositoriesManager() {
     });
   }
 
-  async function handleUntrack(repo: TrackedRepository) {
-    if (
-      !window.confirm(
-        `Untrack ${repo.fullName}? It will stop syncing and won't appear in new reports.`
-      )
-    ) {
-      return;
-    }
-    setBusyId(repo.id);
-    setRowError(null);
-
-    try {
-      await untrackRepository(repo.id);
-      await refresh();
-    } catch (error) {
-      setRowError(getApiErrorMessage(error));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   async function handleCollect(repo: TrackedRepository) {
     setBusyId(repo.id);
     setRowError(null);
@@ -522,30 +406,6 @@ export function RepositoriesManager() {
         tone: "success",
         text: `Collected ${result.prCount} pull request(s) and ${result.reviewCount} review(s) from ${repo.fullName}.`
       });
-    } catch (error) {
-      setRowError(getApiErrorMessage(error));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function handleLiveSyncToggle(repo: TrackedRepository) {
-    setBusyId(repo.id);
-    setRowError(null);
-    setRowNotice(null);
-
-    try {
-      if (repo.liveSync.status) {
-        await disableLiveSync(repo.id);
-        setRowNotice({ tone: "success", text: `Live sync turned off for ${repo.fullName}.` });
-      } else {
-        await enableLiveSync(repo.id);
-        setRowNotice({
-          tone: "success",
-          text: `Live sync is on — new pushes to ${repo.fullName} will appear automatically.`
-        });
-      }
-      await refresh();
     } catch (error) {
       setRowError(getApiErrorMessage(error));
     } finally {
@@ -597,8 +457,6 @@ export function RepositoriesManager() {
     return null;
   }
 
-  const needsCredential = syncError?.toLowerCase().includes("connect a github");
-
   return (
     <DashboardChrome email={session.user.email} onLogout={logout}>
       <div className="grid gap-6">
@@ -612,8 +470,8 @@ export function RepositoriesManager() {
               Tracked repositories
             </h1>
             <p className="mt-1.5 max-w-xl text-sm leading-6 text-(--muted)">
-              Sync repositories from GitHub and choose which ones DevInsight should track
-              for reports.
+              Repositories selected for your GitHub App are tracked automatically.
+              Signed push events keep commit activity current.
             </p>
           </div>
           {manageable ? (
@@ -629,133 +487,9 @@ export function RepositoriesManager() {
                   Auto-map Sonar
                 </button>
               ) : null}
-              <button
-                type="button"
-                onClick={handleSync}
-                disabled={syncing}
-                className="btn-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold"
-              >
-                {syncing ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <DownloadCloud size={16} />
-                )}
-                {syncing ? "Syncing..." : "Sync from GitHub"}
-              </button>
             </div>
           ) : null}
         </section>
-
-        {syncError ? (
-          <div className="glass rounded-[1.5rem] p-5 text-sm font-bold text-red-600 dark:text-red-400">
-            {syncError}
-            {needsCredential ? (
-              <>
-                {" "}
-                <Link href="/dashboard/git" className="underline">
-                  Connect GitHub →
-                </Link>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-
-        {available ? (
-          <section className="glass animate-rise rounded-[2rem] p-6 md:p-7">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-black text-(--text)">
-                Available on GitHub ({available.length})
-              </h2>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAvailable(null);
-                    setSelectedIds(new Set());
-                  }}
-                  className="glass glass-hover rounded-full px-4 py-2 text-sm font-bold text-(--text)"
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddSelected}
-                  disabled={saving || selectedIds.size === 0}
-                  className="btn-gradient inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-black"
-                >
-                  {saving ? (
-                    <Loader2 size={15} className="animate-spin" />
-                  ) : (
-                    <Plus size={15} />
-                  )}
-                  Add {selectedIds.size || ""} selected
-                </button>
-              </div>
-            </div>
-
-            <div className="field mb-4 flex items-center gap-2 rounded-2xl px-3.5 py-2.5">
-              <Search size={15} className="shrink-0 text-(--muted)" />
-              <input
-                value={availableQuery}
-                onChange={(event) => setAvailableQuery(event.target.value)}
-                placeholder="Search repositories…"
-                className="w-full bg-transparent text-sm font-medium text-(--text) outline-none placeholder:font-normal"
-              />
-            </div>
-
-            {untrackedAvailable.length === 0 ? (
-              <p className="glass-soft rounded-2xl px-4 py-4 text-center text-sm font-bold text-(--muted)">
-                All available repositories are already tracked.
-              </p>
-            ) : filteredAvailable.length === 0 ? (
-              <p className="glass-soft rounded-2xl px-4 py-4 text-center text-sm font-bold text-(--muted)">
-                No repositories match “{availableQuery}”.
-              </p>
-            ) : (
-              <ul className="grid max-h-96 gap-2 overflow-y-auto pr-1">
-                {filteredAvailable.map((repo) => {
-                  const checked = selectedIds.has(repo.externalId);
-                  return (
-                    <li key={repo.externalId}>
-                      <button
-                        type="button"
-                        disabled={repo.tracked}
-                        onClick={() => toggleSelect(repo.externalId)}
-                        className={`glass-soft flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left ${
-                          repo.tracked ? "opacity-60" : "glass-hover"
-                        } ${checked ? "ring-2 ring-(--accent-2)" : ""}`}
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-black text-(--text)">
-                            {repo.fullName}
-                          </span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          <PrivacyBadge isPrivate={repo.isPrivate} />
-                          {repo.tracked ? (
-                            <span className="text-xs font-black text-(--muted)">
-                              Tracked
-                            </span>
-                          ) : (
-                            <span
-                              className={`grid h-5 w-5 place-items-center rounded-md border ${
-                                checked
-                                  ? "btn-gradient border-transparent"
-                                  : "border-(--field-border)"
-                              }`}
-                            >
-                              {checked ? <Check size={13} /> : null}
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-        ) : null}
 
         <section className="animate-rise [animation-delay:60ms]">
           {rowError ? (
@@ -786,7 +520,7 @@ export function RepositoriesManager() {
           ) : tracked.length === 0 ? (
             <div className="glass rounded-[1.75rem] p-8 text-center text-sm font-bold text-(--muted)">
               No repositories tracked yet.
-              {manageable ? " Use “Sync from GitHub” to add some." : ""}
+              {manageable ? " Select repositories in the GitHub App settings, then run App Sync." : ""}
             </div>
           ) : (
             <>
@@ -1072,30 +806,6 @@ export function RepositoriesManager() {
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => handleLiveSyncToggle(repo)}
-                                        disabled={busy}
-                                        aria-label={
-                                          repo.liveSync.status
-                                            ? "Turn live sync off"
-                                            : "Turn live sync on"
-                                        }
-                                        title={
-                                          repo.liveSync.status
-                                            ? "Live sync is on — pushes land automatically. Click to turn off."
-                                            : "Turn on live sync: DevInsight registers a GitHub webhook so new pushes appear automatically."
-                                        }
-                                        className={`grid h-8 w-8 place-items-center rounded-md border border-(--border) transition hover:bg-(--surface) ${
-                                          repo.liveSync.status === "ACTIVE"
-                                            ? "text-emerald-600 dark:text-emerald-400"
-                                            : repo.liveSync.status === "ERROR"
-                                              ? "text-red-600 dark:text-red-400"
-                                              : "text-(--muted)"
-                                        }`}
-                                      >
-                                        <Zap size={14} />
-                                      </button>
-                                      <button
-                                        type="button"
                                         onClick={() => handleResync(repo)}
                                         disabled={busy}
                                         aria-label="Resync"
@@ -1106,15 +816,6 @@ export function RepositoriesManager() {
                                         ) : (
                                           <RefreshCw size={14} />
                                         )}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleUntrack(repo)}
-                                        disabled={busy}
-                                        aria-label="Untrack"
-                                        className="grid h-8 w-8 place-items-center rounded-md text-(--muted) transition hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
-                                      >
-                                        <Trash2 size={14} />
                                       </button>
                                     </div>
                                     {deepFormId === repo.id ? (

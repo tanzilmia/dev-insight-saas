@@ -1,7 +1,7 @@
 # DevInsight — VPS Deployment (Docker)
 
-Production runs the whole app in Docker on a single VPS, behind an **nginx**
-reverse proxy on port **80** (HTTP, IP-only for now). The database stays on
+Production runs the whole app in Docker on a single VPS, behind **nginx** on
+ports **80/443** at `devinside.softathena.com`. The database stays on
 **Neon** (external) — no app Postgres container.
 
 ```
@@ -54,13 +54,13 @@ nano deploy/.env.prod
 Fill in at minimum:
 
 - `DATABASE_URL` — your Neon connection string (keep `?sslmode=require`).
-- `JWT_ACCESS_SECRET` and `GIT_TOKEN_ENCRYPTION_KEY` — **copy the exact values
-  from your current `apps/api/.env`.** They must match, because the Neon data
-  already contains JWTs and Git PATs encrypted with those secrets. A new key
-  makes existing PATs undecryptable.
+- `JWT_ACCESS_SECRET` and `GIT_TOKEN_ENCRYPTION_KEY` — **copy the exact existing
+  production values.** The encryption key still protects Sonar and channel
+  integration secrets.
 - Leave `NEXT_PUBLIC_API_URL=""` (same-origin API calls via nginx).
-- `PUBLIC_API_URL="http://YOUR_VPS_IP"` if you want GitHub live-sync webhooks.
-- LLM / OpenClaw / SonarQube / GitHub App values as needed (all optional).
+- Configure `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY`, and
+  `GITHUB_APP_WEBHOOK_SECRET` for customer repositories and live push ingestion.
+- LLM / OpenClaw / SonarQube values remain optional.
 
 ## 3. Start
 
@@ -73,8 +73,12 @@ npm run prod:core
 ```
 
 The `api` container applies pending Prisma migrations automatically before
-serving. Open **`http://YOUR_VPS_IP`** — the dashboard loads, and API calls go to
-`http://YOUR_VPS_IP/api/...` on the same origin.
+serving. Open **`https://devinside.softathena.com`**; API calls use the same origin.
+
+> The `20260717090000_github_app_only` migration is intentionally destructive:
+> it permanently deletes every repository that lacks a matching active GitHub
+> App access grant, including its repository-scoped history/reports. Take a Neon
+> snapshot first only if you want an operator rollback point.
 
 Useful commands:
 
@@ -131,9 +135,8 @@ docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml \
 
 ## Notes & gotchas
 
-- **Single API instance.** The scheduler and the deep-collection worker run
-  in-process with in-memory claim guards, so **do not scale `api` to >1 replica**
-  (a shared queue would be needed first — see PROJECT_STATE "Phase E").
+- **Single API instance.** The scheduler/deep worker and per-repository push FIFO
+  support one API replica; do not scale `api` above one yet.
 - **Same-origin design.** `NEXT_PUBLIC_API_URL=""` means the web bundle never
   hard-codes the host, so you don't rebuild the web image when the IP changes.
 - **Data safety.** Persistent Docker data (SonarQube) lives in named volumes;
@@ -178,5 +181,4 @@ TLS itself.
 Cloudflare with SSL "Full", keep the container on plain HTTP `:80`, and let
 Cloudflare terminate TLS. Nothing in the stack changes.
 
-No image rebuild is needed for the API URL (it's already same-origin). If you had
-set `PUBLIC_API_URL`, update it to `https://yourdomain.com`.
+No image rebuild is needed for the API URL because it is same-origin.

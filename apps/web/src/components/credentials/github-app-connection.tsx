@@ -23,8 +23,7 @@ import {
 import { canManage, useSession } from "@/lib/use-session";
 
 /**
- * GitHub App connection card (the token-free path). Rendered on the Git settings
- * page above the PAT card. Managers connect by installing the DevInside App on
+ * GitHub App connection card. Managers connect by installing the DevInside App on
  * their GitHub account/org; DevInside then syncs the approved repositories. No
  * secret ever reaches this component — only account/status metadata.
  */
@@ -93,7 +92,7 @@ export function GitHubAppConnection() {
     }
     if (
       !window.confirm(
-        `Disconnect @${installation.accountLogin}? DevInside stops syncing its repositories (collected history is kept). To fully revoke access, also uninstall the app from your GitHub settings.`
+        `Disconnect @${installation.accountLogin}? Its repositories and all collected DevInside history will be deleted. To fully revoke GitHub access, also uninstall the app in GitHub settings.`
       )
     ) {
       return;

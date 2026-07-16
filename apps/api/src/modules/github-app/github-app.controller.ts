@@ -7,11 +7,13 @@ import {
   getInstallUrl,
   getStatus,
   linkInstallation,
+  resolveGitHubUser,
   syncInstallation
 } from "./github-app.service.js";
 import {
   linkInstallationSchema,
   organizationQuerySchema,
+  resolveGitHubUserQuerySchema,
   syncInstallationSchema
 } from "./github-app.schemas.js";
 
@@ -42,6 +44,15 @@ githubAppRouter.get(
   asyncHandler(async (req, res) => {
     const { organizationId } = organizationQuerySchema.parse(req.query);
     res.json(await getInstallUrl(req.authUser!.id, organizationId));
+  })
+);
+
+githubAppRouter.get(
+  "/resolve-user",
+  asyncHandler(async (req, res) => {
+    const { organizationId, username } = resolveGitHubUserQuerySchema.parse(req.query);
+    const user = await resolveGitHubUser(req.authUser!.id, organizationId, username);
+    res.status(200).json({ user });
   })
 );
 

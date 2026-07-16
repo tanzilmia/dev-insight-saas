@@ -1,7 +1,7 @@
 # GitHub App-Only Live Commit Sync and PAT Removal Design
 
 **Date:** 2026-07-17  
-**Status:** Approved for implementation planning  
+**Status:** Implemented and verified
 **Scope:** GitHub integration, repository onboarding, commit ingestion, initial history collection, PAT removal, destructive data migration, and related web/API cleanup
 
 ## 1. Context

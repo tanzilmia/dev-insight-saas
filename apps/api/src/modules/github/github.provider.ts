@@ -1,8 +1,7 @@
 import { AppError } from "../../common/errors/app-error.js";
 import { env } from "../../config/env.js";
-import { GitRateLimitError, REPO_AFFILIATIONS } from "../git-providers/git-provider.js";
+import { GitRateLimitError } from "../git-providers/git-provider.js";
 import type {
-  CredentialValidationResult,
   GitBranch,
   GitCommit,
   GitCommitDetail,
@@ -13,8 +12,7 @@ import type {
   GitRepository,
   GitUser,
   ListCommitsOptions,
-  ListPullRequestsOptions,
-  ListRepositoriesOptions
+  ListPullRequestsOptions
 } from "../git-providers/git-provider.js";
 
 const PER_PAGE = 100;
@@ -100,8 +98,8 @@ export class GitHubProvider implements GitProvider {
 
     // Primary limit: 403/429 + x-ratelimit-remaining: 0. Secondary limit:
     // 403/429 + retry-after. Must be detected here, before the per-method
-    // 403 → INVALID_CREDENTIAL branches, so a rate-limited call is never
-    // misread as a bad token. A genuine auth 403 has remaining > 0.
+    // 403 auth branches, so a rate-limited call is never misread as a revoked
+    // App installation. A genuine auth 403 has remaining > 0.
     if (
       (response.status === 403 || response.status === 429) &&
       (response.headers.get("x-ratelimit-remaining") === "0" ||
@@ -125,33 +123,6 @@ export class GitHubProvider implements GitProvider {
     return null;
   }
 
-  async validateCredential(token: string): Promise<CredentialValidationResult> {
-    const response = await this.request("/user", token);
-
-    // A bad or expired token is an expected outcome, not a server error.
-    if (response.status === 401 || response.status === 403) {
-      return { valid: false };
-    }
-
-    if (!response.ok) {
-      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
-    }
-
-    const scopesHeader = response.headers.get("x-oauth-scopes");
-    const data = (await response.json()) as { login?: string };
-
-    return {
-      valid: true,
-      accountLogin: data.login,
-      scopes: scopesHeader
-        ? scopesHeader
-            .split(",")
-            .map((scope) => scope.trim())
-            .filter(Boolean)
-        : []
-    };
-  }
-
   async getUser(token: string, username: string): Promise<GitUser | null> {
     const response = await this.request(`/users/${encodeURIComponent(username)}`, token);
 
@@ -163,8 +134,8 @@ export class GitHubProvider implements GitProvider {
     if (response.status === 401 || response.status === 403) {
       throw new AppError(
         400,
-        "GitHub rejected the stored token. Reconnect the credential.",
-        "INVALID_CREDENTIAL"
+        "GitHub rejected the App installation token. Reconnect the GitHub App.",
+        "GITHUB_APP_ACCESS_REQUIRED"
       );
     }
 
@@ -195,29 +166,20 @@ export class GitHubProvider implements GitProvider {
     };
   }
 
-  async listRepositories(
-    token: string,
-    options: ListRepositoriesOptions = {}
-  ): Promise<GitRepository[]> {
+  async listRepositories(token: string): Promise<GitRepository[]> {
     const repositories: GitRepository[] = [];
-    // The credential's repo-access setting decides which affiliations are
-    // listed; omitted → all (GitHub's own default for /user/repos).
-    const affiliation = (options.affiliations?.length
-      ? options.affiliations
-      : REPO_AFFILIATIONS
-    ).join(",");
 
     for (let page = 1; page <= MAX_PAGES; page += 1) {
       const response = await this.request(
-        `/user/repos?per_page=${PER_PAGE}&page=${page}&sort=full_name&affiliation=${affiliation}`,
+        `/installation/repositories?per_page=${PER_PAGE}&page=${page}`,
         token
       );
 
       if (response.status === 401 || response.status === 403) {
         throw new AppError(
           400,
-          "GitHub rejected the stored token. Reconnect the credential.",
-          "INVALID_CREDENTIAL"
+          "GitHub rejected the App installation token. Reconnect the GitHub App.",
+          "GITHUB_APP_ACCESS_REQUIRED"
         );
       }
 
@@ -225,7 +187,8 @@ export class GitHubProvider implements GitProvider {
         throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
       }
 
-      const page_items = (await response.json()) as GitHubRepo[];
+      const data = (await response.json()) as { repositories?: GitHubRepo[] };
+      const page_items = data.repositories ?? [];
 
       for (const repo of page_items) {
         repositories.push({
@@ -274,8 +237,8 @@ export class GitHubProvider implements GitProvider {
       if (response.status === 401 || response.status === 403) {
         throw new AppError(
           400,
-          "GitHub rejected the stored token. Reconnect the credential.",
-          "INVALID_CREDENTIAL"
+          "GitHub rejected the App installation token. Reconnect the GitHub App.",
+          "GITHUB_APP_ACCESS_REQUIRED"
         );
       }
 
@@ -333,8 +296,8 @@ export class GitHubProvider implements GitProvider {
       if (response.status === 401) {
         throw new AppError(
           400,
-          "GitHub rejected the stored token. Reconnect the credential.",
-          "INVALID_CREDENTIAL"
+          "GitHub rejected the App installation token. Reconnect the GitHub App.",
+          "GITHUB_APP_ACCESS_REQUIRED"
         );
       }
 
@@ -389,8 +352,8 @@ export class GitHubProvider implements GitProvider {
       if (response.status === 401 || response.status === 403) {
         throw new AppError(
           400,
-          "GitHub rejected the stored token. Reconnect the credential.",
-          "INVALID_CREDENTIAL"
+          "GitHub rejected the App installation token. Reconnect the GitHub App.",
+          "GITHUB_APP_ACCESS_REQUIRED"
         );
       }
 
@@ -453,8 +416,8 @@ export class GitHubProvider implements GitProvider {
       if (response.status === 401 || response.status === 403) {
         throw new AppError(
           400,
-          "GitHub rejected the stored token. Reconnect the credential.",
-          "INVALID_CREDENTIAL"
+          "GitHub rejected the App installation token. Reconnect the GitHub App.",
+          "GITHUB_APP_ACCESS_REQUIRED"
         );
       }
 
@@ -522,58 +485,6 @@ export class GitHubProvider implements GitProvider {
     };
   }
 
-  async createWebhook(
-    token: string,
-    owner: string,
-    repo: string,
-    url: string,
-    secret: string
-  ): Promise<{ externalId: string }> {
-    const response = await this.request(`/repos/${owner}/${repo}/hooks`, token, {
-      method: "POST",
-      body: {
-        config: { url, content_type: "json", secret },
-        events: ["push"],
-        active: true
-      }
-    });
-
-    // A token without hook permission gets 404 (repo hooks hidden) or 403.
-    if (response.status === 403 || response.status === 404) {
-      throw new AppError(
-        400,
-        "GitHub refused to create the webhook — the stored token needs webhook permission (classic PAT: admin:repo_hook; fine-grained: Webhooks read & write).",
-        "WEBHOOK_PERMISSION_DENIED"
-      );
-    }
-
-    if (!response.ok) {
-      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
-    }
-
-    const hook = (await response.json()) as { id: number };
-    return { externalId: String(hook.id) };
-  }
-
-  async deleteWebhook(
-    token: string,
-    owner: string,
-    repo: string,
-    externalId: string
-  ): Promise<void> {
-    const response = await this.request(
-      `/repos/${owner}/${repo}/hooks/${encodeURIComponent(externalId)}`,
-      token,
-      { method: "DELETE" }
-    );
-
-    // Already gone (or never visible to this token) is fine — the goal is
-    // "no active hook", not strict bookkeeping.
-    if (!response.ok && response.status !== 404 && response.status !== 403) {
-      throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
-    }
-  }
-
   async listPullRequests(
     token: string,
     owner: string,
@@ -590,7 +501,7 @@ export class GitHubProvider implements GitProvider {
       );
 
       if (response.status === 401 || response.status === 403) {
-        throw new AppError(400, "GitHub rejected the stored token. Reconnect the credential.", "INVALID_CREDENTIAL");
+        throw new AppError(400, "GitHub rejected the App installation token. Reconnect the GitHub App.", "GITHUB_APP_ACCESS_REQUIRED");
       }
       if (response.status === 404) {
         throw new AppError(404, "Repository not found on GitHub", "REPO_NOT_ON_PROVIDER");
@@ -636,7 +547,7 @@ export class GitHubProvider implements GitProvider {
       // A missing/inaccessible PR shouldn't fail the whole collection.
       if (response.status === 404) break;
       if (response.status === 401 || response.status === 403) {
-        throw new AppError(400, "GitHub rejected the stored token. Reconnect the credential.", "INVALID_CREDENTIAL");
+        throw new AppError(400, "GitHub rejected the App installation token. Reconnect the GitHub App.", "GITHUB_APP_ACCESS_REQUIRED");
       }
       if (!response.ok) {
         throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");

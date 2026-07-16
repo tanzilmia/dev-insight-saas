@@ -18,7 +18,7 @@ const features = [
   {
     icon: GitBranch,
     title: "Git-first workflow",
-    copy: "Ready for GitHub PAT, repositories, and contributor mapping."
+    copy: "GitHub App repository access, activity collection, and contributor mapping."
   },
   {
     icon: Sparkles,

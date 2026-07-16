@@ -5,14 +5,66 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-16.
+> Last updated: 2026-07-17.
+
+---
+
+## 0. Current production architecture override (2026-07-17)
+
+The GitHub integration is now **GitHub App-only**. This section supersedes older
+chronological notes below that describe the retired customer PAT/repository-picker
+path; those notes remain as implementation history, not current behavior.
+
+- Customer repository access uses short-lived installation tokens from
+  `GitHubAppInstallation` + tenant-scoped `RepositoryAccess`. There is no
+  `GitCredential` model, `/api/git-credentials`, PAT UI, PAT fallback, or
+  per-repository webhook registration.
+- Repositories selected in GitHub are reconciled automatically on App link,
+  App Sync, and installation repository events. GitHub selection is the source
+  of truth; DevInside no longer exposes local select/untrack or live-toggle APIs.
+- Every selected repo gets one persistent, system-owned 90-day `CollectionJob`
+  (`verify=true`), covering all GitHub branches up to the existing 25-branch cap.
+  The worker also refreshes contributor identities/alias mappings before the
+  onboarding job completes.
+- `POST /api/webhooks/github-app` is the only GitHub webhook endpoint. Its raw
+  body is verified with `GITHUB_APP_WEBHOOK_SECRET`; `push` deliveries are
+  tenant-mapped by installation ID + organization + numeric repository ID +
+  `appInstallationId` + active access grant, acknowledged with `202`, then
+  processed through a per-repository FIFO. Exact pushed SHAs/branches/details
+  update Neon, missing contributors are discovered, SHA uniqueness makes
+  redelivery idempotent, and `webhookStatus`/`lastWebhookAt` expose health.
+- GitHub username resolution moved to `GET /api/github-app/resolve-user`.
+- Destructive migration `20260717090000_github_app_only` deletes every repository
+  without a matching same-tenant active App grant and its local repository-scoped
+  data, then drops `GitCredential`, `CredentialStatus`, `Repository.credentialId`,
+  `webhookExternalId`, and `webhookSecret`. `Repository.appInstallationId` is now
+  required with `ON DELETE CASCADE`. Runtime App deselect/disconnect/uninstall
+  applies the same transactional cleanup rules.
+- `PUBLIC_API_URL` was removed. The public App webhook URL is configured once in
+  GitHub as `https://devinside.softathena.com/api/webhooks/github-app`.
+- Production is live at `https://devinside.softathena.com` on the Docker/nginx VPS;
+  Neon remains the application database and SonarQube is served at `/sonarqube`.
+- Rollout operator steps after deploying this commit: enable the GitHub App
+  **Push** event, re-approve any updated App permissions, run App Sync, watch the
+  90-day jobs, and verify one pushed test commit plus a `202` delivery.
+
+Verification added for this change: App-only token/grant resolution, App push
+tenant routing, rapid-push FIFO preservation, initial-backfill fields/idempotency,
+existing HMAC tests, and a disposable PGlite migration test that applies every
+prior migration, seeds App/PAT/orphan data, runs the destructive migration, and
+asserts data/schema cleanup. The standard release gate remains Prisma generate/
+validate, typecheck, lint, full tests, and production builds.
+
+Local release gate result: Prisma generate/validate passed; API/web/shared
+typecheck passed; API/web lint passed; **23 test files / 153 tests passed**; API,
+Next.js, and shared production builds passed.
 
 ---
 
 ## 1. What this product is
 
 **DevInsight AI** — an AI-powered developer-intelligence / team work-report SaaS.
-Managers connect GitHub (via a Personal Access Token), sync repositories, map Git
+Managers connect the DevInside GitHub App, select repositories in GitHub, map Git
 contributors to employees, collect commit activity, and generate **AI-written
 work reports** ("what did this repo / person / team ship this period?") from real
 Git data.
@@ -20,7 +72,7 @@ Git data.
 Core value chain (all of this is **working end-to-end today on real data**):
 
 ```
-GitHub PAT (encrypted) → repo sync → contributor/collaborator mapping →
+GitHub App selection → automatic backfill + signed push sync → contributor mapping →
 commit + file-change collection → OpenClaw orchestration → LLM report (Markdown)
 ```
 
@@ -39,8 +91,8 @@ The `docs/.../DevInsight_AI_Development_Roadmap.md` defines Phases 0–16. Built
 | 0–1 | Monorepo + backend foundation (Express 5, Prisma 7, env, error handling) | ✅ done (pre-existing) |
 | 2 | Auth + Organizations (JWT, register/login, org membership, RBAC roles) | ✅ done (pre-existing) |
 | 3 | Projects + Employees (CRUD, project members, role checks) | ✅ done |
-| 4 | Git credential management (PAT: validate → AES-256-GCM encrypt → store) | ✅ done |
-| 5 | Repository sync (list from GitHub, select/track, assign to project, resync) | ✅ done |
+| 4 | Legacy Git credential management | 🗑️ retired; GitHub App-only |
+| 5 | App repository reconciliation + automatic 90-day/live push sync | ✅ done |
 | 6 | Contributor discovery + mapping (contributors **and** collaborators → employees) | ✅ done |
 | 7 | OpenClaw orchestration (in-repo stand-in) + report tool layer | ✅ done (see §7) |
 | 8 | Git activity collection (commits + changed files, per-commit stats) | ✅ done |
@@ -93,8 +145,8 @@ npx prisma migrate dev --name <change>
 npx prisma generate
 ```
 
-**No test runner is installed yet.** Verification so far is done by driving the
-running API with curl against mock GitHub / mock LLM servers (see §9).
+Vitest is installed for the API. Run `npm test`; repository-wide release checks
+also include typecheck, lint, and production builds.
 
 ---
 

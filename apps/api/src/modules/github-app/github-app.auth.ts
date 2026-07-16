@@ -14,7 +14,7 @@ import type { GitRepository } from "../git-providers/git-provider.js";
  * private key. Tokens are NEVER persisted — the App JWT is signed on demand
  * (≤10 min lifetime) and installation access tokens are minted per use.
  *
- * The App-level endpoints reuse the same GitHub REST host as the PAT provider
+ * The App-level endpoints reuse the same GitHub REST host as the activity provider
  * (env.GITHUB_API_BASE_URL), so tests can point them at a mock server.
  */
 

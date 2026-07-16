@@ -13,6 +13,9 @@ import {
   githubAppClient,
   isGitHubAppConfigured
 } from "./github-app.auth.js";
+import { ensureInitialAppBackfill } from "../activity/deep-collection.js";
+import { reassignOrDeleteRepositoriesInTransaction } from "./repository-lifecycle.service.js";
+import { resolveOrganizationToken } from "./repository-token.js";
 
 /**
  * GitHub App installation lifecycle: link (post-install callback), status, repo
@@ -62,6 +65,17 @@ export async function getStatus(actorId: string, organizationId: string) {
 export async function getInstallUrl(actorId: string, organizationId: string) {
   await requireOrganizationRole(actorId, organizationId, MANAGER_ROLES);
   return { url: getAppInstallUrl(organizationId) };
+}
+
+/** Resolves a GitHub handle with the organization's App installation token. */
+export async function resolveGitHubUser(
+  actorId: string,
+  organizationId: string,
+  username: string
+) {
+  await requireOrganizationRole(actorId, organizationId, MANAGER_ROLES);
+  const { token, provider } = await resolveOrganizationToken(organizationId);
+  return provider.getUser(token, username);
 }
 
 /**
@@ -174,11 +188,9 @@ export async function syncInstallation(
 }
 
 /**
- * Disconnects an installation from DevInside. Deletes the local installation row
- * (cascading the RepositoryAccess grants); Repository rows are KEPT (their
- * appInstallationId is set null via the schema's SetNull) so collected history
- * survives. Does not uninstall the App on GitHub — the customer does that in
- * their GitHub settings (documented in the UI).
+ * Disconnects an installation from DevInside and deletes every repository/data
+ * row that depended on it. It does not uninstall the App on GitHub; the customer
+ * does that separately in their GitHub settings.
  */
 export async function disconnectInstallation(
   actorId: string,
@@ -190,6 +202,15 @@ export async function disconnectInstallation(
   const installation = await loadOwnedInstallation(organizationId, appInstallationId);
 
   await prisma.$transaction(async (tx) => {
+    const repositories = await tx.repository.findMany({
+      where: { appInstallationId: installation.id },
+      select: { id: true }
+    });
+    await tx.repositoryAccess.deleteMany({ where: { appInstallationId: installation.id } });
+    await reassignOrDeleteRepositoriesInTransaction(
+      tx,
+      repositories.map((repository) => repository.id)
+    );
     await tx.gitHubAppInstallation.delete({ where: { id: installation.id } });
     await tx.auditLog.create({
       data: {
@@ -221,10 +242,8 @@ async function loadOwnedInstallation(organizationId: string, appInstallationId: 
 
 /**
  * Fetches the installation's accessible repositories and reconciles them into
- * the shared Repository table (upsert by [org, provider, externalId] — no
- * duplicate rows) plus the RepositoryAccess grants. Repos no longer accessible
- * lose their grant but keep their Repository row + data. Reused by the manual
- * sync and the webhook resync. Returns the repository count.
+ * Repository + RepositoryAccess. Repositories no longer granted to any linked
+ * App installation are deleted with their local reports/history.
  */
 async function syncInstallationRepositories(installation: GitHubAppInstallation): Promise<number> {
   const accessToken = await githubAppClient.createInstallationAccessToken(
@@ -233,7 +252,11 @@ async function syncInstallationRepositories(installation: GitHubAppInstallation)
   const repos = await githubAppClient.listInstallationRepositories(accessToken.token);
   const now = new Date();
 
-  await prisma.$transaction(async (tx) => {
+  const repositoryIds = await prisma.$transaction(async (tx) => {
+    const previousRepositories = await tx.repository.findMany({
+      where: { appInstallationId: installation.id },
+      select: { id: true }
+    });
     const repositoryIds: string[] = [];
 
     for (const repo of repos) {
@@ -251,16 +274,36 @@ async function syncInstallationRepositories(installation: GitHubAppInstallation)
       });
     }
 
-    // Revoke grants for repos no longer accessible (keep the Repository rows).
+    // Revoke grants for repos no longer accessible and remove ungranted data.
+    const currentIds = new Set(repositoryIds);
+    const removedCandidates = previousRepositories
+      .map((repository) => repository.id)
+      .filter((repositoryId) => !currentIds.has(repositoryId));
+
     await tx.repositoryAccess.deleteMany({
       where: { appInstallationId: installation.id, repositoryId: { notIn: repositoryIds } }
     });
+
+    if (removedCandidates.length) {
+      await reassignOrDeleteRepositoriesInTransaction(tx, removedCandidates);
+    }
 
     await tx.gitHubAppInstallation.update({
       where: { id: installation.id },
       data: { repositoryCount: repositoryIds.length, lastSyncedAt: now }
     });
+
+    return repositoryIds;
   });
+
+  await Promise.all(
+    repositoryIds.map((repositoryId) =>
+      ensureInitialAppBackfill(repositoryId).catch((error) => {
+        console.warn(`[github-app] initial backfill queue failed for repository ${repositoryId}`, error);
+        return false;
+      })
+    )
+  );
 
   return repos.length;
 }
@@ -314,7 +357,7 @@ export type WebhookInstallationPayload = {
   installation?: { id?: number; suspended_at?: string | null };
 };
 
-/** Handles the `installation` App webhook event. Never throws (fire-and-forget). */
+/** Handles a verified `installation` App webhook event. */
 export async function handleInstallationEvent(payload: WebhookInstallationPayload) {
   const installationId = payload.installation?.id;
   if (installationId === undefined) {
@@ -326,9 +369,20 @@ export async function handleInstallationEvent(payload: WebhookInstallationPayloa
   });
 
   if (payload.action === "deleted") {
-    // Uninstalled on GitHub — remove the local link (keeps Repository history).
+    // Uninstalled on GitHub — delete the local link and its repository data.
     if (local) {
-      await prisma.gitHubAppInstallation.delete({ where: { id: local.id } }).catch(() => {});
+      await prisma.$transaction(async (tx) => {
+        const repositories = await tx.repository.findMany({
+          where: { appInstallationId: local.id },
+          select: { id: true }
+        });
+        await tx.repositoryAccess.deleteMany({ where: { appInstallationId: local.id } });
+        await reassignOrDeleteRepositoriesInTransaction(
+          tx,
+          repositories.map((repository) => repository.id)
+        );
+        await tx.gitHubAppInstallation.delete({ where: { id: local.id } });
+      });
       await recordSystemAudit(local, "github_app.installation.deleted");
     }
     return;
@@ -361,7 +415,7 @@ export async function handleInstallationEvent(payload: WebhookInstallationPayloa
   });
 }
 
-/** Handles the `installation_repositories` App webhook event. Never throws. */
+/** Handles a verified `installation_repositories` App webhook event. */
 export async function handleInstallationRepositoriesEvent(payload: WebhookInstallationPayload) {
   const installationId = payload.installation?.id;
   if (installationId === undefined) {

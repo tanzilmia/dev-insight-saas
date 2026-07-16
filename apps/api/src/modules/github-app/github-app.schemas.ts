@@ -15,4 +15,14 @@ export const syncInstallationSchema = z.object({
   organizationId: z.string().min(1)
 });
 
+export const resolveGitHubUserQuerySchema = z.object({
+  organizationId: z.string().min(1),
+  username: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .transform((value) => value.replace(/^@+/, ""))
+});
+
 export type LinkInstallationInput = z.infer<typeof linkInstallationSchema>;

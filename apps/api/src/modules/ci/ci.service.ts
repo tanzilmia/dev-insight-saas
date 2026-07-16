@@ -21,7 +21,7 @@ import {
  * GitHub Actions management: inspect a repository, install a managed workflow via
  * a pull request (never a direct push to the default branch), and track/sync its
  * status and run history. Authenticates ONLY through the GitHub App (installation
- * token resolved per call) — no PAT is used for mutation. Every mutation is
+ * token resolved per call). Every mutation is
  * manager-gated and audit-logged. Built as the permanent DevOps layer: future
  * workflow updates (SonarQube, security scanning) reuse the same install flow.
  */
