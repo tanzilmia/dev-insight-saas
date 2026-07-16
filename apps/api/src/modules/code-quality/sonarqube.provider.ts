@@ -98,19 +98,20 @@ export class SonarQubeProvider implements CodeQualityProvider {
     return url;
   }
 
-  private async apiGet<T>(path: string, params: Record<string, string>): Promise<T> {
+  /** SonarQube's current Web API authentication scheme for user tokens. */
+  private authHeaders(): { Authorization: string } {
     if (!this.config.token) {
       throw new AppError(400, "SonarQube is not configured", "CODE_QUALITY_NOT_CONFIGURED");
     }
+    return { Authorization: `Bearer ${this.config.token}` };
+  }
 
+  private async apiGet<T>(path: string, params: Record<string, string>): Promise<T> {
     const url = this.buildUrl(path, params);
-
-    // Token-as-username Basic auth (empty password) — same as `curl -u token:`.
-    const auth = Buffer.from(`${this.config.token}:`).toString("base64");
 
     let response: Response;
     try {
-      response = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
+      response = await fetch(url, { headers: this.authHeaders() });
     } catch {
       throw new AppError(502, "Could not reach SonarQube", "CODE_QUALITY_UNREACHABLE");
     }
@@ -125,7 +126,24 @@ export class SonarQubeProvider implements CodeQualityProvider {
       throw new AppError(502, `SonarQube request failed (${response.status})`, "CODE_QUALITY_ERROR");
     }
 
-    return (await response.json()) as T;
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!contentType.includes("json")) {
+      throw new AppError(
+        502,
+        "SonarQube returned an unexpected non-JSON response",
+        "CODE_QUALITY_INVALID_RESPONSE"
+      );
+    }
+
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw new AppError(
+        502,
+        "SonarQube returned malformed JSON",
+        "CODE_QUALITY_INVALID_RESPONSE"
+      );
+    }
   }
 
   /** Lightweight token check for the connect flow. Never throws. */
@@ -243,14 +261,9 @@ export class SonarQubeProvider implements CodeQualityProvider {
    * callers can branch on status (e.g. treat "already exists" as success).
    */
   private async apiPost(path: string, params: Record<string, string>): Promise<Response> {
-    if (!this.config.token) {
-      throw new AppError(400, "SonarQube is not configured", "CODE_QUALITY_NOT_CONFIGURED");
-    }
     const url = this.buildUrl(path, params);
-
-    const auth = Buffer.from(`${this.config.token}:`).toString("base64");
     try {
-      return await fetch(url, { method: "POST", headers: { Authorization: `Basic ${auth}` } });
+      return await fetch(url, { method: "POST", headers: this.authHeaders() });
     } catch {
       throw new AppError(502, "Could not reach SonarQube", "CODE_QUALITY_UNREACHABLE");
     }

@@ -2067,9 +2067,17 @@ Actions runner can finally reach the SonarQube server (localhost was unreachable
 using `provisionRepositoryCodeQuality` / `deprovisionRepositoryCodeQuality`. Repo DTO gained `codeQualityScan
 { provisioned, provisionedAt }`.
 
-**Verified locally:** api typecheck/lint/**142 tests**/build + web typecheck/lint/build all pass. **NOT yet
+**Verified locally:** api typecheck/lint/**146 tests**/build + web typecheck/lint/build all pass. **NOT yet
 run against a real client repo** — the live e2e (grant App `secrets: write` → set `SONAR_PUBLIC_URL` on the
 VPS → deploy → "Enable scan" on a repo → merge PR → push → confirm scan lands) is the next step.
+
+**Production connection hardening (2026-07-16):** The VPS SonarQube 26.7 instance returned HTML for the
+provider's legacy Basic-token requests, which caused `/api/code-quality/projects` to fail while parsing JSON.
+The provider now uses Bearer authentication for all SonarQube reads and writes, and maps non-JSON or malformed
+JSON responses to the typed `CODE_QUALITY_INVALID_RESPONSE` error. The Code Quality client now loads connection
+and project metadata independently, preserves the environment-fallback connection when project loading fails,
+and settles to a stable empty-project state instead of showing an infinite loading indicator. Four provider
+regression tests cover the updated authentication and response handling.
 
 **SonarCloud migration stays config-only** (the same `SonarQubeProvider` methods exist; SonarCloud project
 creation differs but the read path is identical).

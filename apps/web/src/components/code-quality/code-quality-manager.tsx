@@ -139,6 +139,8 @@ export function CodeQualityManager() {
   const [overview, setOverview] = useState<CodeQualityOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [connectionLoadError, setConnectionLoadError] = useState<string | null>(null);
+  const [projectListError, setProjectListError] = useState<string | null>(null);
 
   const [trend, setTrend] = useState<CodeQualityTrendPoint[]>([]);
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("coverage");
@@ -158,14 +160,28 @@ export function CodeQualityManager() {
   // Load connection + projects when the org is known.
   const loadConnection = useCallback(() => {
     if (!organizationId) return;
-    Promise.all([getCodeQualityConnection(organizationId), listSonarProjects(organizationId)])
-      .then(([conn, projectList]) => {
+
+    // These requests are independent. A project-list failure must not erase a
+    // successful env-fallback connection and make the UI claim it is disconnected.
+    void getCodeQualityConnection(organizationId)
+      .then((conn) => {
         setConnection(conn);
+        setConnectionLoadError(null);
+      })
+      .catch((caught) => {
+        setConnection({ connected: false });
+        setConnectionLoadError(getApiErrorMessage(caught));
+      });
+
+    void listSonarProjects(organizationId)
+      .then((projectList) => {
         setProjects(projectList.projects);
         setProjectKey((current) => current || projectList.projects[0]?.key || "");
+        setProjectListError(null);
       })
-      .catch(() => {
-        setConnection({ connected: false });
+      .catch((caught) => {
+        setProjects([]);
+        setProjectListError(getApiErrorMessage(caught));
       });
   }, [organizationId]);
 
@@ -175,9 +191,18 @@ export function CodeQualityManager() {
 
   const load = useCallback(() => {
     if (!organizationId || !projectKey) {
-      return Promise.resolve();
+      return Promise.resolve().then(() => {
+        setOverview(null);
+        setError(null);
+        setLoading(false);
+      });
     }
-    return getCodeQualityOverview(organizationId, projectKey)
+    return Promise.resolve()
+      .then(() => {
+        setLoading(true);
+        setError(null);
+        return getCodeQualityOverview(organizationId, projectKey);
+      })
       .then((data) => {
         setOverview(data);
         setError(null);
@@ -258,6 +283,10 @@ export function CodeQualityManager() {
 
   const measures = overview?.measures ?? null;
   const developers = overview?.developers ?? [];
+  const pageError = connectionLoadError ?? projectListError ?? error;
+  const providerConfigured =
+    connection?.connected === true ||
+    (connection?.connected === false && Boolean(connection.envFallback));
 
   return (
     <DashboardChrome>
@@ -374,8 +403,10 @@ export function CodeQualityManager() {
                 onChange={(e) => setManualKey(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
-                    setLoading(true);
-                    setProjectKey(manualKey.trim());
+                    const nextKey = manualKey.trim();
+                    if (!nextKey) return;
+                    if (nextKey === projectKey) void load();
+                    else setProjectKey(nextKey);
                   }
                 }}
                 placeholder="project key"
@@ -384,11 +415,17 @@ export function CodeQualityManager() {
           </label>
           <button
             type="button"
-            className="btn-gradient flex items-center gap-2"
+            disabled={!projects.length && !manualKey.trim()}
+            className="btn-gradient flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => {
-              setLoading(true);
-              if (!projects.length) setProjectKey(manualKey.trim());
-              else void load();
+              if (projects.length) {
+                void load();
+                return;
+              }
+              const nextKey = manualKey.trim();
+              if (!nextKey) return;
+              if (nextKey === projectKey) void load();
+              else setProjectKey(nextKey);
             }}
           >
             <RefreshCw size={15} /> Reload
@@ -397,15 +434,29 @@ export function CodeQualityManager() {
         {overview?.available ? <GateBadge gate={overview.qualityGate} /> : null}
       </div>
 
-      {error ? (
+      {pageError ? (
         <div className="glass mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 p-4 text-sm text-red-600 dark:text-red-400">
           <Info size={18} className="mt-0.5 shrink-0" />
-          <span>{error}</span>
+          <span>{pageError}</span>
         </div>
       ) : null}
 
       {loading ? (
         <DashboardLoading />
+      ) : !projectKey && !projectListError ? (
+        <div className="glass rounded-xl p-6">
+          <div className="mb-2 flex items-center gap-2 text-(--text)">
+            <ShieldQuestion size={18} className="text-(--accent)" />
+            <p className="font-bold">
+              {providerConfigured ? "No SonarQube projects yet" : "SonarQube not connected"}
+            </p>
+          </div>
+          <p className="text-sm text-(--muted)">
+            {providerConfigured
+              ? "Enable scanning for a repository from the Repositories page. Its SonarQube project will appear here after provisioning."
+              : "Configure the shared SonarQube connection before loading code-quality projects."}
+          </p>
+        </div>
       ) : overview && !overview.available ? (
         <div className="glass rounded-xl p-6">
           <div className="mb-2 flex items-center gap-2 text-(--text)">
