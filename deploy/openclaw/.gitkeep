@@ -1,0 +1,3 @@
+# OpenClaw gateway state/config lives here (bind-mounted to /data in the
+# openclaw-gateway container). Configure per docs/OPENCLAW_SETUP.md.
+# Real contents are gitignored.

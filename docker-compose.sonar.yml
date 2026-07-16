@@ -4,9 +4,12 @@
 # tool, not part of the app runtime. SonarQube needs its OWN PostgreSQL (NOT the
 # app's Neon database); the embedded H2 engine is unsupported for real use.
 #
-#   Start:   docker compose -f docker-compose.sonar.yml up -d
+# Normal lifecycle (SonarQube + OpenClaw) is managed by the root compose.yml:
+#   Start:   npm run docker:up
 #   URL:     http://localhost:9000   (first login: admin / admin -> change it)
-#   Stop:    docker compose -f docker-compose.sonar.yml down       (keeps data)
+#   Stop:    npm run docker:down                                  (keeps data)
+# Standalone maintenance remains available when intentionally needed:
+#   Start:   docker compose -f docker-compose.sonar.yml up -d
 #   Wipe:    docker compose -f docker-compose.sonar.yml down -v     (drops volumes)
 #
 # Community Edition analyzes the MAIN branch only (no PR/branch analysis) and is

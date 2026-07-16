@@ -5,7 +5,8 @@
   "version": "0.1.0",
   "description": "Streamable-HTTP MCP server exposing DevInsight report tools to the OpenClaw agent.",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "test": "node --test server.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

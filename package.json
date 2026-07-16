@@ -11,14 +11,25 @@
     "dev:web": "npm run dev -w @devinsight/web",
     "dev:api": "npm run dev -w @devinsight/api",
     "dev:mcp": "cd integrations/devinsight-mcp-server && ./run.sh",
+    "docker:up": "docker compose up -d sonar_db sonarqube openclaw-gateway",
+    "docker:down": "docker compose down",
+    "docker:status": "docker compose ps",
+    "docker:openclaw:cli": "docker compose run --rm openclaw-cli",
+    "prod:up": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml --profile sonar --profile openclaw up -d --build",
+    "prod:core": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml up -d --build",
+    "prod:down": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml --profile sonar --profile openclaw down",
+    "prod:logs": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml logs -f",
+    "prod:ps": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml --profile sonar --profile openclaw ps",
+    "prod:config": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml --profile sonar --profile openclaw config",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "security:rotate-local-secrets": "node scripts/rotate-local-security-secrets.mjs",
+    "security:sync-openclaw-mcp-token": "node scripts/sync-openclaw-mcp-token.mjs",
     "prisma:generate": "npm run prisma:generate -w @devinsight/api"
   },
   "engines": {
     "node": ">=20"
   }
 }
-

@@ -4,6 +4,7 @@ import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
 import { errorHandler } from "./common/middleware/error-handler.js";
+import { HTTP_LOGGER_OPTIONS } from "./common/logging/http-logger.js";
 import { activityRouter } from "./modules/activity/activity.controller.js";
 import { analysisRouter } from "./modules/analysis/analysis.controller.js";
 import { authRouter } from "./modules/auth/auth.controller.js";
@@ -37,7 +38,7 @@ export function createApp() {
   app.use("/api/webhooks", webhooksRouter);
   app.use("/api/webhooks/github-app", githubAppWebhookRouter);
   app.use(express.json());
-  app.use(pinoHttp());
+  app.use(pinoHttp(HTTP_LOGGER_OPTIONS));
 
   app.get("/health", (_req, res) => {
     res.status(200).json({

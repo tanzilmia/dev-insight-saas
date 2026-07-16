@@ -201,7 +201,8 @@ LLM report (Markdown) → dashboard / share link / Telegram / chat
 - **Mandatory provider abstractions** — GitHub behind `GitProvider`, LLM behind `LLMProvider`, channels behind `ChannelProvider`. Never call an external service directly from a controller/service
 - **Reports never fail on LLM problems** — deterministic template fallback (`status: PARTIAL`, `generatedBy: "template"`)
 - **Smart-engine logic lives in the backend**, not in OpenClaw/MCP — every channel (dashboard, chat, schedules, Telegram) reuses `orchestrateReport`
-- **Two auth paths** — JWT (browser) + timing-safe service-key (`x-openclaw-key`) for the MCP tool endpoints
+- **Two auth paths** — JWT (browser) + timing-safe service-key and API-signed,
+  short-lived tenant context for MCP tool endpoints
 - **Security** — PATs, webhook secrets, and Telegram tokens are all AES-256-GCM encrypted at rest; env validated at boot (`GIT_TOKEN_ENCRYPTION_KEY` must be a base64 32-byte key)
 - **Single-instance scheduler by design** (a multi-instance deploy would need a shared queue)
 
@@ -217,7 +218,7 @@ LLM report (Markdown) → dashboard / share link / Telegram / chat
 ## 5. What is NOT yet built
 
 - **Automated tests** — no runner installed yet (verification is done by driving the running API against mock GitHub/LLM servers). Prime candidates when added: `token-cipher`, coverage interval math, commit-classifier, `computeNextRun`, the report flow with mocked providers
-- **Deployment** — Dockerfiles + compose + production env guide
+- **Deployment** — ✅ **Docker stack scaffolded (2026-07-16)**: multi-stage Dockerfiles (api / web-standalone / mcp), `docker-compose.prod.yml` (nginx reverse proxy on :80, DB stays on Neon, `sonar` + `openclaw` Compose profiles), `deploy/nginx.conf`, `deploy/env.prod.example`, and `docs/DEPLOYMENT.md`. Local dev is unchanged. **Not yet run end-to-end on a real VPS**; remaining infra polish = domain + HTTPS (Certbot/Cloudflare with nginx) and a shared scheduler queue for horizontal scale
 - **Discord/Slack** delivery (Telegram is done; the provider abstraction makes them drop-in)
 - **Conversational Telegram** (Telegram → OpenClaw → reports, mostly OpenClaw config)
 - Employee self-login/invite flow

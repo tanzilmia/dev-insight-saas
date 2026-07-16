@@ -6,6 +6,7 @@ import { AppError } from "../../common/errors/app-error.js";
 import { requireOrganizationMember } from "../../common/access/organization-access.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { isGatewayConfigured, streamChatWithAgent } from "./openclaw.gateway.js";
+import { mintOpenClawContext } from "./openclaw-context.js";
 import { generateReportSchema } from "./openclaw.schemas.js";
 import { orchestrateReport } from "./openclaw.service.js";
 import { OPENCLAW_TOOLS } from "./openclaw.tools.js";
@@ -59,6 +60,10 @@ openclawRouter.post(
   asyncHandler(async (req, res) => {
     const { organizationId, messages } = chatStreamSchema.parse(req.body);
     await requireOrganizationMember(req.authUser!.id, organizationId);
+    const contextToken = mintOpenClawContext({
+      organizationId,
+      requesterId: req.authUser!.id
+    });
 
     // Validate reachability before committing to a streamed (headers-sent)
     // response, so this failure can still be a normal JSON error.
@@ -82,7 +87,7 @@ openclawRouter.post(
     try {
       for await (const delta of streamChatWithAgent(
         messages,
-        { organizationId, requesterId: req.authUser!.id },
+        contextToken,
         controller.signal
       )) {
         res.write(`${JSON.stringify({ type: "delta", text: delta })}\n`);

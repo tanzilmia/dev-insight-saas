@@ -5,7 +5,7 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-14.
+> Last updated: 2026-07-16.
 
 ---
 
@@ -114,6 +114,8 @@ Added for provider integration (all have safe defaults / are optional):
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | any OpenAI-compatible endpoint |
 | `OPENAI_MODEL` | `gpt-4o-mini` | model id |
 | `OPENCLAW_SERVICE_KEY` | *(unset)* | shared secret the OpenClaw plugin uses to call our tool endpoints (`x-openclaw-key` header) |
+| `OPENCLAW_CONTEXT_SIGNING_SECRET` | *(unset)* | API-only secret used to sign ten-minute tenant context; never shared with OpenClaw/MCP |
+| `MCP_ACCESS_TOKEN` | *(unset)* | bearer credential OpenClaw sends to the standalone MCP HTTP endpoint |
 | `OPENCLAW_GATEWAY_URL` | *(unset)* | OpenClaw runtime base URL for the website chat proxy (e.g. `http://localhost:18789`) |
 | `OPENCLAW_GATEWAY_TOKEN` | *(unset)* | bearer token for the gateway (server-side only) |
 | `CODE_QUALITY_PROVIDER` | `sonarqube` | code-quality provider selector (SonarCloud slots in behind the same interface) |
@@ -431,15 +433,24 @@ How it was wired (this machine):
   gateway on 18789. LLM = **Z.ai GLM-5.2** on the **Coding Plan endpoint** (see
   `docs/OPENCLAW_SETUP.md`). OpenAI-compat HTTP endpoint enabled
   (`gateway.http.endpoints.chatCompletions`). Chat model alias = `openclaw/default`.
+- **Unified Docker project:** root `compose.yml` includes both
+  `docker-compose.sonar.yml` and `../openclaw/docker-compose.yml` under the explicit
+  project name `devinsight`. OpenClaw's `.env`, source, and host-mounted state remain in
+  the sibling repository. `npm run docker:up` starts SonarDB, SonarQube, and only the
+  long-running gateway; `npm run docker:down` stops them without deleting data;
+  `npm run docker:openclaw:cli -- <args>` runs the helper CLI as a one-off container.
 - **Report tools via an MCP server, NOT the TS plugin.** `integrations/devinsight-mcp-server/`
   (streamable-HTTP, host-run on :4100) exposes `devinsight_context` +
   `devinsight_generate_report` calling `/api/openclaw/tools/*`. Registered with
-  `openclaw mcp set devinsight '{"url":"http://host.docker.internal:4100/mcp","transport":"streamable-http"}'`.
+  `openclaw mcp set devinsight '{"url":"http://host.docker.internal:4100/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${DEVINSIGHT_MCP_TOKEN}"}}'`;
+  the ignored OpenClaw `.env` supplies `DEVINSIGHT_MCP_TOKEN`.
   The `../devinsight-openclaw-plugin/` (TS plugin) was superseded by this — kept for reference.
 
-**To run the whole thing** (see `docs/OPENCLAW_SETUP.md` §"Run everything"): OpenClaw
-(Docker, persistent) + DevInsight `npm run dev` (web+api) + `integrations/devinsight-mcp-server/run.sh`.
-MVP is **single-org** (the MCP server is pinned to one org/requester via `run.sh`).
+**To run the whole thing** (see `docs/OPENCLAW_SETUP.md` §"Run everything"):
+`npm run docker:up` (SonarQube + OpenClaw, persistent) + DevInsight `npm run dev`
+(web+api) + `integrations/devinsight-mcp-server/run.sh`.
+MCP tenant identity is now **per website-chat request** via a ten-minute API-signed
+context token. The bridge has no fixed organization/requester fallback.
 
 Prereqs from the operator: run OpenClaw self-hosted (Docker) — **step-by-step guide in
 `docs/OPENCLAW_SETUP.md`** (clone openclaw repo → `./scripts/docker/setup.sh` → set the
@@ -1521,8 +1532,8 @@ cases) and the CSV parser (edge cases) unit-verified.
    an OpenClaw **channel registration** (long-polling; no inbound webhook). Documented
    step-by-step in `docs/OPENCLAW_SETUP.md` (new "Conversational Telegram" section) incl.
    the two-Telegram-features distinction (outbound delivery vs inbound chat) and the
-   single-org caveat (the MCP server pins one org via `run.sh`; multi-org needs per-chat
-   org resolution — future).
+   security boundary: Telegram cannot call DevInsight report tools until an authenticated
+   account-linking flow can mint the same short-lived tenant context used by website chat.
 
 **Award cards — plain-language enrichment (2026-07-14) ✅** (follow-up to item 4, for
 non-technical CEO/management readers). Each "Employee of the month" card now shows
@@ -1824,7 +1835,9 @@ with a **config-only path to SonarCloud** later.
 ### 12.1 What is built (verified end-to-end on real data)
 
 - **Local SonarQube stack** — `docker-compose.sonar.yml` (SonarQube CE + its own Postgres;
-  NOT the app's Neon DB). Root `sonar-project.properties` scopes the monorepo
+  NOT the app's Neon DB), included with the sibling OpenClaw Compose model by root
+  `compose.yml` under the `devinsight` Docker project. Root `sonar-project.properties`
+  scopes the monorepo
   (`apps/api/src`, `apps/web/src`, `packages/shared/src`), excludes generated/build/test
   paths, and points coverage at `apps/api/coverage/lcov.info`.
 - **Coverage wiring** — `@vitest/coverage-v8` + `coverage` block in `apps/api/vitest.config.ts`
@@ -2051,3 +2064,61 @@ visible alongside commits. Consider folding a per-employee collaboration block i
 **PR/review metrics complete for the single-org phase.** Possible follow-ups: review latency / time-to-merge,
 reviewer↔author matrix (who reviews whom), scheduled PR collection in the tick, and folding collaboration
 into the LLM report narrative.
+
+## 14. Production deployment (VPS + Docker) — scaffolding DONE (2026-07-16)
+
+The whole app now ships as a Docker stack for a single VPS. **Local dev is
+unchanged** (`npm run dev` still runs host processes; the standalone build is
+gated behind `NEXT_OUTPUT=standalone`, only set by the web Dockerfile). Full
+operator guide in **`docs/DEPLOYMENT.md`**.
+
+**Decisions (from the product owner):**
+- **Database stays on Neon** (external) — no app Postgres container. Production
+  reuses the SAME `JWT_ACCESS_SECRET` + `GIT_TOKEN_ENCRYPTION_KEY` as the current
+  `apps/api/.env` (else existing JWTs/encrypted PATs break).
+- **No domain yet → HTTP only on port 80**, IP access. An **nginx** reverse proxy
+  (`deploy/nginx.conf`) serves one origin: `/api/*` → api:4000, everything else →
+  web:3000. Because it's same-origin, the web image is built with
+  `NEXT_PUBLIC_API_URL=""` (relative `/api/...` calls) — so the image never needs
+  rebuilding when the IP changes. nginx specifics: `proxy_buffering off` on `/api/`
+  (the NDJSON chat stream must not be buffered) + Docker DNS `resolver 127.0.0.11`
+  (rebuilt api/web containers don't 502). HTTPS later = a Certbot/Cloudflare setup
+  (nginx doesn't auto-issue certs like Caddy would — steps in docs/DEPLOYMENT.md).
+- **Optional services via Compose profiles:** `sonar` (SonarQube CE + its own
+  Postgres, bound to 127.0.0.1:9000) and `openclaw` (our `mcp` bridge, fully
+  containerized, + the external `openclaw-gateway` image — gateway still needs its
+  own LLM/`openclaw mcp set` config per `docs/OPENCLAW_SETUP.md`).
+
+**Files added:**
+- `apps/api/Dockerfile` (multi-stage: `npm ci` → `prisma generate` → `tsc`; runner
+  keeps the whole tree incl. Prisma CLI) + `apps/api/docker-entrypoint.sh` (runs
+  `prisma migrate deploy` then `node dist/main.js` on every start). Base
+  `node:20-slim` + `openssl` (Prisma engines). `/health` used for the healthcheck.
+- `apps/web/Dockerfile` (Next.js **standalone**; monorepo layout preserved via
+  `outputFileTracingRoot` → repo root, so the entry is `apps/web/server.js`;
+  `static` + `public` copied alongside). `NEXT_PUBLIC_API_URL` is a build ARG.
+- `apps/web/next.config.ts` — `output:"standalone"` + `outputFileTracingRoot`,
+  **only when `NEXT_OUTPUT=standalone`** (local build sees `{}`).
+- `integrations/devinsight-mcp-server/Dockerfile` (+ `.dockerignore`) — the MCP
+  bridge (`DEVINSIGHT_URL=http://api:4000`, service key + MCP token from env).
+- `docker-compose.prod.yml` (project `devinsight-prod`), `deploy/nginx.conf`,
+  `deploy/env.prod.example` (→ copy to `deploy/.env.prod`, gitignored),
+  `deploy/openclaw/` (gateway state mount), root `.dockerignore`.
+- Root `package.json` scripts: `prod:up` (all profiles, build+start),
+  `prod:core` (web+api+nginx only), `prod:down`, `prod:logs`, `prod:ps`,
+  `prod:config`.
+
+**Verified (Docker daemon was down locally, so images not built here, but):**
+`npm run build -w @devinsight/api` (tsc) passes; `NEXT_OUTPUT=standalone` web
+build produces `apps/web/.next/standalone/apps/web/server.js` + root
+`node_modules` (matches the Dockerfile COPY paths exactly); `docker compose
+--env-file … -f docker-compose.prod.yml --profile sonar --profile openclaw config`
+resolves all 7 services + 6 volumes with no errors and `NEXT_PUBLIC_API_URL=""`.
+
+**Operator TODO on the VPS** (see `docs/DEPLOYMENT.md`): install Docker, open port
+80, `cp deploy/env.prod.example deploy/.env.prod` + fill in (Neon URL + the SAME
+secrets), `npm run prod:up`, browse `http://<vps-ip>`. **Single API instance only**
+(scheduler + collection worker are in-process). Not yet exercised end-to-end on a
+real VPS. Remaining infra polish: real domain + HTTPS (Certbot/Cloudflare with
+nginx), optional image-size trimming, and (for horizontal scale) a shared
+scheduler queue.

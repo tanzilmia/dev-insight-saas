@@ -1,40 +1,92 @@
+import { timingSafeEqual } from "node:crypto";
+import { pathToFileURL } from "node:url";
+
 import express from "express";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
-// Runs on the HOST next to DevInsight. OpenClaw (in Docker) reaches it via
-// http://host.docker.internal:PORT/mcp. The MCP server reaches DevInsight at
-// http://localhost:4000 (host → host).
-const DEVINSIGHT_URL = process.env.DEVINSIGHT_URL ?? "http://localhost:4000";
-const SERVICE_KEY = process.env.DEVINSIGHT_SERVICE_KEY ?? "";
-const ORG_ID = process.env.DEVINSIGHT_ORG_ID ?? "";
-const REQUESTER_ID = process.env.DEVINSIGHT_REQUESTER_ID ?? "";
-const PORT = Number(process.env.PORT ?? 4100);
+const DEFAULT_DEVINSIGHT_URL = "http://localhost:4000";
+const DEFAULT_HOST = "127.0.0.1";
+const DEFAULT_PORT = 4100;
+const UPSTREAM_TIMEOUT_MS = 30_000;
 
-async function callDevInsight(path, init = {}) {
-  const response = await fetch(`${DEVINSIGHT_URL}${path}`, {
+function safeEqual(a, b) {
+  const bufferA = Buffer.from(a);
+  const bufferB = Buffer.from(b);
+  return bufferA.length === bufferB.length && timingSafeEqual(bufferA, bufferB);
+}
+
+export function readConfig(source = process.env) {
+  const serviceKey = source.DEVINSIGHT_SERVICE_KEY?.trim() ?? "";
+  const mcpAccessToken = source.MCP_ACCESS_TOKEN?.trim() ?? "";
+  const host = source.MCP_HOST?.trim() || DEFAULT_HOST;
+  const port = Number(source.PORT ?? DEFAULT_PORT);
+
+  if (!serviceKey) {
+    throw new Error("DEVINSIGHT_SERVICE_KEY is required");
+  }
+  if (!mcpAccessToken) {
+    throw new Error("MCP_ACCESS_TOKEN is required");
+  }
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+    throw new Error("PORT must be an integer between 0 and 65535");
+  }
+
+  return {
+    devInsightUrl: source.DEVINSIGHT_URL?.trim() || DEFAULT_DEVINSIGHT_URL,
+    serviceKey,
+    mcpAccessToken,
+    host,
+    port
+  };
+}
+
+export function requireMcpBearer(expectedToken) {
+  return (req, res, next) => {
+    const authorization = req.header("authorization");
+    const provided = authorization?.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length)
+      : "";
+
+    if (!provided || !safeEqual(provided, expectedToken)) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    next();
+  };
+}
+
+async function callDevInsight(config, contextToken, path, init = {}) {
+  const response = await fetch(`${config.devInsightUrl}${path}`, {
     method: init.method ?? "GET",
-    headers: { "content-type": "application/json", "x-openclaw-key": SERVICE_KEY },
-    body: init.body ? JSON.stringify(init.body) : undefined
+    headers: {
+      "content-type": "application/json",
+      "x-openclaw-key": config.serviceKey,
+      "x-openclaw-context": contextToken
+    },
+    body: init.body ? JSON.stringify(init.body) : undefined,
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
   });
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`DevInsight ${path} failed (${response.status}): ${detail}`);
+    const detail = (await response.text().catch(() => "")).slice(0, 500);
+    throw new Error(`DevInsight request failed (${response.status}): ${detail}`);
   }
   return response.json();
 }
 
-function buildServer() {
-  const server = new McpServer({ name: "devinsight", version: "0.1.0" });
+function buildServer(config) {
+  const server = new McpServer({ name: "devinsight", version: "0.2.0" });
 
   server.tool(
     "devinsight_context",
-    "List the DevInsight organization's tracked repositories, projects, and employees (id + name). Call this first to resolve names the user mentions into ids.",
-    {},
-    async () => {
+    "List the authorized DevInsight organization's tracked repositories, projects, and employees. Pass the opaque contextToken from DevInsight unchanged.",
+    { contextToken: z.string().min(1) },
+    async ({ contextToken }) => {
       const data = await callDevInsight(
-        `/api/openclaw/tools/context?organizationId=${encodeURIComponent(ORG_ID)}&requesterId=${encodeURIComponent(REQUESTER_ID)}`
+        config,
+        contextToken,
+        "/api/openclaw/tools/context"
       );
       return { content: [{ type: "text", text: JSON.stringify(data.context) }] };
     }
@@ -42,8 +94,9 @@ function buildServer() {
 
   server.tool(
     "devinsight_generate_report",
-    "Generate a developer work report (repository/project/employee/team) over a period from real Git activity. Returns Markdown. Resolve ids via devinsight_context first if the user gave names. For an arbitrary window (e.g. 'Jan 1 to Mar 31', 'the first 3 months of 2025'), pass period='custom' with customRange {from, to} as ISO dates (YYYY-MM-DD). Named windows: today, yesterday, last_7_days, last_30_days, last_90_days, this_month, last_month. To scope the report to a single branch, pass branch with an exact branch name (valid names are listed per repository in devinsight_context); omit it to read across all branches.",
+    "Generate a developer work report from real Git activity. Pass the opaque contextToken from DevInsight unchanged. Resolve ids via devinsight_context first when the user gives names.",
     {
+      contextToken: z.string().min(1),
       reportType: z.enum(["repository", "project", "employee", "team"]),
       repositoryId: z.string().optional(),
       projectId: z.string().optional(),
@@ -64,51 +117,68 @@ function buildServer() {
       branch: z.string().optional()
     },
     async (args) => {
-      const data = await callDevInsight("/api/openclaw/tools/generate-report", {
-        method: "POST",
-        body: {
-          requesterId: REQUESTER_ID,
-          organizationId: ORG_ID,
-          period: args.period ?? "last_7_days",
-          customRange: args.customRange,
-          reportType: args.reportType,
-          repositoryId: args.repositoryId,
-          projectId: args.projectId,
-          employeeIds: args.employeeIds,
-          branch: args.branch
+      const data = await callDevInsight(
+        config,
+        args.contextToken,
+        "/api/openclaw/tools/generate-report",
+        {
+          method: "POST",
+          body: {
+            period: args.period ?? "last_7_days",
+            customRange: args.customRange,
+            reportType: args.reportType,
+            repositoryId: args.repositoryId,
+            projectId: args.projectId,
+            employeeIds: args.employeeIds,
+            branch: args.branch
+          }
         }
-      });
-      return { content: [{ type: "text", text: data.report?.markdown ?? "No report produced." }] };
+      );
+      return {
+        content: [{ type: "text", text: data.report?.markdown ?? "No report produced." }]
+      };
     }
   );
 
   return server;
 }
 
-const app = express();
-app.use(express.json());
+export function createMcpApp(config) {
+  const app = express();
+  const authenticate = requireMcpBearer(config.mcpAccessToken);
+  const parseJson = express.json({ limit: "256kb" });
 
-// Stateless streamable-HTTP: a fresh server+transport per request.
-app.post("/mcp", async (req, res) => {
-  const server = buildServer();
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  res.on("close", () => {
-    transport.close();
-    server.close();
-  });
-  try {
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
-  } catch (error) {
-    if (!res.headersSent) {
-      res.status(500).json({ error: String(error) });
+  app.post("/mcp", authenticate, parseJson, async (req, res) => {
+    const server = buildServer(config);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => {
+      transport.close();
+      server.close();
+    });
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch {
+      if (!res.headersSent) {
+        res.status(500).json({ error: "MCP request failed" });
+      }
     }
-  }
-});
+  });
 
-app.get("/mcp", (_req, res) => res.status(405).json({ error: "Method Not Allowed" }));
-app.get("/health", (_req, res) => res.json({ ok: true, org: Boolean(ORG_ID) }));
+  app.get("/mcp", (_req, res) =>
+    res.status(405).json({ error: "Method Not Allowed" })
+  );
+  app.get("/health", (_req, res) => res.json({ ok: true }));
 
-app.listen(PORT, () => {
-  console.log(`DevInsight MCP server on :${PORT} (streamable-http at /mcp)`);
-});
+  return app;
+}
+
+export function startMcpServer(config = readConfig()) {
+  return createMcpApp(config).listen(config.port, config.host, () => {
+    console.log(`DevInsight MCP server listening on ${config.host}:${config.port}`);
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startMcpServer();
+}
