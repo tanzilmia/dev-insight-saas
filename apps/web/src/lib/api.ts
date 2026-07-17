@@ -408,7 +408,14 @@ export type CiInspection = {
   isMonorepo: boolean;
   framework: string | null;
   nodeVersion: string;
-  scripts: { lint: boolean; typecheck: boolean; test: boolean; build: boolean };
+  scripts: {
+    lint: boolean;
+    typecheck: boolean;
+    test: boolean;
+    build: boolean;
+    prismaGenerate: boolean;
+    testCoverage: boolean;
+  };
   reason: string | null;
 };
 

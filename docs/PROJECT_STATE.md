@@ -2127,11 +2127,14 @@ Actions runner can finally reach the SonarQube server (localhost was unreachable
   so the analysis token isn't sent in clear text (`deploy/nginx.conf` `/sonarqube/` in the 443 block).
 
 **The four pieces (all built):**
-1. **Sonar-aware workflow** — `ci/workflow-templates.ts` bumped `node@v1`→`v2`. When a repo is provisioned,
+1. **Sonar-aware workflow** — `ci/workflow-templates.ts` is versioned (now `node@v3`). When a repo is provisioned,
    `generateWorkflow(stack, { sonarProjectKey })` emits a separate **`code_quality` job** that runs
-   `SonarSource/sonarqube-scan-action@v4` **only on push** (`if: github.event_name == 'push'` — CE analyzes
-   the main branch only) with `fetch-depth: 0` (full history for accurate SCM-blame attribution). Token +
-   host come from injected repo secrets, never baked in. Unit-tested (`workflow-templates.test.ts`).
+   the SonarSource action pinned to the immutable v8.1.0 commit **only on push**
+   (`if: github.event_name == 'push'` — CE analyzes the main branch only) with `fetch-depth: 0`
+   (full history for accurate SCM-blame attribution). The v3 job installs dependencies, runs detected
+   `prisma:generate` / `test:coverage` preparation, and waits up to 300 seconds for the Quality Gate, so
+   a red gate truthfully fails `code_quality`. Token + host come from injected repo secrets, never baked in.
+   Unit-tested (`stack-detector.test.ts`, `workflow-templates.test.ts`).
 2. **Repo secret injection** — new `DevOpsProvider.putRepoSecret` (`github-devops.provider.ts`): fetches the
    repo's Actions public key, **libsodium sealed-box** encrypts (new dep `libsodium-wrappers`), `PUT
    /repos/{o}/{r}/actions/secrets/{name}`. A 403 maps to `DEVOPS_SECRETS_PERMISSION_DENIED` (the App needs
@@ -2164,6 +2167,14 @@ JSON responses to the typed `CODE_QUALITY_INVALID_RESPONSE` error. The Code Qual
 and project metadata independently, preserves the environment-fallback connection when project loading fails,
 and settles to a stable empty-project state instead of showing an infinite loading indicator. Four provider
 regression tests cover the updated authentication and response handling.
+
+**Managed workflow v3 hardening + DevInsight dogfood preparation (2026-07-17):** `node@v3` replaces the
+vulnerable `sonarqube-scan-action@v4` line (CVE-2025-58178) with the immutable v8.1.0 commit, detects exact
+root `prisma:generate` / `test:coverage` scripts, prepares the Sonar job's own dependencies and coverage,
+and enforces the Quality Gate with a 300-second wait. The root now fans out `npm run test:coverage` across
+workspaces; the CI inspection web type mirrors both new capability flags. Verified locally: 162 tests,
+workspace typecheck/lint/build, coverage generation, and a real YAML parse of the generated `verify` +
+`code_quality` jobs all pass. Live dogfood activation through **Enable scan** is the remaining acceptance step.
 
 **SonarCloud migration stays config-only** (the same `SonarQubeProvider` methods exist; SonarCloud project
 creation differs but the read path is identical).

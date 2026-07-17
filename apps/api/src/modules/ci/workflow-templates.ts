@@ -10,7 +10,8 @@ import type { DetectedStack } from "./stack-detector.js";
  * fresh pull request without clobbering hand edits. Unsupported stacks throw
  * rather than producing a fake workflow.
  *
- * v2 adds an optional, self-contained **code_quality** job (SonarQube scan). It
+ * v3 adds secure, coverage-aware SonarQube scanning and optional Prisma
+ * preparation. The self-contained **code_quality** job
  * is emitted only when a `sonarProjectKey` is passed (i.e. the repo has been
  * provisioned for automated code quality — project created + analysis token
  * injected as a repo secret). Because SonarQube Community Edition analyzes the
@@ -22,11 +23,12 @@ export const MANAGED_WORKFLOW_PATH = ".github/workflows/devinside-ci.yml";
 export const MANAGED_MARKER_PREFIX = "# devinside-managed:";
 
 const TEMPLATE_ID = "node";
-const TEMPLATE_VERSION = "2";
+const TEMPLATE_VERSION = "3";
 
-// Pinned SonarQube scanner action (works against a self-hosted server and
-// SonarCloud alike; reads SONAR_TOKEN + SONAR_HOST_URL from the environment).
-const SONAR_SCAN_ACTION = "SonarSource/sonarqube-scan-action@v4";
+// Immutable v8.1.0 commit. v4 is affected by CVE-2025-58178; pinning the exact
+// patched commit also prevents a mutable tag from changing the executed action.
+const SONAR_SCAN_ACTION =
+  "SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995";
 
 export type GenerateWorkflowOptions = {
   /**
@@ -43,6 +45,48 @@ export type GeneratedWorkflow = {
   path: string;
   content: string;
 };
+
+function packageCommands(stack: DetectedStack): { runCmd: string; installCmd: string } {
+  const pm = stack.packageManager;
+  return {
+    runCmd: pm === "pnpm" ? "pnpm run" : pm === "yarn" ? "yarn run" : "npm run",
+    installCmd:
+      pm === "pnpm"
+        ? "pnpm install --frozen-lockfile"
+        : pm === "yarn"
+          ? "yarn install --frozen-lockfile"
+          : "npm ci"
+  };
+}
+
+/** Shared deterministic checkout/runtime/install preparation for each job. */
+function preparationSteps(stack: DetectedStack, fullHistory: boolean): string[] {
+  const { runCmd, installCmd } = packageCommands(stack);
+  const steps: string[] = ["      - name: Checkout", "        uses: actions/checkout@v4"];
+  if (fullHistory) {
+    steps.push(
+      "        with:",
+      "          # Full history so SonarQube can attribute issues by SCM blame.",
+      "          fetch-depth: 0"
+    );
+  }
+  if (stack.packageManager === "pnpm") {
+    steps.push("      - name: Set up pnpm", "        uses: pnpm/action-setup@v4");
+  }
+  steps.push(
+    "      - name: Set up Node.js",
+    "        uses: actions/setup-node@v4",
+    "        with:",
+    `          node-version: "${stack.nodeVersion}"`,
+    `          cache: "${stack.packageManager}"`,
+    "      - name: Install dependencies",
+    `        run: ${installCmd}`
+  );
+  if (stack.scripts.prismaGenerate) {
+    steps.push("      - name: Generate Prisma client", `        run: ${runCmd} prisma:generate`);
+  }
+  return steps;
+}
 
 /** Parses the `# devinside-managed: <id>@v<version>` marker; null if absent. */
 export function parseManagedMarker(
@@ -64,31 +108,8 @@ export function generateWorkflow(
     );
   }
 
-  const pm = stack.packageManager;
-  const runCmd = pm === "pnpm" ? "pnpm run" : pm === "yarn" ? "yarn run" : "npm run";
-  const installCmd =
-    pm === "pnpm"
-      ? "pnpm install --frozen-lockfile"
-      : pm === "yarn"
-        ? "yarn install --frozen-lockfile"
-        : "npm ci";
-
-  const steps: string[] = [
-    "      - name: Checkout",
-    "        uses: actions/checkout@v4"
-  ];
-  if (pm === "pnpm") {
-    steps.push("      - name: Set up pnpm", "        uses: pnpm/action-setup@v4");
-  }
-  steps.push(
-    "      - name: Set up Node.js",
-    "        uses: actions/setup-node@v4",
-    "        with:",
-    `          node-version: "${stack.nodeVersion}"`,
-    `          cache: "${pm}"`,
-    "      - name: Install dependencies",
-    `        run: ${installCmd}`
-  );
+  const { runCmd } = packageCommands(stack);
+  const steps = preparationSteps(stack, false);
   if (stack.scripts.lint) {
     steps.push("      - name: Lint", `        run: ${runCmd} lint`);
   }
@@ -128,6 +149,13 @@ export function generateWorkflow(
   ];
 
   if (sonarProjectKey) {
+    const sonarSteps = preparationSteps(stack, true);
+    if (stack.scripts.testCoverage) {
+      sonarSteps.push(
+        "      - name: Generate test coverage",
+        `        run: ${runCmd} test:coverage`
+      );
+    }
     lines.push(
       "",
       "  code_quality:",
@@ -136,11 +164,7 @@ export function generateWorkflow(
       "    if: github.event_name == 'push'",
       "    runs-on: ubuntu-latest",
       "    steps:",
-      "      - name: Checkout",
-      "        uses: actions/checkout@v4",
-      "        with:",
-      "          # Full history so SonarQube can attribute issues by SCM blame.",
-      "          fetch-depth: 0",
+      ...sonarSteps,
       "      - name: SonarQube Scan",
       `        uses: ${SONAR_SCAN_ACTION}`,
       "        env:",
@@ -148,7 +172,9 @@ export function generateWorkflow(
       "          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}",
       "        with:",
       "          args: >",
-      `            -Dsonar.projectKey=${sonarProjectKey}`
+      `            -Dsonar.projectKey=${sonarProjectKey}`,
+      "            -Dsonar.qualitygate.wait=true",
+      "            -Dsonar.qualitygate.timeout=300"
     );
   }
 

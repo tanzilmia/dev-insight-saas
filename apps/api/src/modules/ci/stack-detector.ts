@@ -14,6 +14,8 @@ export type DetectedScripts = {
   typecheck: boolean;
   test: boolean;
   build: boolean;
+  prismaGenerate: boolean;
+  testCoverage: boolean;
 };
 
 export type DetectedStack = {
@@ -59,7 +61,14 @@ function unsupported(defaultBranch: string, reason: string): DetectedStack {
     isMonorepo: false,
     framework: null,
     nodeVersion: DEFAULT_NODE_VERSION,
-    scripts: { lint: false, typecheck: false, test: false, build: false },
+    scripts: {
+      lint: false,
+      typecheck: false,
+      test: false,
+      build: false,
+      prismaGenerate: false,
+      testCoverage: false
+    },
     reason
   };
 }
@@ -114,7 +123,9 @@ export function detectStack(input: InspectionInput): DetectedStack {
       lint: has("lint"),
       typecheck: has("typecheck") || has("type-check"),
       test: has("test"),
-      build: has("build")
+      build: has("build"),
+      prismaGenerate: has("prisma:generate"),
+      testCoverage: has("test:coverage")
     },
     reason: null
   };

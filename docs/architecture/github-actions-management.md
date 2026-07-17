@@ -33,13 +33,14 @@ flowchart TD
 - package manager (from `pnpm-lock.yaml` / `yarn.lock` / `package-lock.json`),
 - monorepo (`workspaces` in package.json), framework (`next` / `express`),
 - Node version (`engines.node` → `.nvmrc` → default 20),
-- which **scripts actually exist** (`lint`, `typecheck`/`type-check`, `test`, `build`).
+- which **scripts actually exist** (`lint`, `typecheck`/`type-check`, `test`, `build`,
+  plus optional `prisma:generate` and `test:coverage` preparation).
 
 **Commands are never invented** — the generator emits a step only when its script is detected.
 
 ## 3. Workflow generation (deterministic, versioned)
 
-`generateWorkflow(stack)` renders a reviewed template — **no AI-generated YAML**. It writes to `.github/workflows/devinside-ci.yml` with a version marker `# devinside-managed: node@v1` (so DevInside recognizes and can later update its own workflow). The workflow contains only: `checkout`, `setup-node` (+ cache), install, and the present `lint`/`typecheck`/`test`/`build` steps; triggers `push` (default branch), `pull_request`, `workflow_dispatch`; `permissions: contents: read`. **No SonarQube, deployment, Docker, release, or secrets.** Unsupported stacks throw `STACK_UNSUPPORTED`.
+`generateWorkflow(stack)` renders a reviewed template — **no AI-generated YAML**. It writes to `.github/workflows/devinside-ci.yml` with a version marker (currently `# devinside-managed: node@v3`) so DevInside can recognize and update its own workflow. The `verify` job contains deterministic checkout/runtime/install preparation, optional Prisma generation, and only the present `lint`/`typecheck`/`test`/`build` steps. A provisioned repository also receives a separate push-only SonarQube job with full history, optional coverage generation, and Quality Gate enforcement. Triggers are `push` (default branch), `pull_request`, and `workflow_dispatch`; permissions remain `contents: read`. Unsupported stacks throw `STACK_UNSUPPORTED`.
 
 ## 4. Safe installation (PR-based, idempotent)
 
@@ -55,7 +56,7 @@ Idempotency comes from three guards: the on-default-branch check, `createBranch`
 
 ## 6. Security
 
-Installation tokens (never persisted, never exposed), App-only auth (no PAT for mutation), private key/secrets never leave the server. Every mutation validates organization membership + **manager role** and repository ownership (`loadRepository` + `requireOrganizationRole`), and writes an `AuditLog` row (`ci.enable` / `ci.disable` / `ci.sync`). The generated workflow itself is least-privilege (`contents: read`, no secrets).
+Installation tokens (never persisted, never exposed), App-only auth (no PAT for mutation), private key/secrets never leave the server. Every mutation validates organization membership + **manager role** and repository ownership (`loadRepository` + `requireOrganizationRole`), and writes an `AuditLog` row (`ci.enable` / `ci.disable` / `ci.sync`). The generated workflow itself is least-privilege (`contents: read`); only a provisioned Sonar job can read its project-scoped `SONAR_TOKEN` and public `SONAR_HOST_URL` repository secrets.
 
 ### GitHub App permissions required (add before using)
 
@@ -67,6 +68,7 @@ Committing under `.github/workflows/` needs the dedicated **Workflows** permissi
 | Workflows | Write | write files under `.github/workflows/` |
 | Pull requests | Read & Write | open the setup PR |
 | Actions | Read | list/sync workflow runs (Read & Write later for dispatch/cancel/rerun) |
+| Secrets | Read & Write | inject per-repository Sonar analysis token + public host URL |
 | Metadata | Read | mandatory baseline |
 
 A missing permission surfaces as `DEVOPS_PERMISSION_DENIED` with an actionable message.
@@ -86,12 +88,18 @@ A missing permission surfaces as `DEVOPS_PERMISSION_DENIED` with an actionable m
 | `POST /api/ci/disable` | pause management (manager) |
 | `POST /api/ci/sync` | refresh PR + runs (manager) |
 
-## 8. Future: SonarQube (the next feature) plugs in here
+## 8. SonarQube-managed workflow
 
-The template is versioned so DevInside can bump `node@v1 → node@v2` to add a Sonar scan step and open a **fresh update PR** through the exact same install flow — no redesign. Sonar credentials (`SONAR_TOKEN`, `SONAR_HOST_URL`) would be stored encrypted (reusing `token-cipher`) and injected as repository Actions secrets via a new provider method + the Secrets App permission. The `DevOpsProvider` dispatch/cancel/rerun extension points and the marker-based version detection are already in place.
+The versioned template used `node@v2` for the first Sonar scan job and now uses
+`node@v3` for the hardened contract: the SonarSource action is pinned to the
+immutable v8.1.0 commit, full history is checked out, detected Prisma/coverage
+steps run before analysis, and the scanner waits up to 300 seconds for the
+Quality Gate. A red gate fails only the separate `code_quality` job. The backend
+creates a project-scoped token and injects `SONAR_TOKEN` / `SONAR_HOST_URL`; no
+client manually enters a token.
 
 ## Implemented vs deferred
 
-**Implemented:** DevOpsProvider + GitHub impl, deterministic detection + versioned Node template, idempotent PR-based install, disable/sync/status/inspect, run synchronization + history, models + migration, `/api/ci` routes, repository CI dashboard, unit tests (detector, templates, provider idempotency/mapping), this doc.
+**Implemented:** DevOpsProvider + GitHub impl, deterministic detection + versioned Node template, idempotent PR-based install, disable/sync/status/inspect, run synchronization + history, models + migration, `/api/ci` routes, repository CI dashboard, automated SonarQube project/token/secret provisioning, push-only Quality Gate-enforced scans, and unit tests (detector, templates, provider idempotency/mapping).
 
-**Deferred:** applying the migration + adding the App's Workflows/Contents/PR write permissions (manual, Phase 2); non-Node templates (Flutter/Python/Java/Go/.NET — architecture ready, reported unsupported until built); workflow dispatch/cancel/rerun UI (provider extension points exist); SonarQube/secrets/deployment (explicitly out of scope — next feature).
+**Deferred:** non-Node templates (Flutter/Python/Java/Go/.NET — architecture ready, reported unsupported until built); workflow dispatch/cancel/rerun UI (provider extension points exist); SonarCloud-specific PR analysis/decoration.

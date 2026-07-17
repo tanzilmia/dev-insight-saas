@@ -176,6 +176,7 @@ export async function enableCi(actorId: string, repositoryId: string) {
 
 function pullRequestBody(stack: DetectedStack, sonarProjectKey?: string | null): string {
   const steps = ["install dependencies"]
+    .concat(stack.scripts.prismaGenerate ? ["generate Prisma client"] : [])
     .concat(stack.scripts.lint ? ["lint"] : [])
     .concat(stack.scripts.typecheck ? ["typecheck"] : [])
     .concat(stack.scripts.test ? ["test"] : [])
@@ -190,7 +191,7 @@ function pullRequestBody(stack: DetectedStack, sonarProjectKey?: string | null):
     ...(sonar
       ? [
           "",
-          `On each push to \`${stack.defaultBranch}\`, a **SonarQube code-quality scan** also runs (project \`${sonar}\`), sending results to your DevInside code-quality dashboard. It uses the \`SONAR_TOKEN\` / \`SONAR_HOST_URL\` repository secrets DevInside has set for you.`
+          `On each push to \`${stack.defaultBranch}\`, a **SonarQube code-quality scan** also runs (project \`${sonar}\`), waits for the Quality Gate, and sends results to your DevInside code-quality dashboard.${stack.scripts.testCoverage ? " It generates test coverage before scanning." : ""} It uses the \`SONAR_TOKEN\` / \`SONAR_HOST_URL\` repository secrets DevInside has set for you.`
         ]
       : []),
     "",

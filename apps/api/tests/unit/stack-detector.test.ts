@@ -22,7 +22,14 @@ describe("detectStack", () => {
           workspaces: ["apps/*"],
           engines: { node: ">=20" },
           dependencies: { next: "16.0.0" },
-          scripts: { lint: "eslint", typecheck: "tsc --noEmit", test: "vitest", build: "next build" }
+          scripts: {
+            lint: "eslint",
+            typecheck: "tsc --noEmit",
+            test: "vitest",
+            build: "next build",
+            "prisma:generate": "prisma generate",
+            "test:coverage": "vitest run --coverage"
+          }
         }),
         packageLock: "{}"
       }
@@ -34,7 +41,14 @@ describe("detectStack", () => {
       isMonorepo: true,
       framework: "next",
       nodeVersion: "20",
-      scripts: { lint: true, typecheck: true, test: true, build: true }
+      scripts: {
+        lint: true,
+        typecheck: true,
+        test: true,
+        build: true,
+        prismaGenerate: true,
+        testCoverage: true
+      }
     });
   });
 
@@ -66,7 +80,41 @@ describe("detectStack", () => {
       defaultBranch: "main",
       files: { ...noFiles, packageJson: pkg({ scripts: { test: "vitest" } }) }
     });
-    expect(stack.scripts).toEqual({ lint: false, typecheck: false, test: true, build: false });
+    expect(stack.scripts).toEqual({
+      lint: false,
+      typecheck: false,
+      test: true,
+      build: false,
+      prismaGenerate: false,
+      testCoverage: false
+    });
+  });
+
+  it("only detects the exact optional preparation script names", () => {
+    const present = detectStack({
+      defaultBranch: "main",
+      files: {
+        ...noFiles,
+        packageJson: pkg({
+          scripts: {
+            "prisma:generate": "prisma generate",
+            "test:coverage": "vitest run --coverage"
+          }
+        })
+      }
+    });
+    expect(present.scripts.prismaGenerate).toBe(true);
+    expect(present.scripts.testCoverage).toBe(true);
+
+    const absent = detectStack({
+      defaultBranch: "main",
+      files: {
+        ...noFiles,
+        packageJson: pkg({ scripts: { prisma: "prisma generate", coverage: "vitest --coverage" } })
+      }
+    });
+    expect(absent.scripts.prismaGenerate).toBe(false);
+    expect(absent.scripts.testCoverage).toBe(false);
   });
 
   it("accepts the alternate 'type-check' script name", () => {
