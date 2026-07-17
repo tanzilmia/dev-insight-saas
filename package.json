@@ -21,11 +21,13 @@
     "prod:logs": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml logs -f",
     "prod:ps": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml --profile sonar --profile openclaw ps",
     "prod:config": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml --profile sonar --profile openclaw config",
+    "prod:openclaw:cli": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml run --rm openclaw-cli",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "security:rotate-local-secrets": "node scripts/rotate-local-security-secrets.mjs",
+    "security:rotate-prod-openclaw-secrets": "node scripts/rotate-prod-openclaw-secrets.mjs deploy/.env.prod",
     "security:sync-openclaw-mcp-token": "node scripts/sync-openclaw-mcp-token.mjs",
     "prisma:generate": "npm run prisma:generate -w @devinsight/api"
   },

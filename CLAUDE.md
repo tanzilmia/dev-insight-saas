@@ -40,7 +40,9 @@ npm run lint         # eslint across workspaces
 npm run typecheck    # tsc --noEmit across workspaces
 npm run prisma:generate                       # regenerate the Prisma client (== -w @devinsight/api)
 npm run security:rotate-local-secrets         # rotate local JWT/encryption secrets (scripts/*.mjs)
+npm run security:rotate-prod-openclaw-secrets # atomically rotate gateway/service/MCP/context trust secrets
 npm run security:sync-openclaw-mcp-token      # sync the MCP bearer token into OpenClaw's .env
+npm run prod:openclaw:cli -- <args>            # one-off VPS Compose CLI sharing hosted OpenClaw state
 ```
 
 Other tooling: `scripts/install-hooks.sh` points `core.hooksPath` at `.githooks/` — its `pre-push` hook launches a **background** SonarQube scan (`scripts/sonar-scan.sh`, log at `.sonar-scan.log`, gitignored) and never blocks the push, skipping cleanly when `SONAR_TOKEN`/the local server is absent. CI is `.github/workflows/ci.yml` (push to `main` + PRs): `npm ci → prisma:generate → typecheck → lint → test → build`, no secrets/deploy.
@@ -98,10 +100,10 @@ Writes generally run in `prisma.$transaction` and record an `AuditLog` row. Data
 
 ## OpenClaw integration
 
-OpenClaw (openclaw.ai) is an external self-hosted AI-agent runtime, run separately in Docker (gateway on :18789 — setup in `docs/OPENCLAW_SETUP.md`). Two distinct paths:
+OpenClaw (openclaw.ai) is an external self-hosted AI-agent runtime. Production runs it in the `openclaw` Compose profile with MCP; port 18789 is private, while nginx publishes only authenticated `/openclaw/v1/chat/completions` and `/openclaw/healthz`. A local API uses `https://devinside.softathena.com/openclaw`, so it shares the hosted runtime without local OpenClaw/MCP containers. Setup: `docs/OPENCLAW_SETUP.md`. Two distinct paths:
 
 - **Dashboard report form** → `POST /api/openclaw/reports/generate` → the in-repo `orchestrateReport` directly (no external runtime involved).
-- **Chat widget** → `POST /api/openclaw/chat/stream` (NDJSON to the browser) → OpenClaw gateway (OpenAI-compatible SSE) → agent → MCP server (:4100) → service-key tool endpoints → `orchestrateReport`. Chat degrades gracefully to a "not connected" state when `OPENCLAW_GATEWAY_URL`/`TOKEN` are unset. MVP is single-org: the MCP server is pinned to one org/requester via its `run.sh`.
+- **Chat widget** → `POST /api/openclaw/chat/stream` (NDJSON to the browser) → OpenClaw gateway (OpenAI-compatible SSE) → agent → private MCP server (:4100) → service-key tool endpoints → `orchestrateReport`. Chat degrades gracefully to a "not connected" state when gateway config is unset. MCP has no fixed organization/requester; every tool call requires the API-signed ten-minute tenant context minted for the authenticated website request.
 
 ## Frontend architecture (`apps/web/src`)
 
@@ -137,11 +139,12 @@ Vitest is now installed and the pure-core unit suite is in place (see the Tests 
 
 ## Production deploy (VPS + Docker)
 
-Full guide: `docs/DEPLOYMENT.md`. Everything runs in Docker on one VPS behind an **nginx** reverse proxy on port 80 (`deploy/nginx.conf`: `/api/*` → api, else → web — single origin, HTTP-only/IP for now). The **DB stays on Neon** (no app Postgres container). Files: `docker-compose.prod.yml` (project `devinsight-prod`; core = nginx/web/api, plus `sonar` + `openclaw` Compose profiles), `apps/{api,web}/Dockerfile`, `integrations/devinsight-mcp-server/Dockerfile`, `deploy/env.prod.example` → `deploy/.env.prod`. Root scripts: `prod:up` / `prod:core` / `prod:down` / `prod:logs` / `prod:config`.
+Full guide: `docs/DEPLOYMENT.md`; hosted OpenClaw guide: `docs/OPENCLAW_SETUP.md`. Everything runs in Docker on one VPS behind an **HTTPS nginx** reverse proxy (`deploy/nginx.conf`: `/api/*` → api, `/sonarqube` → SonarQube, restricted `/openclaw` → gateway, else → web). The **DB stays on Neon**. Files: `docker-compose.prod.yml` (project `devinsight-prod`; core = nginx/web/api, plus `sonar` + `openclaw` profiles), `apps/{api,web}/Dockerfile`, `integrations/devinsight-mcp-server/Dockerfile`, `deploy/env.prod.example` → `deploy/.env.prod`. Root scripts include `prod:up`, `prod:core`, `prod:down`, `prod:logs`, `prod:config`, and `prod:openclaw:cli`.
 
 Things easy to get wrong here:
 - **Local dev is untouched.** Web standalone output is gated behind `NEXT_OUTPUT=standalone` (set only in `apps/web/Dockerfile`); `next dev`/`next build` see an empty config. Don't remove the gate.
 - **Same-origin web build.** The web image builds with `NEXT_PUBLIC_API_URL=""` so the browser calls `/api/...` on its own origin (nginx routes it). Don't hard-code the VPS IP into the build.
 - **nginx specifics.** `deploy/nginx.conf` needs `proxy_buffering off` on `/api/` (the NDJSON chat stream must not be buffered) and uses the Docker DNS `resolver 127.0.0.11` so rebuilt api/web containers don't 502. Keep both.
+- **OpenClaw exposure.** Never publish 18789 or 4100. nginx proxies only the exact Chat Completions and health routes; local development uses the same rotated gateway/context secrets through the HTTPS `/openclaw` base URL.
 - **Reuse the existing secrets.** Because production points at the same Neon DB, `deploy/.env.prod` must reuse the exact `GIT_TOKEN_ENCRYPTION_KEY` + `JWT_ACCESS_SECRET`; the encryption key still protects Sonar/channel secrets.
 - **Migrations auto-run** on api container start (`docker-entrypoint.sh` → `prisma migrate deploy`). **Single api instance only** (in-process scheduler + collection worker).

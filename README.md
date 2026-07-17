@@ -23,9 +23,11 @@ npm run docker:down     # stop containers without deleting persisted data
 
 ## Production deployment (VPS)
 
-The whole app ships as a Docker stack behind an nginx reverse proxy (single origin,
-port 80). The database stays on Neon. See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**
-for the full guide.
+The whole app ships as a Docker stack behind an HTTPS nginx reverse proxy. The
+database stays on Neon; SonarQube is published at `/sonarqube`, while only the
+authenticated OpenClaw Chat Completions route is published at `/openclaw` and MCP
+stays private. See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** and
+**[docs/OPENCLAW_SETUP.md](docs/OPENCLAW_SETUP.md)**.
 
 ```bash
 cp deploy/env.prod.example deploy/.env.prod   # then fill it in

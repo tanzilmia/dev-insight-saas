@@ -94,27 +94,95 @@ services:
       MCP_ACCESS_TOKEN: "${MCP_ACCESS_TOKEN:-}"
       MCP_HOST: "0.0.0.0"
       PORT: "4100"
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://localhost:4100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       - api
 
   # ---- OpenClaw runtime/gateway (external software). Profile: openclaw ----
-  # Advanced/optional. This starts the gateway image, but the gateway still needs
-  # its own configuration (LLM provider + `openclaw mcp set devinsight` pointing at
-  # http://mcp:4100/mcp) — follow docs/OPENCLAW_SETUP.md. State lives in the mounted
-  # ./deploy/openclaw dir. If you already run OpenClaw from its own repo, you can
-  # skip this service and just run the `mcp` service above.
+  # The gateway is private to this Compose network. nginx publishes only its
+  # authenticated Chat Completions route at /openclaw; the Control UI and direct
+  # port 18789 are intentionally not exposed on the VPS host.
   openclaw-gateway:
     profiles: ["openclaw"]
-    image: ghcr.io/openclaw/openclaw:latest
+    image: "${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}"
     restart: unless-stopped
-    ports:
-      - "18789:18789"
+    init: true
+    expose:
+      - "18789"
     env_file:
       - deploy/.env.prod
+    environment:
+      HOME: "/home/node"
+      OPENCLAW_HOME: "/home/node"
+      OPENCLAW_STATE_DIR: "/home/node/.openclaw"
+      OPENCLAW_CONFIG_PATH: "/home/node/.openclaw/openclaw.json"
+      OPENCLAW_CONFIG_DIR: "/home/node/.openclaw"
+      OPENCLAW_WORKSPACE_DIR: "/home/node/.openclaw/workspace"
+      OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-}"
+      OPENCLAW_DISABLE_BONJOUR: "1"
     volumes:
-      - ./deploy/openclaw:/data
+      - ./deploy/openclaw:/home/node/.openclaw
+    command:
+      - "node"
+      - "dist/index.js"
+      - "gateway"
+      - "--bind"
+      - "lan"
+      - "--port"
+      - "18789"
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
-      - mcp
+      mcp:
+        condition: service_healthy
+
+  # One-off operator CLI sharing the gateway's persistent state. It is on a
+  # separate profile so `--profile openclaw up` never starts an idle CLI
+  # container. Explicit `docker compose run openclaw-cli ...` still works.
+  openclaw-cli:
+    profiles: ["openclaw-cli"]
+    image: "${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}"
+    init: true
+    stdin_open: true
+    tty: true
+    env_file:
+      - deploy/.env.prod
+    environment:
+      HOME: "/home/node"
+      OPENCLAW_HOME: "/home/node"
+      OPENCLAW_STATE_DIR: "/home/node/.openclaw"
+      OPENCLAW_CONFIG_PATH: "/home/node/.openclaw/openclaw.json"
+      OPENCLAW_CONFIG_DIR: "/home/node/.openclaw"
+      OPENCLAW_WORKSPACE_DIR: "/home/node/.openclaw/workspace"
+      OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-}"
+      OPENCLAW_DISABLE_BONJOUR: "1"
+    volumes:
+      - ./deploy/openclaw:/home/node/.openclaw
+    entrypoint:
+      - "node"
+      - "dist/index.js"
 
   # ---- SonarQube Community Edition + its own Postgres. Profile: sonar ----
   sonar_db:

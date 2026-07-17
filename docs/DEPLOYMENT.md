@@ -60,7 +60,10 @@ Fill in at minimum:
 - Leave `NEXT_PUBLIC_API_URL=""` (same-origin API calls via nginx).
 - Configure `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY`, and
   `GITHUB_APP_WEBHOOK_SECRET` for customer repositories and live push ingestion.
-- LLM / OpenClaw / SonarQube values remain optional.
+- LLM / OpenClaw / SonarQube values remain optional. For the hosted OpenClaw
+  profile, set `GROQ_API_KEY`, keep
+  `OPENCLAW_GATEWAY_URL=http://openclaw-gateway:18789`, and follow
+  `docs/OPENCLAW_SETUP.md` before the first `prod:up`.
 
 ## 3. Start
 
@@ -87,6 +90,7 @@ npm run prod:ps      # status
 npm run prod:logs    # follow logs (Ctrl+C to stop following)
 npm run prod:down    # stop everything (volumes/data are kept)
 npm run prod:config  # render the fully-resolved compose config (validation)
+npm run prod:openclaw:cli -- <args> # one-off CLI using persistent gateway state
 ```
 
 Raw equivalent (if you prefer not to use the npm scripts):
@@ -99,7 +103,7 @@ docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml \
 ## 4. Updating a deployed version
 
 ```bash
-git pull
+git pull --ff-only
 npm run prod:up      # rebuilds changed images and restarts; migrations auto-apply
 ```
 
@@ -113,16 +117,18 @@ already-created migrations, never resets).
 Services without a profile (`nginx`, `web`, `api`) always start. The rest are
 opt-in:
 
-- **`sonar`** — `sonarqube` + its own Postgres. Bound to `127.0.0.1:9000` on the
-  VPS (not public). To use code-quality features, set `SONAR_TOKEN` /
-  `SONAR_BASE_URL=http://sonarqube:9000` in `deploy/.env.prod`, or configure a
-  per-org connection in the UI. Change `SONAR_DB_PASSWORD`.
+- **`sonar`** — `sonarqube` + its own Postgres. Direct port 9000 is retained for
+  VPS administration; client scans use the HTTPS `/sonarqube` route. Set
+  `SONAR_TOKEN`, `SONAR_BASE_URL=http://sonarqube:9000/sonarqube`, and
+  `SONAR_PUBLIC_URL=https://devinside.softathena.com/sonarqube`. Change
+  `SONAR_DB_PASSWORD`.
 - **`openclaw`** — `mcp` (our bridge, fully containerized) + `openclaw-gateway`
-  (the external OpenClaw runtime). The gateway still needs its own setup — an LLM
-  provider and `openclaw mcp set devinsight` pointing at `http://mcp:4100/mcp`.
-  Follow `docs/OPENCLAW_SETUP.md`; its state lives in `deploy/openclaw/`. If you
-  already run OpenClaw elsewhere, you can drop the gateway service and keep only
-  `mcp`. Without this profile the chat widget simply shows "not connected".
+  (the external OpenClaw runtime). State lives in `deploy/openclaw/`. Port 18789
+  is private to Compose; nginx exposes only authenticated
+  `/openclaw/v1/chat/completions` plus `/openclaw/healthz`. MCP stays internal at
+  `http://mcp:4100/mcp`. One-time Groq/onboarding/MCP registration and local
+  shared-runtime setup are in `docs/OPENCLAW_SETUP.md`. Without this profile the
+  chat widget simply shows "not connected".
 
 Start a subset, e.g. core + sonar only:
 
@@ -144,6 +150,9 @@ docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml \
 - **NDJSON chat stream.** `deploy/nginx.conf` sets `proxy_buffering off` on
   `/api/` so the AI chat streams token-by-token; don't remove it or the reply
   will only appear once, at the end.
+- **Restricted OpenClaw surface.** Do not publish ports 18789 or 4100. Local
+  development uses `OPENCLAW_GATEWAY_URL=https://devinside.softathena.com/openclaw`
+  with the same rotated gateway/context secrets; it never calls MCP directly.
 - **No 502 after updates.** The proxy uses Docker's DNS resolver
   (`resolver 127.0.0.11`) so it re-resolves `api`/`web` when they are rebuilt.
 

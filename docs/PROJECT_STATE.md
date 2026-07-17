@@ -59,6 +59,38 @@ Local release gate result: Prisma generate/validate passed; API/web/shared
 typecheck passed; API/web lint passed; **23 test files / 153 tests passed**; API,
 Next.js, and shared production builds passed.
 
+### Hosted OpenClaw + private MCP rollout (2026-07-17)
+
+The production/runtime configuration is implemented in the repository; the VPS
+operator rollout is the remaining step.
+
+- `openclaw-gateway` now follows the official `/home/node/.openclaw` persistent
+  layout, starts explicitly in local/lan mode, has a health check, and exposes
+  port 18789 only to the Compose network. `mcp` is health-checked and stays
+  internal on 4100. A separate one-off `openclaw-cli` profile shares the state
+  without being started by the normal `openclaw` profile.
+- nginx publishes only `POST /openclaw/v1/chat/completions` (Bearer-authenticated
+  by OpenClaw, streaming, rate-limited) and `GET /openclaw/healthz`. Every other
+  `/openclaw` path is `404`; the Control UI, WebSockets, MCP, and direct gateway
+  port are not public.
+- Hosted API config uses `OPENCLAW_GATEWAY_URL=http://openclaw-gateway:18789`.
+  Local API config uses `https://devinside.softathena.com/openclaw` with the same
+  gateway token and context-signing secret, so local chat reaches hosted
+  OpenClaw → private MCP → VPS API and verifies against shared Neon identities.
+- OpenClaw uses its official Groq provider (`GROQ_API_KEY`, paid account) with
+  `groq/llama-3.3-70b-versatile`. The DevInsight API keeps its existing
+  OpenAI-compatible Groq variables.
+- `npm run security:rotate-prod-openclaw-secrets` atomically replaces the
+  gateway, service, MCP, and context secrets without printing values. The
+  previously shared gateway/service values must not be reused.
+- Operator guide: `docs/OPENCLAW_SETUP.md`; design:
+  `docs/superpowers/specs/2026-07-17-hosted-openclaw-gateway-design.md`.
+- Release gate after implementation: production Compose renders cleanly;
+  API/web/shared typecheck, API/web lint, all production builds, and **24 test
+  files / 155 tests** pass. nginx syntax must still be run with `nginx -t` on
+  the VPS after pulling the image because the local Docker host did not have the
+  nginx image available during this change.
+
 ---
 
 ## 1. What this product is
