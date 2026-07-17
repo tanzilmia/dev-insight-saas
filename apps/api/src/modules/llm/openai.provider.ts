@@ -6,6 +6,22 @@ type OpenAIResponse = {
   choices?: { message?: { content?: string } }[];
 };
 
+function providerOptions(): Record<string, unknown> {
+  try {
+    const hostname = new URL(env.OPENAI_BASE_URL).hostname;
+    const isZai = hostname === "z.ai" || hostname.endsWith(".z.ai");
+    if (isZai && env.OPENAI_MODEL.startsWith("glm-")) {
+      // GLM enables deep thinking by default. Reports need visible Markdown,
+      // not a response budget spent only on reasoning_content.
+      return { thinking: { type: "disabled" } };
+    }
+  } catch {
+    // env validation already requires a URL; keep this adapter defensive.
+  }
+
+  return {};
+}
+
 /** OpenAI-compatible chat completions provider. */
 export class OpenAIProvider implements LLMProvider {
   get available(): boolean {
@@ -29,7 +45,8 @@ export class OpenAIProvider implements LLMProvider {
         body: JSON.stringify({
           model: env.OPENAI_MODEL,
           messages,
-          temperature: 0.4
+          temperature: 0.4,
+          ...providerOptions()
         })
       });
     } catch {

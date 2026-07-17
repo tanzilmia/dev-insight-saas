@@ -87,10 +87,11 @@ temporary Groq route exhausted its separate organization quota.
 - Operator guide: `docs/OPENCLAW_SETUP.md`; design:
   `docs/superpowers/specs/2026-07-17-hosted-openclaw-gateway-design.md`.
 - Release gate after the Z.AI restoration and streamed-error guard:
-  API/web/shared typecheck, API/web lint, all production builds, and **25 test
-  files / 158 tests** pass. Production logs confirm `zai/glm-5.2` with thinking
+  API/web/shared typecheck, API/web lint, all production builds, and **26 test
+  files / 160 tests** pass. Production logs confirm `zai/glm-5.2` with thinking
   disabled; the remaining acceptance checks are authenticated chat and a real
-  report request.
+  report request. The Z.AI report writer also explicitly disables thinking so
+  its response budget produces visible Markdown instead of reasoning-only output.
 
 ---
 
