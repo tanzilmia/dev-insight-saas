@@ -35,8 +35,8 @@ cd /opt/projects/dev-insight-saas
 nano deploy/.env.prod
 ```
 
-Keep the existing Neon, GitHub App, SonarQube, and DevInsight LLM values. Ensure
-these OpenClaw values exist:
+Keep the existing Neon, GitHub App, and SonarQube values. Configure both the
+OpenClaw agent and API report writer for the paid Z.AI Coding Plan:
 
 ```env
 OPENCLAW_GATEWAY_URL="http://openclaw-gateway:18789"
@@ -44,19 +44,32 @@ OPENCLAW_GATEWAY_TOKEN=""
 OPENCLAW_SERVICE_KEY=""
 OPENCLAW_CONTEXT_SIGNING_SECRET=""
 MCP_ACCESS_TOKEN=""
-GROQ_API_KEY="same paid Groq credential used by OPENAI_API_KEY"
+ZAI_API_KEY="same paid Z.AI Coding Plan key used by OPENAI_API_KEY"
+OPENAI_API_KEY="same paid Z.AI Coding Plan key used by ZAI_API_KEY"
+OPENAI_BASE_URL="https://api.z.ai/api/coding/paas/v4"
+OPENAI_MODEL="glm-5.2"
 OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:latest"
 ```
 
-`GROQ_API_KEY` and `OPENAI_API_KEY` may contain the same paid Groq credential.
-They have separate names because OpenClaw and the DevInsight API use different
-provider adapters.
+`ZAI_API_KEY` and `OPENAI_API_KEY` contain the same paid Z.AI credential. They
+have separate names because OpenClaw and the DevInsight API use different
+provider adapters. Keep `GROQ_API_KEY` only as an optional inactive fallback.
 
 Do not reuse any gateway/service token that has appeared in chat, screenshots,
 shell history, or logs. Rotate all four cross-service secrets atomically:
 
 ```bash
-npm run security:rotate-prod-openclaw-secrets
+docker compose \
+  --env-file deploy/.env.prod \
+  -f docker-compose.prod.yml \
+  run --rm --no-deps \
+  --entrypoint node \
+  -v "$PWD/scripts:/app/scripts:ro" \
+  -v "$PWD/deploy:/app/deploy" \
+  api \
+  /app/scripts/rotate-prod-openclaw-secrets.mjs \
+  /app/deploy/.env.prod
+
 chmod 600 deploy/.env.prod
 ```
 
@@ -85,10 +98,19 @@ recreation.
 ## 3. One-time OpenClaw onboarding
 
 Run onboarding through the one-off CLI container. It shares the same persistent
-state as the gateway but is not started by `npm run prod:up`:
+state as the gateway but is not started with the long-running stack:
 
 ```bash
-npm run prod:openclaw:cli -- onboard --mode local --no-install-daemon
+oc() {
+  docker compose \
+    --env-file deploy/.env.prod \
+    -f docker-compose.prod.yml \
+    --profile openclaw \
+    run --rm --no-deps \
+    openclaw-cli "$@"
+}
+
+oc onboard --mode local --no-install-daemon
 ```
 
 The later commands set the final provider and gateway values, so onboarding may
@@ -97,24 +119,28 @@ skip optional channels and providers.
 Explicitly configure the gateway:
 
 ```bash
-npm run prod:openclaw:cli -- config set gateway.mode local
-npm run prod:openclaw:cli -- config set gateway.auth.mode token
-npm run prod:openclaw:cli -- config set gateway.http.endpoints.chatCompletions.enabled true --strict-json
+oc config set gateway.mode local
+oc config set gateway.auth.mode token
+oc config set gateway.http.endpoints.chatCompletions.enabled true --strict-json
 ```
 
 The gateway command in Compose uses `--bind lan` so nginx can reach it over the
 Docker network. Port 18789 is not published on the VPS host.
 
-## 4. Configure the paid Groq provider
+## 4. Configure the paid Z.AI Coding Plan provider
 
 Install the official provider and select the existing model:
 
 ```bash
-npm run prod:openclaw:cli -- plugins install @openclaw/groq-provider
-npm run prod:openclaw:cli -- models set groq/llama-3.3-70b-versatile
+oc plugins install @openclaw/zai-provider
+oc plugins enable zai
+oc config set models.providers.zai.baseUrl \
+  '"https://api.z.ai/api/coding/paas/v4"' --strict-json
+oc models set zai/glm-5.2
+oc config set agents.defaults.thinkingDefault '"off"' --strict-json
 ```
 
-The CLI and gateway read `GROQ_API_KEY` from `deploy/.env.prod`. Never include
+The CLI and gateway read `ZAI_API_KEY` from `deploy/.env.prod`. Never include
 the key directly in the command.
 
 ## 5. Register the private DevInsight MCP bridge
@@ -124,7 +150,7 @@ important: `${MCP_ACCESS_TOKEN}` must stay as an environment reference in the
 OpenClaw config, not expand into a stored literal.
 
 ```bash
-npm run prod:openclaw:cli -- mcp set devinsight \
+oc mcp set devinsight \
   '{"url":"http://mcp:4100/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${MCP_ACCESS_TOKEN}"}}'
 ```
 
@@ -136,14 +162,24 @@ The bridge exposes only these tenant-scoped tools:
 ## 6. Start the hosted stack
 
 ```bash
-npm run prod:up
+docker compose \
+  --env-file deploy/.env.prod \
+  -f docker-compose.prod.yml \
+  --profile sonar \
+  --profile openclaw \
+  up -d --build
 ```
 
 This starts/recreates the core, SonarQube, MCP, and OpenClaw services. Check
 status and focused logs:
 
 ```bash
-npm run prod:ps
+docker compose \
+  --env-file deploy/.env.prod \
+  -f docker-compose.prod.yml \
+  --profile sonar \
+  --profile openclaw \
+  ps
 
 docker compose \
   --env-file deploy/.env.prod \
@@ -177,31 +213,50 @@ curl -sS -o /dev/null -w 'HTTP %{http_code}\n' \
 
 Expected: `HTTP 401` or another gateway authentication rejection.
 
-Load the environment without printing it and perform one real paid-Groq model
-turn:
+Perform one authenticated paid Z.AI model turn without printing the gateway
+token:
 
 ```bash
-(
-  set -a
-  . deploy/.env.prod
-  set +a
-
-  curl -fsS https://devinside.softathena.com/openclaw/v1/chat/completions \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer $OPENCLAW_GATEWAY_TOKEN" \
-    -d '{"model":"openclaw/default","stream":false,"messages":[{"role":"user","content":"Reply with: gateway ok"}]}'
-)
+docker compose \
+  --env-file deploy/.env.prod \
+  -f docker-compose.prod.yml \
+  exec -T api node --input-type=module <<'NODE'
+const response = await fetch(
+  "https://devinside.softathena.com/openclaw/v1/chat/completions",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.OPENCLAW_GATEWAY_TOKEN}`
+    },
+    body: JSON.stringify({
+      model: "openclaw/default",
+      stream: false,
+      messages: [{ role: "user", content: "Reply with exactly: gateway ok" }]
+    })
+  }
+);
+const body = await response.text();
+console.log("HTTP", response.status);
+try {
+  const data = JSON.parse(body);
+  console.log("Reply:", data.choices?.[0]?.message?.content ?? body.slice(0, 500));
+} catch {
+  console.log(body.slice(0, 500));
+}
+NODE
 ```
 
 Probe MCP after its container is healthy:
 
 ```bash
-npm run prod:openclaw:cli -- mcp doctor devinsight --probe
+oc mcp doctor devinsight --probe
+unset -f oc
 ```
 
 The probe must list both DevInsight tools. Finally, log in to the hosted website
 and request a repository report from the chat widget; this proves the context
-token, gateway, Groq, MCP, service key, and VPS API together.
+token, gateway, Z.AI, MCP, service key, and VPS API together.
 
 ## 8. Use the hosted runtime from local development
 
@@ -252,7 +307,12 @@ Normal deployment:
 
 ```bash
 git pull --ff-only
-npm run prod:up
+docker compose \
+  --env-file deploy/.env.prod \
+  -f docker-compose.prod.yml \
+  --profile sonar \
+  --profile openclaw \
+  up -d --build
 ```
 
 OpenClaw configuration and installed provider state survive because
@@ -260,15 +320,29 @@ OpenClaw configuration and installed provider state survive because
 secrets:
 
 ```bash
-npm run prod:openclaw:cli -- models list --provider groq
-npm run prod:openclaw:cli -- mcp status --verbose
+docker compose \
+  --env-file deploy/.env.prod \
+  -f docker-compose.prod.yml \
+  --profile openclaw \
+  run --rm --no-deps openclaw-cli models list --provider zai
+
+docker compose \
+  --env-file deploy/.env.prod \
+  -f docker-compose.prod.yml \
+  --profile openclaw \
+  run --rm --no-deps openclaw-cli mcp status --verbose
 ```
 
 To rotate the gateway/service trust boundary again:
 
 ```bash
-npm run security:rotate-prod-openclaw-secrets
-npm run prod:up
+# Re-run the one-off rotation command from section 1, then recreate the stack.
+docker compose \
+  --env-file deploy/.env.prod \
+  -f docker-compose.prod.yml \
+  --profile sonar \
+  --profile openclaw \
+  up -d --force-recreate
 ```
 
 Copy the newly rotated env to local again before using local chat.
@@ -282,10 +356,10 @@ Copy the newly rotated env to local again before using local chat.
   `deploy/openclaw` is writable by uid 1000.
 - **Public chat returns 401:** local/VPS API token does not match the gateway's
   `OPENCLAW_GATEWAY_TOKEN`; copy the latest env and restart the API.
-- **Groq returns 401/403:** confirm `GROQ_API_KEY` exists and the official Groq
+- **Z.AI returns 401/403:** confirm `ZAI_API_KEY` exists and the official Z.AI
   provider is installed; do not place the key in OpenClaw config.
-- **Groq returns 429:** inspect the paid account's organization limits and the
-  response rate-limit headers.
+- **Z.AI returns 429/1302/1305:** verify the Coding Plan endpoint first. These
+  responses can also indicate temporary plan capacity limits; retry later.
 - **MCP probe is unauthorized:** `MCP_ACCESS_TOKEN` differs between the gateway
   environment and `mcp` container; rotate/synchronize env and recreate both.
 - **Tool endpoint returns invalid service key:** `OPENCLAW_SERVICE_KEY` differs
@@ -308,5 +382,5 @@ fail-closed behavior remains unchanged.
 
 - OpenClaw Docker: <https://github.com/openclaw/openclaw/blob/main/docs/install/docker.md>
 - Gateway security: <https://github.com/openclaw/openclaw/blob/main/docs/gateway/security/index.md>
-- Groq provider: <https://docs.openclaw.ai/providers/groq>
+- Z.AI provider: <https://docs.openclaw.ai/providers/zai>
 - MCP configuration: <https://docs.openclaw.ai/cli/mcp>

@@ -61,8 +61,9 @@ Next.js, and shared production builds passed.
 
 ### Hosted OpenClaw + private MCP rollout (2026-07-17)
 
-The production/runtime configuration is implemented in the repository; the VPS
-operator rollout is the remaining step.
+The hosted gateway, private MCP bridge, and restricted nginx ingress are live on
+the VPS. The active provider was restored to the paid Z.AI Coding Plan after the
+temporary Groq route exhausted its separate organization quota.
 
 - `openclaw-gateway` now follows the official `/home/node/.openclaw` persistent
   layout, starts explicitly in local/lan mode, has a health check, and exposes
@@ -77,19 +78,19 @@ operator rollout is the remaining step.
   Local API config uses `https://devinside.softathena.com/openclaw` with the same
   gateway token and context-signing secret, so local chat reaches hosted
   OpenClaw → private MCP → VPS API and verifies against shared Neon identities.
-- OpenClaw uses its official Groq provider (`GROQ_API_KEY`, paid account) with
-  `groq/llama-3.3-70b-versatile`. The DevInsight API keeps its existing
-  OpenAI-compatible Groq variables.
-- `npm run security:rotate-prod-openclaw-secrets` atomically replaces the
-  gateway, service, MCP, and context secrets without printing values. The
-  previously shared gateway/service values must not be reused.
+- OpenClaw uses its official Z.AI provider (`ZAI_API_KEY`, paid Coding Plan) with
+  `zai/glm-5.2`. The DevInsight API report writer uses the same key through the
+  Global Coding Plan OpenAI-compatible endpoint.
+- The one-off production secret rotation script atomically replaces the gateway,
+  service, MCP, and context secrets without printing values. The previously
+  shared gateway/service values must not be reused.
 - Operator guide: `docs/OPENCLAW_SETUP.md`; design:
   `docs/superpowers/specs/2026-07-17-hosted-openclaw-gateway-design.md`.
-- Release gate after implementation: production Compose renders cleanly;
-  API/web/shared typecheck, API/web lint, all production builds, and **24 test
-  files / 155 tests** pass. nginx syntax must still be run with `nginx -t` on
-  the VPS after pulling the image because the local Docker host did not have the
-  nginx image available during this change.
+- Release gate after the Z.AI restoration and streamed-error guard:
+  API/web/shared typecheck, API/web lint, all production builds, and **25 test
+  files / 158 tests** pass. Production logs confirm `zai/glm-5.2` with thinking
+  disabled; the remaining acceptance checks are authenticated chat and a real
+  report request.
 
 ---
 
@@ -207,9 +208,9 @@ Added for provider integration (all have safe defaults / are optional):
 | `SONAR_TOKEN` | *(unset)* | server-side token to read the SonarQube Web API. **Unset → Code Quality page shows "not connected"** (graceful, like the LLM fallback) |
 | `SONAR_ORGANIZATION` | *(unset)* | empty for self-hosted; set for SonarCloud (also flips on branch/PR capabilities) |
 
-**Currently configured LLM:** Groq (OpenAI-compatible, free tier). The `.env` has:
-`OPENAI_BASE_URL="https://api.groq.com/openai/v1"`,
-`OPENAI_MODEL="llama-3.3-70b-versatile"`, and a Groq `gsk_...` key.
+**Currently configured LLM:** Z.AI Coding Plan (OpenAI-compatible). The `.env` has:
+`OPENAI_BASE_URL="https://api.z.ai/api/coding/paas/v4"`,
+`OPENAI_MODEL="glm-5.2"`, and the paid Z.AI key.
 To swap providers, only change these three env vars (no code change) — e.g.
 Gemini (`.../v1beta/openai`), Ollama (`http://localhost:11434/v1`), or OpenAI.
 

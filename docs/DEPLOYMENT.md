@@ -61,7 +61,7 @@ Fill in at minimum:
 - Configure `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY`, and
   `GITHUB_APP_WEBHOOK_SECRET` for customer repositories and live push ingestion.
 - LLM / OpenClaw / SonarQube values remain optional. For the hosted OpenClaw
-  profile, set `GROQ_API_KEY`, keep
+  profile, set `ZAI_API_KEY` and the matching Z.AI-compatible `OPENAI_*` values, keep
   `OPENCLAW_GATEWAY_URL=http://openclaw-gateway:18789`, and follow
   `docs/OPENCLAW_SETUP.md` before the first `prod:up`.
 
@@ -126,7 +126,7 @@ opt-in:
   (the external OpenClaw runtime). State lives in `deploy/openclaw/`. Port 18789
   is private to Compose; nginx exposes only authenticated
   `/openclaw/v1/chat/completions` plus `/openclaw/healthz`. MCP stays internal at
-  `http://mcp:4100/mcp`. One-time Groq/onboarding/MCP registration and local
+  `http://mcp:4100/mcp`. One-time Z.AI/onboarding/MCP registration and local
   shared-runtime setup are in `docs/OPENCLAW_SETUP.md`. Without this profile the
   chat widget simply shows "not connected".
 

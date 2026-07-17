@@ -7,6 +7,65 @@ type GatewayResponse = {
   choices?: { message?: { content?: string } }[];
 };
 
+type GatewayErrorResponse = {
+  error?:
+    | string
+    | {
+        message?: unknown;
+        type?: unknown;
+        code?: unknown;
+      };
+};
+
+const PROVIDER_LIMIT_MESSAGE =
+  "The AI service has reached its provider limit. Please try again later.";
+
+function gatewayError(payload: unknown, status?: number): AppError | null {
+  const body = payload as GatewayErrorResponse | null;
+  const upstreamError = body && typeof body === "object" ? body.error : undefined;
+
+  let details = "";
+  if (typeof upstreamError === "string") {
+    details = upstreamError;
+  } else if (upstreamError && typeof upstreamError === "object") {
+    details = [upstreamError.message, upstreamError.type, upstreamError.code]
+      .filter((value) => value !== undefined && value !== null)
+      .map(String)
+      .join(" ");
+  }
+
+  const isProviderLimit =
+    status === 429 ||
+    /rate.?limit|too many requests|request too large|tokens per (minute|day)|quota|\b130[25]\b/i.test(
+      details
+    );
+
+  if (isProviderLimit) {
+    return new AppError(429, PROVIDER_LIMIT_MESSAGE, "OPENCLAW_PROVIDER_LIMIT");
+  }
+
+  if (upstreamError !== undefined) {
+    return new AppError(502, "OpenClaw gateway request failed", "OPENCLAW_ERROR");
+  }
+
+  return null;
+}
+
+async function errorFromResponse(response: Response): Promise<AppError> {
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    // Some gateways return an empty or non-JSON error body. Only the HTTP
+    // status is needed to identify a rate limit; other details stay private.
+  }
+
+  return (
+    gatewayError(payload, response.status) ??
+    new AppError(502, "OpenClaw gateway request failed", "OPENCLAW_ERROR")
+  );
+}
+
 /** Whether the backend can reach a configured OpenClaw runtime. */
 export function isGatewayConfigured(): boolean {
   return Boolean(
@@ -27,7 +86,7 @@ function systemNote(contextToken: string): string {
 
 type StreamGatewayChunk = {
   choices?: { delta?: { content?: string }; message?: { content?: string } }[];
-};
+} & GatewayErrorResponse;
 
 /**
  * Asks the gateway for a streamed (OpenAI-compatible SSE) completion and yields
@@ -68,14 +127,29 @@ export async function* streamChatWithAgent(
     throw new AppError(502, "Could not reach the OpenClaw gateway", "OPENCLAW_UNREACHABLE");
   }
 
-  if (!response.ok || !response.body) {
+  if (!response.ok) {
+    throw await errorFromResponse(response);
+  }
+
+  if (!response.body) {
     throw new AppError(502, "OpenClaw gateway request failed", "OPENCLAW_ERROR");
   }
 
   // If the gateway ignored `stream`, deliver the whole reply as one chunk.
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("event-stream")) {
-    const data = (await response.json()) as GatewayResponse;
+    let data: GatewayResponse & GatewayErrorResponse;
+    try {
+      data = (await response.json()) as GatewayResponse & GatewayErrorResponse;
+    } catch {
+      throw new AppError(502, "OpenClaw gateway request failed", "OPENCLAW_ERROR");
+    }
+
+    const upstreamError = gatewayError(data, response.status);
+    if (upstreamError) {
+      throw upstreamError;
+    }
+
     const content = data.choices?.[0]?.message?.content?.trim() ?? "";
     if (content) {
       yield content;
@@ -107,20 +181,31 @@ export async function* streamChatWithAgent(
         if (payload === "[DONE]") {
           return;
         }
+        let parsed: StreamGatewayChunk;
         try {
-          const parsed = JSON.parse(payload) as StreamGatewayChunk;
-          const delta = parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.message?.content;
-          if (delta) {
-            yield delta;
-          }
+          parsed = JSON.parse(payload) as StreamGatewayChunk;
         } catch {
           // Ignore partial/keepalive frames.
+          continue;
+        }
+
+        const upstreamError = gatewayError(parsed, response.status);
+        if (upstreamError) {
+          throw upstreamError;
+        }
+
+        const delta = parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.message?.content;
+        if (delta) {
+          yield delta;
         }
       }
     }
-  } catch {
+  } catch (error) {
     if (signal?.aborted) {
       return; // client cancelled mid-stream
+    }
+    if (error instanceof AppError) {
+      throw error;
     }
     throw new AppError(502, "OpenClaw stream interrupted", "OPENCLAW_ERROR");
   }
