@@ -38,6 +38,7 @@ npm test             # Vitest unit suite (fans out; currently apps/api only)
 npm run build        # tsc / next build across workspaces
 npm run lint         # eslint across workspaces
 npm run typecheck    # tsc --noEmit across workspaces
+npm run test:coverage # coverage-enabled tests across workspaces that expose the script
 npm run prisma:generate                       # regenerate the Prisma client (== -w @devinsight/api)
 npm run security:rotate-local-secrets         # rotate local JWT/encryption secrets (scripts/*.mjs)
 npm run security:rotate-prod-openclaw-secrets # atomically rotate gateway/service/MCP/context trust secrets
@@ -45,7 +46,7 @@ npm run security:sync-openclaw-mcp-token      # sync the MCP bearer token into O
 npm run prod:openclaw:cli -- <args>            # one-off VPS Compose CLI sharing hosted OpenClaw state
 ```
 
-Other tooling: `scripts/install-hooks.sh` points `core.hooksPath` at `.githooks/` — its `pre-push` hook launches a **background** SonarQube scan (`scripts/sonar-scan.sh`, log at `.sonar-scan.log`, gitignored) and never blocks the push, skipping cleanly when `SONAR_TOKEN`/the local server is absent. CI is `.github/workflows/ci.yml` (push to `main` + PRs): `npm ci → prisma:generate → typecheck → lint → test → build`, no secrets/deploy.
+Other tooling: `scripts/install-hooks.sh` points `core.hooksPath` at `.githooks/` — its `pre-push` hook launches a **background** SonarQube scan (`scripts/sonar-scan.sh`, log at `.sonar-scan.log`, gitignored) and never blocks the push, skipping cleanly when `SONAR_TOKEN`/the local server is absent. Canonical CI is the panel-generated `.github/workflows/devinside-ci.yml` (`node@v3`): `verify` runs install → Prisma generation → lint/typecheck/test/build on PRs + `main`; the separate push-only `code_quality` job generates coverage, uses a project-scoped injected token, and waits for the SonarQube Quality Gate. Edit the generator, not the managed YAML.
 
 Prisma (run from `apps/api/`; CLI config in `prisma.config.ts`, DB is PostgreSQL/Neon):
 
