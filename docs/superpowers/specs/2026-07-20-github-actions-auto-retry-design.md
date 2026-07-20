@@ -127,7 +127,7 @@ Add a dedicated `CiRetryJob` model rather than overloading `WorkflowRun` with qu
 - repository and organization IDs;
 - source workflow run ID and the latest rerun ID;
 - workflow name, workflow ID, head SHA, and branch for correlation;
-- retry status: `PENDING`, `PROCESSING`, `TRIGGERED`, `EXHAUSTED`, or `SKIPPED`;
+- retry status: `PENDING`, `PROCESSING`, `TRIGGERED`, `SUCCEEDED`, `EXHAUSTED`, or `SKIPPED`;
 - attempt count and maximum attempts (initially 2);
 - retry reason/category and redacted diagnostic summary;
 - `nextAttemptAt`, `lockedUntil`, `lastError`, `createdAt`, and `updatedAt`;

@@ -11,4 +11,7 @@ echo "[devinsight-api] Applying database migrations (prisma migrate deploy)..."
 npx prisma migrate deploy
 
 echo "[devinsight-api] Starting API on port ${PORT:-4000}..."
-exec node dist/main.js
+if [ "$#" -eq 0 ]; then
+  set -- node dist/main.js
+fi
+exec "$@"

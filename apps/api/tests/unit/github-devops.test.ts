@@ -72,6 +72,48 @@ describe("GitHubDevOpsProvider", () => {
     });
   });
 
+  it("maps workflow jobs and their steps", async () => {
+    stubFetch(200, {
+      jobs: [
+        {
+          id: 77,
+          run_id: 99,
+          name: "code_quality",
+          status: "completed",
+          conclusion: "failure",
+          steps: [{ name: "SonarQube Scan", status: "completed", conclusion: "failure" }]
+        }
+      ]
+    });
+    await expect(githubDevOpsProvider.listWorkflowJobs("t", ref, "99")).resolves.toEqual([
+      {
+        jobId: "77",
+        runId: "99",
+        name: "code_quality",
+        status: "completed",
+        conclusion: "failure",
+        steps: [{ name: "SonarQube Scan", status: "completed", conclusion: "failure" }]
+      }
+    ]);
+  });
+
+  it("reads a workflow job log and triggers failed-job reruns", async () => {
+    const mock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("REFUSED_STREAM", { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 201 }));
+    vi.stubGlobal("fetch", mock);
+
+    await expect(githubDevOpsProvider.getWorkflowJobLog("t", ref, "77")).resolves.toBe(
+      "REFUSED_STREAM"
+    );
+    await expect(githubDevOpsProvider.rerunFailedJobs("t", ref, "99")).resolves.toBeUndefined();
+    expect(mock).toHaveBeenLastCalledWith(
+      "https://api.github.com/repos/acme/web/actions/runs/99/rerun-failed-jobs",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   it("getFile decodes base64 content, and returns null on 404", async () => {
     stubFetch(200, {
       content: Buffer.from("hello world").toString("base64"),

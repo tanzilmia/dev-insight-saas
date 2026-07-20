@@ -80,6 +80,23 @@ services:
       retries: 5
       start_period: 40s
 
+  # ---- Durable GitHub Actions retry worker ----
+  # Uses the same image and database as the API, but claims retry jobs through
+  # PostgreSQL leases so it can be scaled independently later.
+  ci-retry-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - deploy/.env.prod
+    environment:
+      NODE_ENV: production
+    command: ["node", "dist/ci-retry-worker-main.js"]
+    depends_on:
+      api:
+        condition: service_healthy
+
   # ---- OpenClaw AI chat bridge (our MCP server). Profile: openclaw ----
   mcp:
     profiles: ["openclaw"]

@@ -10,6 +10,7 @@ import type {
   PullRequestRef,
   RepositoryFile,
   RepositoryRef,
+  WorkflowJobDto,
   WorkflowRunDto
 } from "../devops-providers/devops-provider.js";
 
@@ -34,6 +35,19 @@ type GitHubRunResponse = {
   run_started_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+type GitHubJobResponse = {
+  id: number;
+  run_id: number;
+  name?: string | null;
+  status?: string | null;
+  conclusion?: string | null;
+  steps?: Array<{
+    name?: string | null;
+    status?: string | null;
+    conclusion?: string | null;
+  }>;
 };
 
 class GitHubDevOpsProvider implements DevOpsProvider {
@@ -342,6 +356,64 @@ class GitHubDevOpsProvider implements DevOpsProvider {
       startedAt: run.run_started_at ?? run.created_at ?? null,
       completedAt: run.status === "completed" ? (run.updated_at ?? null) : null
     }));
+  }
+
+  async listWorkflowJobs(
+    token: string,
+    ref: RepositoryRef,
+    runId: string
+  ): Promise<WorkflowJobDto[]> {
+    const response = await this.request(
+      `/repos/${this.encode(ref)}/actions/runs/${encodeURIComponent(runId)}/jobs?per_page=100`,
+      token
+    );
+    if (!response.ok) {
+      throw new AppError(502, "GitHub workflow jobs request failed", "GIT_PROVIDER_ERROR");
+    }
+    const data = (await response.json()) as { jobs?: GitHubJobResponse[] };
+    return (data.jobs ?? []).map((job) => ({
+      jobId: String(job.id),
+      runId: String(job.run_id),
+      name: job.name ?? null,
+      status: job.status ?? null,
+      conclusion: job.conclusion ?? null,
+      steps: (job.steps ?? []).map((step) => ({
+        name: step.name ?? "",
+        status: step.status ?? null,
+        conclusion: step.conclusion ?? null
+      }))
+    }));
+  }
+
+  async getWorkflowJobLog(token: string, ref: RepositoryRef, jobId: string): Promise<string> {
+    const response = await this.request(
+      `/repos/${this.encode(ref)}/actions/jobs/${encodeURIComponent(jobId)}/logs`,
+      token
+    );
+    if (response.status === 404) return "";
+    if (!response.ok) {
+      throw new AppError(502, "GitHub workflow log request failed", "GIT_PROVIDER_ERROR");
+    }
+    return (await response.text()).slice(-12000);
+  }
+
+  async rerunFailedJobs(token: string, ref: RepositoryRef, runId: string): Promise<void> {
+    const response = await this.request(
+      `/repos/${this.encode(ref)}/actions/runs/${encodeURIComponent(runId)}/rerun-failed-jobs`,
+      token,
+      { method: "POST" }
+    );
+    if (response.status === 403) {
+      throw new AppError(
+        403,
+        "GitHub refused the retry. The DevInsight App needs Actions write permission on this repository.",
+        "DEVOPS_ACTIONS_PERMISSION_DENIED"
+      );
+    }
+    this.assertWritable(response);
+    if (!response.ok) {
+      throw new AppError(502, "GitHub failed to rerun workflow jobs", "GIT_PROVIDER_ERROR");
+    }
   }
 
   /**

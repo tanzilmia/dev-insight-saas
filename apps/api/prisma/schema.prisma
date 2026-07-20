@@ -115,6 +115,7 @@ model Organization {
   githubAppInstallations GitHubAppInstallation[]
   ciConfigurations      CiConfiguration[]
   workflowRuns          WorkflowRun[]
+  ciRetryJobs            CiRetryJob[]
   codeQualityConnection CodeQualityConnection?
   codeQualitySnapshots  CodeQualitySnapshot[]
   requestLogs           RequestLog[]
@@ -302,6 +303,7 @@ model Repository {
   access         RepositoryAccess[]
   ciConfiguration CiConfiguration?
   workflowRuns    WorkflowRun[]
+  ciRetryJobs     CiRetryJob[]
   contributors   ContributorIdentity[]
   commits        Commit[]
   coverage       RepositoryCoverage[]
@@ -879,4 +881,36 @@ model WorkflowRun {
 
   @@unique([repositoryId, runId])
   @@index([repositoryId, startedAt])
+}
+
+/// Durable automatic retry state for transient GitHub Actions failures.
+/// This is deliberately separate from WorkflowRun because WorkflowRun remains
+/// a provider-owned mirror while this table owns retry orchestration state.
+model CiRetryJob {
+  id             String   @id @default(cuid())
+  organizationId String
+  repositoryId   String
+  sourceRunId    String
+  latestRunId    String?
+  workflowId     String?
+  workflowName   String?
+  headSha        String?
+  branch         String?
+  status         String   @default("PENDING")
+  attempts       Int      @default(0)
+  maxAttempts    Int      @default(2)
+  reason         String
+  diagnostic     String?
+  nextAttemptAt  DateTime @default(now())
+  lockedUntil    DateTime?
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, sourceRunId])
+  @@index([status, nextAttemptAt])
+  @@index([repositoryId, updatedAt])
 }

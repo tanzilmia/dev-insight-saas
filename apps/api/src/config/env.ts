@@ -42,6 +42,10 @@ const envSchema = z.object({
   // avoids newline issues in env) or a raw PEM with literal newlines.
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
   GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
+  CI_AUTO_RETRY_ENABLED: z.coerce.boolean().default(false),
+  CI_AUTO_RETRY_QUEUE_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  CI_AUTO_RETRY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(120000),
+  CI_AUTO_RETRY_MAX_REPOSITORIES_PER_POLL: z.coerce.number().int().positive().default(25),
   // Code-quality provider (SonarQube self-hosted, or SonarCloud with the same
   // Web API). All optional — code-quality features stay unavailable (with a UI
   // hint) until SONAR_TOKEN is set. SONAR_ORGANIZATION is empty for self-hosted

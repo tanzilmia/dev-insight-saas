@@ -212,6 +212,26 @@ export function RepositoryCiDetail({ repositoryId }: { repositoryId: string }) {
                 </div>
               </dl>
 
+              {status.autoRetry ? (
+                <div className="mt-5 rounded-2xl border border-(--border) bg-(--surface-soft) px-4 py-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-black text-(--text)">Automatic failure recovery</p>
+                    <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-black text-amber-600 dark:text-amber-400">
+                      {status.autoRetry.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-(--muted)">
+                    {status.autoRetry.status === "PENDING"
+                      ? `DevInsight will retry this transient failure (${status.autoRetry.attempts}/${status.autoRetry.maxAttempts} used).`
+                      : status.autoRetry.status === "TRIGGERED"
+                        ? `A failed-job retry is running (${status.autoRetry.attempts}/${status.autoRetry.maxAttempts}).`
+                        : status.autoRetry.status === "EXHAUSTED"
+                          ? "Automatic retry limit reached; inspect the workflow for the remaining failure."
+                          : status.autoRetry.diagnostic ?? "The latest failure was reviewed by automatic recovery."}
+                  </p>
+                </div>
+              ) : null}
+
               {error ? (
                 <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-600 dark:text-red-400">
                   {error}

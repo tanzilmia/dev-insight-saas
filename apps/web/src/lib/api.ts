@@ -398,6 +398,14 @@ export type CiStatus = {
   pullRequest: { number: number; url: string | null; state: string | null } | null;
   lastSyncedAt: string | null;
   latestRun: CiWorkflowRun | null;
+  autoRetry: {
+    status: string;
+    attempts: number;
+    maxAttempts: number;
+    reason: string;
+    diagnostic: string | null;
+    updatedAt: string;
+  } | null;
 };
 
 export type CiInspection = {

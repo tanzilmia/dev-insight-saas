@@ -54,6 +54,21 @@ export type WorkflowRunDto = {
   completedAt: string | null;
 };
 
+export type WorkflowJobStepDto = {
+  name: string;
+  status: string | null;
+  conclusion: string | null;
+};
+
+export type WorkflowJobDto = {
+  jobId: string;
+  runId: string;
+  name: string | null;
+  status: string | null;
+  conclusion: string | null;
+  steps: WorkflowJobStepDto[];
+};
+
 export interface DevOpsProvider {
   getDefaultBranch(token: string, ref: RepositoryRef): Promise<string>;
   getFile(
@@ -93,6 +108,9 @@ export interface DevOpsProvider {
     ref: RepositoryRef,
     options?: { perPage?: number; branch?: string }
   ): Promise<WorkflowRunDto[]>;
+  listWorkflowJobs(token: string, ref: RepositoryRef, runId: string): Promise<WorkflowJobDto[]>;
+  getWorkflowJobLog(token: string, ref: RepositoryRef, jobId: string): Promise<string>;
+  rerunFailedJobs(token: string, ref: RepositoryRef, runId: string): Promise<void>;
   /**
    * Creates or updates a repository Actions secret. The value is encrypted in
    * transit with the repository's public key per the provider's own scheme

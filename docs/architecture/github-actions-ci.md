@@ -110,8 +110,14 @@ Required GitHub App repository permissions are:
 | Contents | Read & Write | inspect files and commit the managed workflow branch |
 | Workflows | Write | write under `.github/workflows/` |
 | Pull requests | Read & Write | open and merge the setup PR |
-| Actions | Read | synchronize workflow runs |
+| Actions | Write | synchronize workflow runs and automatically rerun transient failures |
 | Secrets | Read & Write | inject the analysis token and public host URL |
+
+The GitHub App must also subscribe to the **Workflow runs** webhook event. DevInsight
+uses signed `workflow_run.completed` deliveries as the fast path for automatic
+retry; the separate `ci-retry-worker` periodically reconciles recent runs as a
+fallback when a webhook is delayed or missed. Set `CI_AUTO_RETRY_ENABLED=true` in
+the production environment to enable the worker.
 
 ## 6. Live dogfood evidence
 
@@ -144,6 +150,7 @@ were verified through GitHub's metadata endpoint.
 | Missing blame | checkout remains `fetch-depth: 0` |
 | Missing coverage | `npm run test:coverage` produced `apps/api/coverage/lcov.info` |
 | Quality Gate timeout | Sonar Compute Engine health and the explicit 300-second limit |
+| Transient Actions/Sonar failure | DevInsight classifies known transport/runner failures and retries failed jobs up to twice; code/test/lint/build and quality-gate failures are not retried |
 
 ## 8. Deferred
 

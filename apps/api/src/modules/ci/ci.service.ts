@@ -1,4 +1,4 @@
-import type { CiConfiguration, Repository, WorkflowRun } from "@prisma/client";
+import type { CiConfiguration, CiRetryJob, Repository, WorkflowRun } from "@prisma/client";
 
 import { prisma } from "../../config/database.js";
 import { AppError } from "../../common/errors/app-error.js";
@@ -330,7 +330,13 @@ export async function getCiStatus(actorId: string, repositoryId: string) {
   await requireOrganizationMember(actorId, repository.organizationId);
 
   const config = await prisma.ciConfiguration.findUnique({ where: { repositoryId } });
-  return statusFor(repository, config, await latestRun(repositoryId), repository.defaultBranch);
+  return statusFor(
+    repository,
+    config,
+    await latestRun(repositoryId),
+    repository.defaultBranch,
+    await latestRetry(repositoryId)
+  );
 }
 
 export async function listWorkflowRuns(actorId: string, repositoryId: string) {
@@ -368,6 +374,16 @@ async function latestRun(repositoryId: string): Promise<WorkflowRun | null> {
   return prisma.workflowRun.findFirst({
     where: { repositoryId },
     orderBy: { startedAt: "desc" }
+  });
+}
+
+async function latestRetry(repositoryId: string): Promise<CiRetryJob | null> {
+  return prisma.ciRetryJob.findFirst({
+    where: {
+      repositoryId,
+      status: { in: ["PENDING", "PROCESSING", "TRIGGERED", "EXHAUSTED", "SKIPPED", "SUCCEEDED"] }
+    },
+    orderBy: { updatedAt: "desc" }
   });
 }
 
@@ -410,7 +426,8 @@ function statusFor(
   repository: Repository,
   config: CiConfiguration | null,
   latest: WorkflowRun | null,
-  defaultBranch: string | null
+  defaultBranch: string | null,
+  retry: CiRetryJob | null = null
 ) {
   const base = repository.remoteUrl.replace(/\/$/, "");
   const enabled = config?.status === "ENABLED";
@@ -436,6 +453,16 @@ function statusFor(
         }
       : null,
     lastSyncedAt: config?.lastSyncedAt ?? null,
-    latestRun: latest ? toRun(latest) : null
+    latestRun: latest ? toRun(latest) : null,
+    autoRetry: retry
+      ? {
+          status: retry.status,
+          attempts: retry.attempts,
+          maxAttempts: retry.maxAttempts,
+          reason: retry.reason,
+          diagnostic: retry.diagnostic,
+          updatedAt: retry.updatedAt
+        }
+      : null
   };
 }
