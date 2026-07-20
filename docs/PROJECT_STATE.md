@@ -5,7 +5,16 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-17.
+> Last updated: 2026-07-18.
+
+## 0.1 Current analysis handoff
+
+The exhaustive current-code audit and API contract reference is now available at
+docs/DEVINSIGHT_PROJECT_ANALYSIS_FOR_CHATGPT.md. It documents the implemented
+frontend features, backend modules, all 97 current HTTP routes, request/query
+validation, response DTO shapes, authentication boundaries, database models,
+report pipeline, integrations, tests, and known stale-doc mismatches. Future AI
+agents should read it together with this file and CLAUDE.md.
 
 ---
 
