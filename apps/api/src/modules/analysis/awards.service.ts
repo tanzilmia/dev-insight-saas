@@ -246,7 +246,7 @@ async function buildAwardDetails(
       .slice(0, 4)
       .map(([module]) => ({ module }));
     result.set(candidate.userId, {
-      projects: [...projects].sort().slice(0, 6),
+      projects: [...projects].sort((a, b) => a.localeCompare(b)).slice(0, 6),
       workType: humanizeWorkMix(categories).text,
       areas: humanizeAreas(topModules).slice(0, 4)
     });
