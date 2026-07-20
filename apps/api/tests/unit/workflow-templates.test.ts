@@ -32,8 +32,8 @@ describe("generateWorkflow", () => {
     const wf = generateWorkflow(stack());
     expect(wf.path).toBe(MANAGED_WORKFLOW_PATH);
     expect(wf.templateId).toBe("node");
-    expect(wf.templateVersion).toBe("3");
-    expect(wf.content).toContain("# devinside-managed: node@v3");
+    expect(wf.templateVersion).toBe("4");
+    expect(wf.content).toContain("# devinside-managed: node@v4");
     expect(wf.content).toContain("name: CI");
     expect(wf.content).toContain("workflow_dispatch:");
     expect(wf.content).toContain("pull_request:");
@@ -73,6 +73,9 @@ describe("generateWorkflow", () => {
       "SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995"
     );
     expect(wf.content).toContain("-Dsonar.projectKey=devinside-acme-web");
+    expect(wf.content).toContain(
+      "-Dsonar.javascript.lcov.reportPaths=apps/api/coverage/lcov.info"
+    );
     expect(wf.content).toContain("-Dsonar.qualitygate.wait=true");
     expect(wf.content).toContain("-Dsonar.qualitygate.timeout=300");
     // Full history for accurate SCM-blame author attribution.
@@ -172,7 +175,7 @@ describe("parseManagedMarker", () => {
   it("round-trips its own generated output", () => {
     expect(parseManagedMarker(generateWorkflow(stack()).content)).toEqual({
       templateId: "node",
-      templateVersion: "3"
+      templateVersion: "4"
     });
   });
 });

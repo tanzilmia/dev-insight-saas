@@ -23,7 +23,7 @@ export const MANAGED_WORKFLOW_PATH = ".github/workflows/devinside-ci.yml";
 export const MANAGED_MARKER_PREFIX = "# devinside-managed:";
 
 const TEMPLATE_ID = "node";
-const TEMPLATE_VERSION = "3";
+const TEMPLATE_VERSION = "4";
 
 // Immutable v8.1.0 commit. v4 is affected by CVE-2025-58178; pinning the exact
 // patched commit also prevents a mutable tag from changing the executed action.
@@ -173,6 +173,7 @@ export function generateWorkflow(
       "        with:",
       "          args: >",
       `            -Dsonar.projectKey=${sonarProjectKey}`,
+      "            -Dsonar.javascript.lcov.reportPaths=apps/api/coverage/lcov.info",
       "            -Dsonar.qualitygate.wait=true",
       "            -Dsonar.qualitygate.timeout=300"
     );
