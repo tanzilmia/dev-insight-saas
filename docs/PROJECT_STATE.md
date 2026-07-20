@@ -5,7 +5,16 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-17.
+> Last updated: 2026-07-20.
+
+## 0.1 Current analysis handoff
+
+The exhaustive current-code audit and API contract reference is now available at
+docs/DEVINSIGHT_PROJECT_ANALYSIS_FOR_CHATGPT.md. It documents the implemented
+frontend features, backend modules, all 97 current HTTP routes, request/query
+validation, response DTO shapes, authentication boundaries, database models,
+report pipeline, integrations, tests, and known stale-doc mismatches. Future AI
+agents should read it together with this file and CLAUDE.md.
 
 ---
 
@@ -40,6 +49,12 @@ path; those notes remain as implementation history, not current behavior.
   `webhookExternalId`, and `webhookSecret`. `Repository.appInstallationId` is now
   required with `ON DELETE CASCADE`. Runtime App deselect/disconnect/uninstall
   applies the same transactional cleanup rules.
+- Bot commit exclusion (2026-07-20): a shared GitHub bot-identity predicate now
+  filters `[bot]` usernames and known service accounts before commit details,
+  `Commit`, `ChangedFile`, or `CommitBranch` rows are written. The filter is
+  active for push webhooks, manual/automatic collection, and backfills. Branch
+  head metadata still advances on bot-only pushes; historical bot rows are kept
+  and are not deleted by this behavior change.
 - `PUBLIC_API_URL` was removed. The public App webhook URL is configured once in
   GitHub as `https://devinside.softathena.com/api/webhooks/github-app`.
 - Production is live at `https://devinside.softathena.com` on the Docker/nginx VPS;
@@ -2168,13 +2183,17 @@ and project metadata independently, preserves the environment-fallback connectio
 and settles to a stable empty-project state instead of showing an infinite loading indicator. Four provider
 regression tests cover the updated authentication and response handling.
 
-**Managed workflow v3 hardening + DevInsight dogfood preparation (2026-07-17):** `node@v3` replaces the
+**Managed workflow v3 hardening + DevInsight live dogfood (2026-07-17):** `node@v3` replaces the
 vulnerable `sonarqube-scan-action@v4` line (CVE-2025-58178) with the immutable v8.1.0 commit, detects exact
 root `prisma:generate` / `test:coverage` scripts, prepares the Sonar job's own dependencies and coverage,
 and enforces the Quality Gate with a 300-second wait. The root now fans out `npm run test:coverage` across
 workspaces; the CI inspection web type mirrors both new capability flags. Verified locally: 162 tests,
 workspace typecheck/lint/build, coverage generation, and a real YAML parse of the generated `verify` +
-`code_quality` jobs all pass. Live dogfood activation through **Enable scan** is the remaining acceptance step.
+`code_quality` jobs all pass. Live dogfood used the production Neon record + GitHub App and the exact
+panel service: it created the tenant-safe Sonar project, generated/injected project-scoped secrets, opened
+and merged managed-workflow PR #4, and ran both jobs successfully. Sonar analyzed merge revision `42d1595d`
+with Quality Gate `OK` and 13.3% imported coverage; DevInsight's tenant-guarded read path returned the live
+measures. The verified managed workflow is now canonical; the temporary handwritten CI was removed.
 
 **SonarCloud migration stays config-only** (the same `SonarQubeProvider` methods exist; SonarCloud project
 creation differs but the read path is identical).

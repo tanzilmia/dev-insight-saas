@@ -16,6 +16,7 @@ import {
   moduleFromPath
 } from "../report-engine/commit-classifier.js";
 import { getGitProvider } from "../git-providers/provider-registry.js";
+import { isBotUsername } from "../git-providers/bot-identity.js";
 import { mergeIntervals, subtractCovered, type Interval } from "./coverage.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -282,12 +283,17 @@ export async function ingestBranchRange(
     return { newCollected: 0, detailCapped: false, cancelled: false };
   }
 
+  const eligibleCommits = commits.filter((commit) => !isBotUsername(commit.username));
+
   const existing = await prisma.commit.findMany({
-    where: { repositoryId: repository.id, sha: { in: commits.map((commit) => commit.sha) } },
+    where: {
+      repositoryId: repository.id,
+      sha: { in: eligibleCommits.map((commit) => commit.sha) }
+    },
     select: { id: true, sha: true }
   });
   const idBySha = new Map(existing.map((commit) => [commit.sha, commit.id]));
-  const newCommits = commits.filter((commit) => !idBySha.has(commit.sha));
+  const newCommits = eligibleCommits.filter((commit) => !idBySha.has(commit.sha));
   const cap = options.maxDetailCommits ?? MAX_DETAIL_COMMITS;
   const toCollect = newCommits.slice(0, cap);
 
@@ -369,7 +375,7 @@ export async function ingestBranchRange(
   }
 
   // Link every stored commit in this window to the branch (idempotent).
-  const links = commits
+  const links = eligibleCommits
     .map((commit) => idBySha.get(commit.sha))
     .filter((commitId): commitId is string => Boolean(commitId))
     .map((commitId) => ({ commitId, branchId: branch.id }));
@@ -1117,14 +1123,19 @@ export async function ingestPushedCommits(
     update: { headSha: head.sha, lastSyncedAt: new Date() }
   });
 
+  const eligibleCommits = commits.filter((commit) => !isBotUsername(commit.username));
+
   const existing = await prisma.commit.findMany({
-    where: { repositoryId: repository.id, sha: { in: commits.map((commit) => commit.sha) } },
+    where: {
+      repositoryId: repository.id,
+      sha: { in: eligibleCommits.map((commit) => commit.sha) }
+    },
     select: { id: true, sha: true }
   });
   const idBySha = new Map(existing.map((commit) => [commit.sha, commit.id]));
 
   let collected = 0;
-  for (const commit of commits) {
+  for (const commit of eligibleCommits) {
     if (idBySha.has(commit.sha)) {
       continue;
     }
@@ -1177,7 +1188,7 @@ export async function ingestPushedCommits(
     }
   }
 
-  const links = commits
+  const links = eligibleCommits
     .map((commit) => idBySha.get(commit.sha))
     .filter((commitId): commitId is string => Boolean(commitId))
     .map((commitId) => ({ commitId, branchId: branch.id }));
