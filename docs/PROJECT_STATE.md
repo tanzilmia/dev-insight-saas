@@ -171,6 +171,12 @@ abstraction (SonarCloud-swap-ready) feeds a per-developer **Code Quality** dashb
 page, plus a pre-push git hook that auto-scans in the background. Full details and
 the remaining client-repo provisioning plan in **§12**.
 
+**Public landing page (2026-07-20):** the root Next.js page now follows a
+“Signal → Story” narrative with a product preview, trust strip, Connect → Collect
+→ Understand → Act workflow, outcome cards, capability grid, and closing CTA. It
+remains static, theme-aware, responsive, and uses only existing local routes and
+Lucide icons.
+
 ---
 
 ## 3. Monorepo layout & how to run

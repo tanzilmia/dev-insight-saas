@@ -293,6 +293,238 @@ input {
   background: var(--border);
 }
 
+/* ---------- Public landing page ---------- */
+.landing-page {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 25rem),
+    radial-gradient(circle at 8% 42%, color-mix(in srgb, var(--accent-3) 6%, transparent), transparent 24rem),
+    var(--background);
+}
+
+.landing-grid {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: -2;
+  height: 52rem;
+  pointer-events: none;
+  opacity: 0.45;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px);
+  background-size: 4.5rem 4.5rem;
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+
+.landing-orb {
+  position: absolute;
+  z-index: -1;
+  width: 18rem;
+  height: 18rem;
+  pointer-events: none;
+  border-radius: 999px;
+  filter: blur(70px);
+  opacity: 0.13;
+}
+
+.landing-orb-one {
+  top: 12rem;
+  right: -6rem;
+  background: var(--accent);
+}
+
+.landing-orb-two {
+  top: 42rem;
+  left: -8rem;
+  background: var(--accent-3);
+}
+
+.landing-focus:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 65%, white);
+  outline-offset: 4px;
+}
+
+.landing-signal-wrap {
+  position: relative;
+}
+
+.landing-signal-frame {
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: 2.15rem;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 42%),
+    color-mix(in srgb, var(--surface) 94%, var(--accent));
+  box-shadow:
+    0 30px 80px -38px color-mix(in srgb, var(--accent) 35%, transparent),
+    var(--card-shadow-lg);
+}
+
+.landing-signal-frame::before {
+  position: absolute;
+  inset: 2.4rem -1rem auto auto;
+  width: 5rem;
+  height: 5rem;
+  content: "";
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  filter: blur(30px);
+  opacity: 0.7;
+}
+
+.landing-signal-inner {
+  position: relative;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-soft) 86%, transparent);
+}
+
+.signal-metric {
+  min-height: 7.8rem;
+  border: 1px solid var(--border);
+  border-radius: 1.2rem;
+  padding: 0.9rem;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.signal-metric-accent {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.signal-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 2.4rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.signal-status {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.signal-status-emerald {
+  background: #10b981;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #10b981 14%, transparent);
+}
+
+.signal-status-indigo {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.signal-status-amber {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #f59e0b 14%, transparent);
+}
+
+.section-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.section-title {
+  max-width: 42rem;
+  margin-top: 1.2rem;
+  color: var(--text);
+  font-size: clamp(2.25rem, 5vw, 4.25rem);
+  font-weight: 900;
+  letter-spacing: -0.055em;
+  line-height: 0.98;
+}
+
+.section-copy {
+  max-width: 38rem;
+  margin-top: 1.25rem;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.workflow-card {
+  min-height: 18rem;
+}
+
+.workflow-arrow {
+  position: absolute;
+  top: 2.1rem;
+  right: -0.75rem;
+  z-index: 2;
+}
+
+.signal-icon {
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-soft));
+}
+
+.outcome-card {
+  transition: transform 0.2s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.outcome-card:hover {
+  transform: translateX(0.35rem);
+}
+
+.capability-card {
+  min-height: 17rem;
+}
+
+.landing-cta {
+  border: 1px solid color-mix(in srgb, #a5b4fc 38%, transparent);
+  background:
+    radial-gradient(circle at 82% 20%, rgba(129, 140, 248, 0.55), transparent 18rem),
+    linear-gradient(125deg, #312e81, #4338ca 55%, #4f46e5);
+  box-shadow: 0 26px 60px -35px rgba(79, 70, 229, 0.7);
+}
+
+.landing-cta::before {
+  position: absolute;
+  inset: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1.5rem;
+  content: "";
+  pointer-events: none;
+}
+
+.landing-cta-mark {
+  position: absolute;
+  right: 4%;
+  bottom: -2rem;
+  color: rgba(224, 231, 255, 0.16);
+  transform: rotate(-14deg);
+}
+
+@media (max-width: 640px) {
+  .landing-grid {
+    height: 45rem;
+    background-size: 3rem 3rem;
+  }
+
+  .section-copy {
+    font-size: 0.95rem;
+  }
+
+  .landing-cta-mark {
+    right: -2.5rem;
+    bottom: -1rem;
+    opacity: 0.6;
+  }
+}
+
 /* ---------- Entrance animation ---------- */
 @keyframes rise-in {
   from {
@@ -319,8 +551,10 @@ input {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-rise,
-  .pulse-dot {
+  .pulse-dot,
+  .outcome-card {
     animation: none !important;
+    transition: none !important;
   }
   .animate-rise {
     opacity: 1;
