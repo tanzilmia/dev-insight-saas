@@ -77,4 +77,16 @@ describe("GitHub App push FIFO", () => {
     expect(mocks.ingestPushedCommits.mock.calls[0]?.[3]).toBe("main");
     expect(mocks.ingestPushedCommits.mock.calls[1]?.[3]).toBe("feature");
   });
+
+  it("does not rediscover contributors for a bot-only push", async () => {
+    enqueuePushIngestion("repo_bot", {
+      ref: "refs/heads/main",
+      commits: [{ id: "bot_sha", author: { username: "github-actions[bot]" } }]
+    });
+
+    await vi.waitFor(() => expect(mocks.updateRepository).toHaveBeenCalledTimes(1));
+
+    expect(mocks.contributorCount).not.toHaveBeenCalled();
+    expect(mocks.discoverContributors).not.toHaveBeenCalled();
+  });
 });

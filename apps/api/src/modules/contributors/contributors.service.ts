@@ -13,38 +13,13 @@ import {
   requireOrganizationRole
 } from "../../common/access/organization-access.js";
 import type { GitContributor } from "../git-providers/git-provider.js";
+import { isBotUsername } from "../git-providers/bot-identity.js";
 import { resolveRepositoryToken } from "../github-app/repository-token.js";
 import { autoLinkRepositoryContributors, normalizeHandle } from "./auto-link.js";
 
 type IdentityWithMapping = ContributorIdentity & {
   mapping: (EmployeeGitMapping & { user: User }) | null;
 };
-
-// Automated accounts that are noise in a "who did what" report. GitHub App bots
-// use a "[bot]" login suffix; a few common service accounts don't, so they are
-// listed explicitly. Matched identities are ignored on first discovery so they
-// never clutter the mapping list or get auto-linked.
-const KNOWN_BOT_LOGINS = new Set([
-  "web-flow",
-  "dependabot",
-  "dependabot-preview",
-  "github-actions",
-  "renovate",
-  "renovate-bot",
-  "greenkeeper",
-  "snyk-bot",
-  "imgbot",
-  "mergify",
-  "codecov"
-]);
-
-function isBotUsername(username?: string | null): boolean {
-  if (!username) {
-    return false;
-  }
-  const login = username.toLowerCase();
-  return login.endsWith("[bot]") || KNOWN_BOT_LOGINS.has(login);
-}
 
 const mappingInclude = {
   mapping: { include: { user: true } }

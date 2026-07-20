@@ -1,6 +1,7 @@
 import { prisma } from "../../config/database.js";
 import { resolveRepositoryToken } from "../github-app/repository-token.js";
 import { discoverContributorsForRepository } from "../contributors/contributors.service.js";
+import { isBotUsername } from "../git-providers/bot-identity.js";
 import {
   ingestPushedCommits,
   ingestRepository,
@@ -66,7 +67,12 @@ async function ingestOne(repositoryId: string, payload: PushPayload): Promise<vo
   }
 
   const pushedUsernames = [
-    ...new Set(pushed.map((commit) => commit.username).filter((value): value is string => Boolean(value)))
+    ...new Set(
+      pushed
+        .filter((commit) => !isBotUsername(commit.username))
+        .map((commit) => commit.username)
+        .filter((value): value is string => Boolean(value))
+    )
   ];
   if (pushedUsernames.length) {
     const knownCount = await prisma.contributorIdentity.count({

@@ -5,7 +5,7 @@
 > It records **what the product is, what has been built, how it works, the key
 > decisions, and what remains**. Keep it updated as work continues.
 >
-> Last updated: 2026-07-18.
+> Last updated: 2026-07-20.
 
 ## 0.1 Current analysis handoff
 
@@ -49,6 +49,12 @@ path; those notes remain as implementation history, not current behavior.
   `webhookExternalId`, and `webhookSecret`. `Repository.appInstallationId` is now
   required with `ON DELETE CASCADE`. Runtime App deselect/disconnect/uninstall
   applies the same transactional cleanup rules.
+- Bot commit exclusion (2026-07-20): a shared GitHub bot-identity predicate now
+  filters `[bot]` usernames and known service accounts before commit details,
+  `Commit`, `ChangedFile`, or `CommitBranch` rows are written. The filter is
+  active for push webhooks, manual/automatic collection, and backfills. Branch
+  head metadata still advances on bot-only pushes; historical bot rows are kept
+  and are not deleted by this behavior change.
 - `PUBLIC_API_URL` was removed. The public App webhook URL is configured once in
   GitHub as `https://devinside.softathena.com/api/webhooks/github-app`.
 - Production is live at `https://devinside.softathena.com` on the Docker/nginx VPS;
