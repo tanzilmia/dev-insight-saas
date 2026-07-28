@@ -6,23 +6,33 @@ export const collectIssuesSchema = z.object({
   repositoryId: z.string().min(1)
 });
 
-export const issueListQuerySchema = z
-  .object({
-    organizationId: z.string().min(1),
-    repositoryId: z.string().min(1).optional(),
-    projectId: z.string().min(1).optional(),
-    state: z.enum(["open", "closed"]).optional(),
-    assignee: z.string().trim().min(1).max(100).optional(),
-    from: isoDate.optional(),
-    to: isoDate.optional(),
-    limit: z.coerce.number().int().min(1).max(200).default(50)
-  })
-  .refine((value) => (value.from ? Boolean(value.to) : !value.to), {
-    message: "A date range needs both from and to",
-    path: ["to"]
-  });
+const issueQueryBaseSchema = z.object({
+  organizationId: z.string().min(1),
+  repositoryId: z.string().min(1).optional(),
+  projectId: z.string().min(1).optional(),
+  state: z.enum(["open", "closed"]).optional(),
+  assignee: z.string().trim().min(1).max(100).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50)
+});
 
-export const issueMetricsQuerySchema = issueListQuerySchema.omit({ limit: true });
+const hasCompleteDateRange = (value: { from?: string; to?: string }) =>
+  value.from ? Boolean(value.to) : !value.to;
+
+const dateRangeError = {
+  message: "A date range needs both from and to",
+  path: ["to"]
+};
+
+export const issueListQuerySchema = issueQueryBaseSchema.refine(
+  hasCompleteDateRange,
+  dateRangeError
+);
+
+export const issueMetricsQuerySchema = issueQueryBaseSchema
+  .omit({ limit: true })
+  .refine(hasCompleteDateRange, dateRangeError);
 
 export const issueParamsSchema = z.object({ id: z.string().min(1) });
 
