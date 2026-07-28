@@ -6,12 +6,15 @@ import type {
   GitCommit,
   GitCommitDetail,
   GitContributor,
+  GitIssue,
+  GitIssueEvent,
   GitProvider,
   GitPullRequest,
   GitPullRequestReview,
   GitRepository,
   GitUser,
   ListCommitsOptions,
+  ListIssuesOptions,
   ListPullRequestsOptions
 } from "../git-providers/git-provider.js";
 
@@ -568,6 +571,112 @@ export class GitHubProvider implements GitProvider {
 
     return reviews;
   }
+
+  async listIssues(
+    token: string,
+    owner: string,
+    repo: string,
+    options: ListIssuesOptions = {}
+  ): Promise<GitIssue[]> {
+    const max = options.max ?? 300;
+    const issues: GitIssue[] = [];
+
+    for (let page = 1; page <= MAX_PAGES && issues.length < max; page += 1) {
+      const response = await this.request(
+        `/repos/${owner}/${repo}/issues?state=all&sort=updated&direction=desc&per_page=${PER_PAGE}&page=${page}`,
+        token
+      );
+
+      if (response.status === 401 || response.status === 403) {
+        throw new AppError(400, "GitHub rejected the App installation token. Reconnect the GitHub App.", "GITHUB_APP_ACCESS_REQUIRED");
+      }
+      if (response.status === 404) {
+        throw new AppError(404, "Repository not found on GitHub", "REPO_NOT_ON_PROVIDER");
+      }
+      if (!response.ok) {
+        throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+      }
+
+      const items = (await response.json()) as GitHubIssueResponse[];
+      for (const item of items) {
+        // GitHub's /issues endpoint includes pull requests. Keep this mirror
+        // strictly about work issues; PRs are collected by the PR module.
+        if (item.pull_request) continue;
+
+        issues.push({
+          externalId: String(item.id),
+          number: item.number,
+          title: item.title ?? "",
+          body: item.body ?? null,
+          state: item.state ?? "open",
+          stateReason: item.state_reason ?? null,
+          authorLogin: item.user?.login ?? null,
+          authorAvatarUrl: item.user?.avatar_url ?? null,
+          assigneeLogins: (item.assignees ?? [])
+            .map((assignee) => assignee.login?.trim().toLowerCase())
+            .filter((login): login is string => Boolean(login)),
+          labels: (item.labels ?? [])
+            .map((label) => label.name?.trim())
+            .filter((label): label is string => Boolean(label)),
+          milestoneTitle: item.milestone?.title ?? null,
+          openedAt: item.created_at,
+          updatedAt: item.updated_at,
+          closedAt: item.closed_at ?? null,
+          htmlUrl: item.html_url
+        });
+      }
+
+      if (items.length < PER_PAGE) break;
+    }
+
+    return issues.slice(0, max);
+  }
+
+  async listIssueEvents(
+    token: string,
+    owner: string,
+    repo: string,
+    number: number,
+    options: ListIssuesOptions = {}
+  ): Promise<GitIssueEvent[]> {
+    const max = options.max ?? 200;
+    const events: GitIssueEvent[] = [];
+
+    for (let page = 1; page <= MAX_PAGES && events.length < max; page += 1) {
+      const response = await this.request(
+        `/repos/${owner}/${repo}/issues/${number}/events?per_page=${PER_PAGE}&page=${page}`,
+        token
+      );
+
+      // An issue can disappear between list and timeline collection. Keep the
+      // successfully collected issue snapshot rather than failing the batch.
+      if (response.status === 404) break;
+      if (response.status === 401 || response.status === 403) {
+        throw new AppError(400, "GitHub rejected the App installation token. Reconnect the GitHub App.", "GITHUB_APP_ACCESS_REQUIRED");
+      }
+      if (!response.ok) {
+        throw new AppError(502, "GitHub API request failed", "GIT_PROVIDER_ERROR");
+      }
+
+      const items = (await response.json()) as GitHubIssueEventResponse[];
+      for (const item of items) {
+        events.push({
+          externalId: String(item.id),
+          eventType: item.event ?? "unknown",
+          actorLogin: item.actor?.login ?? null,
+          assigneeLogin: item.assignee?.login?.trim().toLowerCase() ?? null,
+          labelName: item.label?.name ?? null,
+          milestoneTitle: item.milestone?.title ?? null,
+          commitSha: item.commit_id ?? null,
+          occurredAt: item.created_at
+        });
+      }
+
+      if (items.length < PER_PAGE) break;
+    }
+
+    return events.slice(0, max);
+  }
 }
 
 type GitHubPull = {
@@ -585,4 +694,33 @@ type GitHubReview = {
   user?: { login?: string } | null;
   state?: string;
   submitted_at?: string | null;
+};
+
+type GitHubIssueResponse = {
+  id: number;
+  number: number;
+  title?: string;
+  body?: string | null;
+  state?: string;
+  state_reason?: string | null;
+  user?: { login?: string; avatar_url?: string | null } | null;
+  assignees?: { login?: string }[];
+  labels?: { name?: string }[];
+  milestone?: { title?: string } | null;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+  closed_at?: string | null;
+  pull_request?: unknown;
+};
+
+type GitHubIssueEventResponse = {
+  id: number;
+  event?: string;
+  actor?: { login?: string } | null;
+  assignee?: { login?: string } | null;
+  label?: { name?: string } | null;
+  milestone?: { title?: string } | null;
+  commit_id?: string | null;
+  created_at: string;
 };

@@ -12,6 +12,10 @@ import {
   type GitHubAppPushPayload
 } from "./github-app-push.service.js";
 import {
+  handleGitHubAppIssuesEvent,
+  type GitHubIssueWebhookPayload
+} from "../issues/issues.service.js";
+import {
   handleGitHubAppWorkflowRunEvent,
   type GitHubWorkflowRunPayload
 } from "./github-app-workflow.service.js";
@@ -47,7 +51,10 @@ githubAppWebhookRouter.post(
       return;
     }
 
-    let payload: WebhookInstallationPayload & GitHubAppPushPayload & GitHubWorkflowRunPayload;
+    let payload: WebhookInstallationPayload &
+      GitHubAppPushPayload &
+      GitHubWorkflowRunPayload &
+      GitHubIssueWebhookPayload;
     try {
       payload = JSON.parse(rawBody.toString("utf8")) as WebhookInstallationPayload &
         GitHubAppPushPayload;
@@ -67,6 +74,8 @@ githubAppWebhookRouter.post(
       task = handleGitHubAppPushEvent(payload);
     } else if (event === "workflow_run") {
       task = handleGitHubAppWorkflowRunEvent(payload);
+    } else if (event === "issues") {
+      task = handleGitHubAppIssuesEvent(payload, req.get("x-github-delivery") ?? undefined);
     }
     void task?.catch((error) => {
       console.warn(`[github-app] ${event ?? "unknown"} webhook processing failed`, error);

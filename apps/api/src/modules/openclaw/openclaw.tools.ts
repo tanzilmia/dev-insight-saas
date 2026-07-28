@@ -255,6 +255,16 @@ export type ReportCommit = {
 /** Per-employee focus signals (top categories/modules), keyed by employeeId. */
 export type EmployeeSignalMap = Map<string, { topCategories: string[]; topModules: string[] }>;
 
+export type IssueReportMetrics = {
+  open: number;
+  opened: number;
+  closed: number;
+  unassignedOpen: number;
+  overdueOpen: number;
+  avgAgeDays: number;
+  avgCycleDays: number;
+};
+
 export type ReportContext = {
   reportType: ReportType;
   range: DateRange;
@@ -273,6 +283,8 @@ export type ReportContext = {
   insights?: Insight[];
   /** Optional — lets "Who did what" say what each person focused on. */
   employeeSignals?: EmployeeSignalMap;
+  /** Read-only GitHub Issue workflow signals for the same target and period. */
+  issueMetrics?: IssueReportMetrics;
   customPrompt?: string;
 };
 
@@ -363,6 +375,16 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
 
   const comparisonLines = comparisonPromptLines(context.comparison);
 
+  const issueLines = context.issueMetrics
+    ? [
+        "",
+        "GitHub Issue workflow signals (operational workload, not a performance verdict):",
+        `- Open backlog: ${context.issueMetrics.open}; opened in period: ${context.issueMetrics.opened}; closed in period: ${context.issueMetrics.closed}.`,
+        `- Unassigned open issues: ${context.issueMetrics.unassignedOpen}; overdue open issues (14+ days): ${context.issueMetrics.overdueOpen}.`,
+        `- Average open issue age: ${context.issueMetrics.avgAgeDays} days; average closed-issue cycle time: ${context.issueMetrics.avgCycleDays} days.`
+      ].join("\n")
+    : null;
+
   const leaderboard = context.leaderboard ?? [];
   const leaderboardLines = leaderboard.length
     ? [
@@ -426,6 +448,7 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
     "4. THE MOST IMPORTANT SECTION — a section titled exactly '## What shipped'. Read the update messages listed below and GROUP them into 3-6 concrete pieces of work or initiatives (for example 'Payment webhook retries', 'Refund flow', 'Login redesign', 'Telegram report delivery'). For each initiative write a short **bold plain-language title**, then one sentence on what it delivered and roughly how much work it was (e.g. 'about a dozen updates by 2 people'). Base every item ONLY on the actual update messages — never invent a feature or a name. Merge related updates into one initiative rather than listing them separately. If the work is genuinely too scattered to group, briefly describe the main areas of activity instead.",
     "5. If a contributor leaderboard is provided, a section titled exactly '## Who did what' listing each person most-active first, one plain line each on what they worked on. Present this as involvement/activity, NOT a performance rating.",
     "6. If a previous-period comparison is provided, a section titled exactly '## Trend vs previous period' with the key changes.",
+    "7. If GitHub Issue workflow signals are provided, add a short section titled exactly '## Work tracking' covering backlog, opened/closed flow, unassigned/overdue work, and cycle time. Call these operational signals, not performance scores.",
     "Never invent people or work. Keep it under 600 words."
   ].join("\n");
 
@@ -444,6 +467,7 @@ export function buildReportPrompt(context: ReportContext): ChatMessage[] {
     context.customPrompt ? `Extra instructions: ${context.customPrompt}` : null,
     comparisonLines,
     insightsLines,
+    issueLines,
     leaderboardLines,
     "",
     "Update messages (source material — read these and cluster them into the '## What shipped' initiatives):",
@@ -513,6 +537,16 @@ export function buildReportMarkdown(context: ReportContext): { title: string; ma
           ...context.insights.map(
             (insight) => `- ${insight.severity === "warn" ? "⚠️ " : ""}${insight.text}`
           )
+        ]
+      : []),
+    ...(context.issueMetrics
+      ? [
+          "",
+          "## Work tracking",
+          "_Operational workflow signals from the GitHub Issue mirror; not a standalone performance score._",
+          `- Open backlog: ${context.issueMetrics.open}; opened: ${context.issueMetrics.opened}; closed: ${context.issueMetrics.closed}.`,
+          `- Unassigned open: ${context.issueMetrics.unassignedOpen}; overdue open (14+ days): ${context.issueMetrics.overdueOpen}.`,
+          `- Average open age: ${context.issueMetrics.avgAgeDays} days; average cycle time: ${context.issueMetrics.avgCycleDays} days.`
         ]
       : []),
     "",

@@ -12,6 +12,7 @@ import { buildInsights } from "../report-engine/insights.js";
 import { buildCaveats } from "../report-engine/plain-language.js";
 import { type ReportTheme, buildThemesPrompt, parseThemes } from "../report-engine/themes.js";
 import { buildCodeHealthMarkdown } from "../code-quality/snapshots.service.js";
+import { getIssueMetrics } from "../issues/issues.service.js";
 import { getLLMProvider } from "../llm/llm-registry.js";
 import { createReport, findCachedReport } from "../reports/reports.service.js";
 import type { GenerateReportInput } from "./openclaw.schemas.js";
@@ -25,6 +26,7 @@ import {
   resolvePeriod,
   resolveProject,
   resolveRepository,
+  type IssueReportMetrics,
   type ReportContext
 } from "./openclaw.tools.js";
 
@@ -162,6 +164,28 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     comparison
   });
 
+  // GitHub Issues are a read-only work-item mirror. Keep this best-effort so
+  // reports generated before a repository has been issue-collected remain
+  // fully useful, and omit employee reports to avoid presenting team backlog
+  // as an individual person's work.
+  let issueMetrics: IssueReportMetrics | undefined;
+  if (input.reportType !== "employee") {
+    try {
+      const issueSummary = await getIssueMetrics(requesterId, {
+        organizationId: input.organizationId,
+        repositoryId: repository?.id,
+        projectId: project?.id,
+        from: range.from.toISOString(),
+        to: range.to.toISOString()
+      });
+      if (issueSummary.totals.open || issueSummary.totals.opened || issueSummary.totals.closed) {
+        issueMetrics = issueSummary.totals;
+      }
+    } catch (error) {
+      console.warn("GitHub Issue metrics unavailable for report.", error);
+    }
+  }
+
   // Trust-calibration caveats: what the numbers do and don't cover. Deterministic
   // and appended to the saved markdown (both the LLM and template paths) so a
   // non-technical reader always knows the limits — never paraphrased away.
@@ -174,7 +198,10 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
   // Fold the branch AND the previous-period baseline into the fingerprint: a
   // branch-filtered report never collides with the all-branches one, and a
   // changed baseline (which changes the trend/insights) busts a stale cache.
-  const baseFingerprint = `${computeFingerprint(activity)}-p${prevActivity.commits}s${prevActivity.lastSha ?? ""}`;
+  const issueFingerprint = issueMetrics
+    ? `i${issueMetrics.open}-${issueMetrics.opened}-${issueMetrics.closed}-${issueMetrics.unassignedOpen}-${issueMetrics.overdueOpen}`
+    : "i0";
+  const baseFingerprint = `${computeFingerprint(activity)}-p${prevActivity.commits}s${prevActivity.lastSha ?? ""}-${issueFingerprint}`;
   const dataFingerprint = input.branch ? `b:${input.branch}|${baseFingerprint}` : baseFingerprint;
 
   const baseTargetLabel =
@@ -193,7 +220,8 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     commits: activity.commits,
     additions: activity.additions,
     deletions: activity.deletions,
-    filesChanged: activity.filesChanged
+    filesChanged: activity.filesChanged,
+    issueMetrics: issueMetrics ?? null
   };
 
   // Report cache: an identical prior request with the same data reuses the saved
@@ -225,6 +253,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
         leaderboard,
         comparison,
         insights,
+        issueMetrics,
         themes: cached.themes ?? [],
         caveats,
         status: "GENERATED" as const,
@@ -270,6 +299,7 @@ export async function orchestrateReport(requesterId: string, input: GenerateRepo
     leaderboard,
     comparison,
     insights,
+    issueMetrics,
     employeeSignals,
     customPrompt: input.customPrompt
   };

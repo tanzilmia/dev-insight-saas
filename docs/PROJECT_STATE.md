@@ -2300,3 +2300,34 @@ operator guide in **`docs/DEPLOYMENT.md`**.
 - Certificate expires 2026-10-14 (90 days).
 - Systemd timer runs `certbot renew` daily; triggers `docker compose restart nginx` on success.
 - No manual intervention needed (if the renewal hook script is configured).
+
+## 15. GitHub Issues work tracking — Issue #9 (2026-07-28)
+
+Implemented on branch `feat/9-github-issues-monitoring`. GitHub remains the
+source of truth; DevInsight does not create or edit issues. The implementation
+adds a tenant-scoped `GitHubIssue` read model and immutable `GitHubIssueEvent`
+timeline, with idempotent repository collection through the GitProvider
+abstraction and HMAC-authenticated GitHub App `issues` webhook ingestion.
+
+Current API surface:
+
+- `POST /api/issues/collect` — manager-only repository snapshot/timeline sync.
+- `GET /api/issues` — organization-member issue list with repository/project,
+  state, assignee, date, and limit filters.
+- `GET /api/issues/metrics` — backlog, opened/closed flow, average age/cycle
+  time, overdue/unassigned work, labels, and employee assignment workload.
+- `GET /api/issues/:id/events` — issue workflow timeline.
+
+The Repositories page has a manager-only **Issues** collection action. The
+project Analysis page shows read-only GitHub Issue workflow metrics, and report
+generation includes a deterministic `## Work tracking` section plus the same
+signals in the LLM prompt when issue data exists. Issue counts are explicitly
+framed as operational signals, not standalone performance verdicts.
+
+Migration: `20260728090000_github_issues_monitoring`. Before production use,
+deploy the migration and update the GitHub App installation with **Issues:
+Read-only** permission and the `issues` webhook event, then collect the
+DevInsight repository as the first real dogfood dataset.
+
+Verification on the feature branch: API 193 tests across 34 files, workspace
+typecheck/lint/build, Prisma validation, and API coverage generation all pass.

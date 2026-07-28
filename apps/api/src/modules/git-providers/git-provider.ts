@@ -107,6 +107,40 @@ export type ListPullRequestsOptions = {
   max?: number;
 };
 
+export type GitIssue = {
+  externalId: string;
+  number: number;
+  title: string;
+  body: string | null;
+  state: string; // "open" | "closed"
+  stateReason: string | null;
+  authorLogin: string | null;
+  authorAvatarUrl: string | null;
+  assigneeLogins: string[];
+  labels: string[];
+  milestoneTitle: string | null;
+  openedAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  htmlUrl: string;
+};
+
+export type GitIssueEvent = {
+  externalId: string;
+  eventType: string;
+  actorLogin: string | null;
+  assigneeLogin: string | null;
+  labelName: string | null;
+  milestoneTitle: string | null;
+  commitSha: string | null;
+  occurredAt: string;
+};
+
+export type ListIssuesOptions = {
+  /** Newest-updated cap on how many issues to walk back. */
+  max?: number;
+};
+
 /**
  * Common abstraction over Git hosting providers. GitHub is the only
  * implementation for the MVP; GitLab/Bitbucket can be added behind the same
@@ -160,4 +194,19 @@ export interface GitProvider {
     repo: string,
     number: number
   ): Promise<GitPullRequestReview[]>;
+  /** Issues (not pull requests), newest-updated first, for work tracking. */
+  listIssues(
+    token: string,
+    owner: string,
+    repo: string,
+    options?: ListIssuesOptions
+  ): Promise<GitIssue[]>;
+  /** Timeline events for one issue, used to preserve workflow history. */
+  listIssueEvents(
+    token: string,
+    owner: string,
+    repo: string,
+    number: number,
+    options?: ListIssuesOptions
+  ): Promise<GitIssueEvent[]>;
 }

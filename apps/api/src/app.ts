@@ -15,6 +15,7 @@ import { contributorsRouter } from "./modules/contributors/contributors.controll
 import { employeesRouter } from "./modules/employees/employees.controller.js";
 import { githubAppRouter } from "./modules/github-app/github-app.controller.js";
 import { githubAppWebhookRouter } from "./modules/github-app/github-app.webhook.controller.js";
+import { issuesRouter } from "./modules/issues/issues.controller.js";
 import { openclawRouter } from "./modules/openclaw/openclaw.controller.js";
 import { openclawServiceRouter } from "./modules/openclaw/openclaw.service-tools.controller.js";
 import { organizationsRouter } from "./modules/organizations/organizations.controller.js";
@@ -63,6 +64,7 @@ export function createApp() {
   app.use("/api/statistics", statisticsRouter);
   app.use("/api/code-quality", codeQualityRouter);
   app.use("/api/pull-requests", pullRequestsRouter);
+  app.use("/api/issues", issuesRouter);
   app.use("/api/analysis", analysisRouter);
   app.use("/api/schedules", schedulesRouter);
   app.use("/api/channels", channelsRouter);

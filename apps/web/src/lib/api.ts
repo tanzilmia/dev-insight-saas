@@ -1280,6 +1280,88 @@ export async function collectPullRequests(repositoryId: string) {
 }
 
 /* ------------------------------------------------------------------ */
+/* GitHub Issues / work-tracking metrics                              */
+/* ------------------------------------------------------------------ */
+
+export type TrackedIssue = {
+  id: string;
+  repositoryId: string;
+  externalId: string;
+  number: number;
+  title: string;
+  body: string | null;
+  state: "open" | "closed" | string;
+  stateReason: string | null;
+  author: { login: string; employee: { userId: string; name: string } | null } | null;
+  assignees: ({ login: string; employee: { userId: string; name: string } | null } | null)[];
+  labels: string[];
+  milestoneTitle: string | null;
+  htmlUrl: string;
+  openedAt: string;
+  providerUpdatedAt: string;
+  closedAt: string | null;
+  lastSyncedAt: string;
+};
+
+export type IssueMetricsDeveloper = {
+  login: string;
+  employee: { userId: string; name: string } | null;
+  assignedOpen: number;
+  opened: number;
+  closed: number;
+};
+
+export type IssueMetrics = {
+  period: { from: string; to: string };
+  truncated: boolean;
+  totals: {
+    open: number;
+    opened: number;
+    closed: number;
+    unassignedOpen: number;
+    overdueOpen: number;
+    avgAgeDays: number;
+    avgCycleDays: number;
+  };
+  labels: { label: string; count: number }[];
+  developers: IssueMetricsDeveloper[];
+};
+
+export async function collectIssues(repositoryId: string) {
+  const response = await api.post<{
+    result: { issueCount: number; eventCount: number; capped: boolean };
+  }>("/api/issues/collect", { repositoryId });
+  return response.data.result;
+}
+
+export async function listIssues(
+  organizationId: string,
+  options: {
+    repositoryId?: string;
+    projectId?: string;
+    state?: "open" | "closed";
+    from?: string;
+    to?: string;
+    limit?: number;
+  } = {}
+) {
+  const response = await api.get<{ issues: TrackedIssue[] }>("/api/issues", {
+    params: { organizationId, ...options }
+  });
+  return response.data.issues;
+}
+
+export async function getIssueMetrics(
+  organizationId: string,
+  options: { repositoryId?: string; projectId?: string; from?: string; to?: string } = {}
+) {
+  const response = await api.get<{ metrics: IssueMetrics }>("/api/issues/metrics", {
+    params: { organizationId, ...options }
+  });
+  return response.data.metrics;
+}
+
+/* ------------------------------------------------------------------ */
 /* Project analysis (manager-only per-employee activity cards)        */
 /* ------------------------------------------------------------------ */
 
