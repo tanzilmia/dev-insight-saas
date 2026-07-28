@@ -118,6 +118,7 @@ model Organization {
   ciRetryJobs            CiRetryJob[]
   codeQualityConnection CodeQualityConnection?
   codeQualitySnapshots  CodeQualitySnapshot[]
+  githubIssues          GitHubIssue[]
   requestLogs           RequestLog[]
   auditLogs             AuditLog[]
 }
@@ -183,6 +184,64 @@ model PullRequestReview {
   @@unique([pullRequestId, externalId])
   @@index([pullRequestId])
   @@index([reviewerLogin])
+}
+
+/// Read-only mirror of a GitHub Issue. GitHub remains the source of truth;
+/// this row exists so reporting does not repeatedly depend on the provider API.
+model GitHubIssue {
+  id              String   @id @default(cuid())
+  organizationId  String
+  repositoryId    String
+  externalId      String
+  number          Int
+  title           String
+  body            String?
+  state           String
+  stateReason     String?
+  authorLogin     String?
+  authorAvatarUrl String?
+  assigneeLogins  String[] @default([])
+  labels          String[] @default([])
+  milestoneTitle  String?
+  htmlUrl         String
+  openedAt        DateTime
+  providerUpdatedAt DateTime
+  closedAt        DateTime?
+  lastSyncedAt    DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository   Repository       @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  events       GitHubIssueEvent[]
+
+  @@unique([repositoryId, number])
+  @@unique([repositoryId, externalId])
+  @@index([organizationId, state])
+  @@index([repositoryId, openedAt])
+  @@index([repositoryId, authorLogin])
+}
+
+/// Provider timeline event for a GitHub Issue. Events are immutable and
+/// de-duplicated by the provider event id.
+model GitHubIssueEvent {
+  id             String   @id @default(cuid())
+  issueId        String
+  externalId     String
+  eventType      String
+  actorLogin     String?
+  assigneeLogin  String?
+  labelName      String?
+  milestoneTitle String?
+  commitSha      String?
+  occurredAt     DateTime
+  createdAt      DateTime @default(now())
+
+  issue GitHubIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@unique([issueId, externalId])
+  @@index([issueId, occurredAt])
+  @@index([actorLogin])
 }
 
 /// One-per-day code-quality measurement for a SonarQube project, so trends
@@ -309,6 +368,7 @@ model Repository {
   coverage       RepositoryCoverage[]
   branches       Branch[]
   collectionJobs CollectionJob[]
+  issues         GitHubIssue[]
   pullRequests   PullRequest[]
 
   @@unique([organizationId, provider, externalId])

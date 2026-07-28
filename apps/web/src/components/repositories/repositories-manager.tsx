@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  ClipboardList,
   FolderGit2,
   GitPullRequest,
   Globe,
@@ -25,6 +26,7 @@ import {
   assignRepositoryProject,
   cancelDeepCollection,
   collectActivity,
+  collectIssues,
   collectPullRequests,
   deprovisionRepositoryCodeQuality,
   getApiErrorMessage,
@@ -413,6 +415,24 @@ export function RepositoriesManager() {
     }
   }
 
+  async function handleCollectIssues(repo: TrackedRepository) {
+    setBusyId(repo.id);
+    setRowError(null);
+    setRowNotice(null);
+
+    try {
+      const result = await collectIssues(repo.id);
+      setRowNotice({
+        tone: result.capped ? "warning" : "success",
+        text: `${result.issueCount} GitHub issue(s) and ${result.eventCount} workflow event(s) synced from ${repo.fullName}${result.capped ? " (collection cap reached)" : ""}.`
+      });
+    } catch (error) {
+      setRowError(getApiErrorMessage(error));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function handleDeepStart(repo: TrackedRepository) {
     setBusyId(repo.id);
     setRowError(null);
@@ -787,6 +807,16 @@ export function RepositoriesManager() {
                                       >
                                         <GitPullRequest size={13} />
                                         PRs
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCollectIssues(repo)}
+                                        disabled={busy || jobActive}
+                                        title="Fetch GitHub Issues and workflow events for work tracking"
+                                        className="inline-flex items-center gap-1.5 rounded-md border border-(--border) px-3 py-1.5 text-xs font-semibold text-(--text) transition hover:bg-(--surface) disabled:cursor-not-allowed disabled:opacity-55"
+                                      >
+                                        <ClipboardList size={13} />
+                                        Issues
                                       </button>
                                       <button
                                         type="button"
