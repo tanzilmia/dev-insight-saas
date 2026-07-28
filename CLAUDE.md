@@ -126,6 +126,9 @@ Copy `apps/api/.env.example` → `apps/api/.env`. Validated in `config/env.ts`:
 - **Optional (features degrade gracefully — an unset key disables its feature, never crashes):**
   - LLM: `OPENAI_API_KEY`/`OPENAI_BASE_URL`/`OPENAI_MODEL` (any OpenAI-compatible endpoint; unset key → template reports).
   - Misc: `PORT` (4000), `GITHUB_API_BASE_URL` (override to point at a mock).
+    If another local Docker project owns port 4000, run
+    `DEVINSIGHT_API_PORT=4010 npm run dev`; the launcher propagates the matching
+    API URL to the web and MCP processes.
   - OpenClaw chat: `OPENCLAW_SERVICE_KEY`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GATEWAY_TOKEN`, `OPENCLAW_CONTEXT_SIGNING_SECRET` (signs the 10-min MCP tenant context).
   - Code quality: `CODE_QUALITY_PROVIDER` (`sonarqube`), `SONAR_BASE_URL`, `SONAR_TOKEN`, `SONAR_ORGANIZATION` (set → SonarCloud branch/PR capabilities). Per-org connections stored in DB override these env defaults.
   - GitHub App (client-repo CI/DevOps): `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`.
